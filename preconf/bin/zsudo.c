@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>  /* setuid, geteuid: GCC 14+ treats a missing declaration as an error */
 
 #define MAX_ARGS 11     // Max. arguments : argv[0] + 10
 #define MIN_LEN 47      // strlen ("/bin/echo ' > /dev/null 2>&1' | /usr/bin/at now")

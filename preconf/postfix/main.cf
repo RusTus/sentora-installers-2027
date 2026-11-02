@@ -1,9 +1,16 @@
 # postfix config file
 
 # uncomment for debugging if needed
-soft_bounce=yes
+# soft_bounce=yes is a testing setting: it turns every rejection into a
+# temporary error, so mail to unknown users never bounces and senders retry for days
+soft_bounce=no
 
 # postfix main
+# Use Postfix 3.6+ defaults (and stop the "backwards-compatible default settings"
+# notice). With Sentora's settings below this only changes: no ".mydomain" appended
+# to bare host names, SMTPUTF8 enabled, sha256 TLS fingerprints, and relay checks
+# (permit_mynetworks, permit_sasl_authenticated, defer_unauth_destination) run first.
+compatibility_level = 3.6
 mail_owner = postfix
 setgid_group = postdrop
 delay_warning_time = 4
@@ -65,8 +72,18 @@ smtpd_sasl_type = dovecot
 smtpd_sasl_path = private/auth
 
 # tls config
-smtp_use_tls = no
-smtpd_use_tls = no
+# Certificate made by the installer (self-signed until replaced, see ssl/README)
+smtpd_tls_cert_file = /etc/sentora/configs/ssl/sentora.crt
+smtpd_tls_key_file = /etc/sentora/configs/ssl/sentora.key
+# Port 25: offer STARTTLS to other servers but do not require it
+smtpd_tls_security_level = may
+# Passwords are only accepted after STARTTLS
+smtpd_tls_auth_only = yes
+smtpd_tls_received_header = yes
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
+# Outgoing mail: encrypt whenever the other server supports it
+smtp_tls_security_level = may
+smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
 #smtp_tls_note_starttls_offer = yes
 #smtpd_tls_loglevel = 1
 #smtpd_tls_received_header = yes

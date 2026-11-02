@@ -1,55 +1,29 @@
 <?php
-
-###############################################
-# PHPMyAdmin Configuration for Sentora        #
-# Last updated: 4/28/2024                    #
-# Author: Bobby Allen (ballen@sentora.io)     #
-###############################################
-
-/*
- * This is needed for cookie based authentication to encrypt password in
- * cookie
+/**
+ * phpMyAdmin 5.2 configuration for Sentora
+ * The installer replaces SENTORA with a random 32 character secret.
  */
 $cfg['blowfish_secret'] = 'SENTORA';
 
-/*
- * Servers configuration
- */
 $i = 0;
 $i++;
-/* Authentication type */
 $cfg['Servers'][$i]['auth_type'] = 'cookie';
-/* Server parameters */
+// localhost connects over the MySQL socket
 $cfg['Servers'][$i]['host'] = 'localhost';
-$cfg['Servers'][$i]['connect_type'] = 'tcp';
 $cfg['Servers'][$i]['compress'] = false;
-$cfg['Servers'][$i]['extension'] = 'mysqli';
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+$cfg['Servers'][$i]['hide_db'] = '^(information_schema|sys|performance_schema)$';
 
-/*
- * Directories for saving/loading files from server
- */
+// Writable folders outside the read-only application tree
+$cfg['TempDir'] = '/var/sentora/temp/';
 $cfg['UploadDir'] = '/var/sentora/temp/';
 $cfg['SaveDir'] = '/var/sentora/temp/';
 
-/* rajk - for blobstreaming */
-$cfg['Servers'][$i]['bs_garbage_threshold'] = 50;
-$cfg['Servers'][$i]['bs_repository_threshold'] = '32M';
-$cfg['Servers'][$i]['bs_temp_blob_timeout'] = 600;
-$cfg['Servers'][$i]['bs_temp_log_threshold'] = '32M';
-
-/*
- * Sentora specific changes
- */
+// Databases and passwords are managed in the Sentora panel
 $cfg['ShowCreateDb'] = false;
 $cfg['ShowChgPassword'] = false;
 $cfg['AllowUserDropDatabase'] = false;
-$cfg['SuhosinDisableWarning'] = true;
 $cfg['PmaNoRelation_DisableWarning'] = true;
-$cfg['Servers'][$i]['hide_db'] = '^(information_schema|sys|performance_schema)$';
 $cfg['ShowServerInfo'] = false;
-
-/*
- * You can find more configuration options in Documentation.html
- * or here: http://wiki.phpmyadmin.net/pma/Config
- */
-?>
+$cfg['VersionCheck'] = false;
+$cfg['SendErrorReports'] = 'never';

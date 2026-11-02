@@ -9,6 +9,6 @@
        sharedscripts
        postrotate
                # reload could be not sufficient for all logs, a restart is saf$
-               systemctl reload proftpd /dev/null
+               systemctl reload proftpd > /dev/null 2>&1 || true
 endscript
 }

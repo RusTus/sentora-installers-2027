@@ -1,0 +1,25 @@
+Description: Fix compilation with GCC 10.
+Author: Logan Rosen <logan@ubuntu.com>
+Bug-Debian: https://bugs.debian.org/957923
+Forwarded: no
+Reviewed-By: Francisco Vilmar Cardoso Ruviaro <francisco.ruviaro@riseup.net>
+Last-Update: 2021-02-12
+
+--- a/dns_resolv.c
++++ b/dns_resolv.c
+@@ -78,11 +78,11 @@
+ 
+ struct   dns_child child[MAXCHILD];            /* DNS child pipe data      */
+ 
+-DNODEPTR host_table[MAXHASH];                  /* hostname/ip hash table   */
++extern DNODEPTR host_table[MAXHASH];           /* hostname/ip hash table   */
+ 
+-char     buffer[BUFSIZE];                      /* log file record buffer   */
+-char     tmp_buf[BUFSIZE];                     /* used to temp save above  */
+-struct   utsname system_info;                  /* system info structure    */
++extern char     buffer[BUFSIZE];               /* log file record buffer   */
++extern char     tmp_buf[BUFSIZE];              /* used to temp save above  */
++extern struct   utsname system_info;           /* system info structure    */
+ 
+ int      raiseSigChild = 1;
+ 

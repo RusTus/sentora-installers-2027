@@ -6,7 +6,7 @@
        compress
        delaycompress
        notifempty
-       create 666 vmail mail
+       create 660 vmail mail
        sharedscripts
        postrotate
                doveadm log reopen

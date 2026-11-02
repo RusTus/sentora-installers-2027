@@ -11,6 +11,20 @@
 smtp      inet  n       -       n       -       -       smtpd
 #  -o content_filter=smtp-amavis:127.0.0.1:10024
 #  -o receive_override_options=no_address_mappings
+# Mail clients: port 587 with STARTTLS required, port 465 with TLS from the start.
+# Both only accept logged-in users.
+submission inet n       -       n       -       -       smtpd
+  -o syslog_name=postfix/submission
+  -o smtpd_tls_security_level=encrypt
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
+smtps     inet  n       -       n       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 pickup    fifo  n       -       n       60      1       pickup
   -o content_filter= 
   -o receive_override_options=no_header_body_checks
@@ -56,7 +70,7 @@ bsmtp     unix  -       n       n       -       -       pipe
 #
 smtp-amavis  unix  -    -       y       -       2       smtp
   -o smtp_data_done_timeout=1200
-  -o disable_dns_lookups=yes
+  -o smtp_dns_support_level=disabled
   -o smtp_send_xforward_command=yes
 127.0.0.1:10025 inet n  -       y       -       -       smtpd
   -o content_filter=
@@ -79,6 +93,3 @@ smtp-amavis  unix  -    -       y       -       2       smtp
 dovecot   unix  -       n       n       -       -       pipe
   flags=DRhu user=vmail:mail argv=!USR_LIB!/dovecot/deliver -d ${recipient}
 #
-# Vacation mail
-vacation    unix  -       n       n       -       -       pipe
-  flags=Rq user=vacation argv=/var/spool/vacation/vacation.pl -f ${sender} -- ${recipient}

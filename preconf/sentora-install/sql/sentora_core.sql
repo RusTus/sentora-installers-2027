@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS `x_autoip` (
 
 /*Data for the table `x_autoip` */
 INSERT INTO `x_autoip` (`ai_id_pk`, `ai_script_vc`, `ai_email_vc`, `ai_command_vc`, `ai_newip_vc`, `ai_oldip_vc`, `ai_enabled_in`, `ai_lastupdate_ts`) VALUES
-('1', null, null, 'http://myip.dnsomatic.com/', null, null, '1', null);
+('1', null, null, 'https://api.ipify.org', null, null, '1', null);
 
 /*Table structure for table `x_bandwidth` */
 
@@ -414,8 +414,6 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (1,3,'PHPInfo',200,'phpinfo','user','PHPInfo provides you with information regarding the version of PHP running on this system as well as installed PHP extensions and configuration details.',NULL,'true',NULL,''),
 (3,7,'Shadowing',200,'shadowing','user','From here you can shadow any of your client\'s accounts, this enables you to automatically login as the user which enables you to offer remote help by seeing what they see!',NULL,'true',NULL,''),
 (4,2,'Sentora Config',200,'sentoraconfig','user','Changes made here affect the entire Sentora configuration, please double check everything before saving changes.',NULL,'true',NULL,''),
-(5,2,'Sentora News',200,'news','user','Find out all the latest news and information from the Sentora project.',NULL,'true',NULL,''),
-(6,2,'Updates',200,'updates','user','Check to see if there are any available updates to your version of the Sentora software.',NULL,'true',NULL,''),
 (8,4,'phpMyAdmin',200,'phpmyadmin','user','phpMyAdmin is a web based tool that enables you to manage your Sentora MySQL databases via. the web.',NULL,'true',NULL,''),
 (9,1,'My Account',200,'my_account','user','Current personal details that you have provided us with, We ask that you keep these upto date in case we require to contact you regarding your hosting package.\r\n',NULL,'true',NULL,''),
 (10,6,'WebMail',200,'webmail','user','Webmail is a convenient way for you to check your email accounts online without the need to configure an email client.',NULL,'true',NULL,''),
@@ -538,16 +536,16 @@ CREATE TABLE `x_permissions` (
 /*Data for the table `x_permissions` */
 
 insert  into `x_permissions` (`pe_id_pk`,`pe_group_fk`,`pe_module_fk`) values
- (1,1,18),  (2,1,35),  (3,2,35),  (4,3,35),  (5,1,28),  (6,1,12),  (7,2,12),  (8,3,12),  (9,1,41), (10,1,11),
-(11,2,11), (12,3,11), (13,1,42), (14,2,42), (15,1,22), (16,2,22), (17,3,22), (18,1,34), (19,2,34), (20,3,34),
-(21,1,30), (22,1,29), (23,2,29), (24,3,29), (25,1,15), (26,2,15), (27,3,15), (28,1,27), (29,2,27), (30,3,27),
-(31,1,33), (32,2,33), (33,3,33), (34,1,26), (35,2,26), (36,3,26), (37,1,40), (38,1,36), (39,1,32), (40,2,32),
-(41,3,32), (42,1,19), (43,2,19), (44,1,31), (45,2,31), (46,1,9),  (47,2,9),  (48,3,9),  (49,1,24), (50,2,24),
+ (87,1,10), (88,2,10), (89,3,10), (2,1,35), (3,2,35), (4,3,35), (18,1,34), (19,2,34), (20,3,34), (31,1,33), (32,2,33), (33,3,33), (38,1,36), (39,1,32), (40,2,32), (41,3,32), (21,1,30), (22,1,29), (23,2,29), (24,3,29), (34,1,26), (35,2,26), (36,3,26), (37,1,40), (63,1,8), (64,2,8), (65,3,8), (1,1,18),  (5,1,28),  (6,1,12),  (7,2,12),  (8,3,12),  (9,1,41), (10,1,11),
+(11,2,11), (12,3,11), (13,1,42), (14,2,42), (15,1,22), (16,2,22), (17,3,22), 
+(25,1,15), (26,2,15), (27,3,15), (28,1,27), (29,2,27), (30,3,27),
+
+(42,1,19), (43,2,19), (44,1,31), (45,2,31), (46,1,9),  (47,2,9),  (48,3,9),  (49,1,24), (50,2,24),
 (51,3,24), (52,1,39), (53,2,39), (54,3,39), (55,1,20), (56,2,20), (57,1,16), (58,2,16), (59,3,16), (60,1,1),
-(61,2,1),  (62,3,1),  (63,1,8),  (64,2,8),  (65,3,8),  (66,1,23), (67,1,43), (68,2,43), (69,3,43), (70,1,14),
-(71,2,14), (72,3,14), (73,1,3),  (74,2,3),  (75,1,17), (76,2,17), (77,3,17), (78,1,46), (79,2,46), (80,1,6),
-(81,1,25), (82,2,25), (83,3,25), (84,1,47), (85,2,47), (86,3,47), (87,1,10), (88,2,10), (89,3,10), (90,1,4),
-(91,1,5),  (92,1,48), (93,2,48), (94,3,48), (95,1,49), (96,2,49), (97,3,49), (98,1,50), (99,2,50), (100,3,50),
+(61,2,1),  (62,3,1),  (66,1,23), (67,1,43), (68,2,43), (69,3,43), (70,1,14),
+(71,2,14), (72,3,14), (73,1,3),  (74,2,3),  (75,1,17), (76,2,17), (77,3,17), (78,1,46), (79,2,46), 
+(81,1,25), (82,2,25), (83,3,25), (84,1,47), (85,2,47), (86,3,47), (90,1,4),
+(92,1,48), (93,2,48), (94,3,48), (95,1,49), (96,2,49), (97,3,49), (98,1,50), (99,2,50), (100,3,50),
 (101,1,51), (102,2,51), (103,3,51);
 
 /*Table structure for table `x_profiles` */
@@ -627,6 +625,25 @@ CREATE TABLE `x_settings` (
 /*Data for the table `x_settings` */
 
 insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx`,`so_defvalues_tx`,`so_desc_tx`,`so_module_vc`,`so_usereditable_en`) values 
+(50,'ftp_config_file','FTP Config File','',NULL,'The path to the configuration file if applicable.','FTP Config','true'),
+(51,'mailserver_db','Mailserver Database','sentora_postfix',NULL,'The name of the mail server database','Mail Config','true'),
+(52,'hmailserver_et','Hmail Encryption Type','2',NULL,'Type of encryption uses for hMailServer passwords','Mail Config','false'),
+(53,'max_mail_size','Max Mailbox Size','200',NULL,'Maximum size in megabytes allowed for mailboxes. Default = 200','Mail Config','true'),
+(54,'mailserver_php','Mailserver PHP','postfix.php',NULL,'Name of PHP to include when adding mailbox data.','Mail Config','true'),
+(55,'remove_orphan','Remove Orphans','true','true|false','When domains are deleted, also delete all mailboxes for that domain when the daemon runs. (true/false)','Mail Config','true'),
+(56,'named_dir','Named Directory','/etc/sentora/configs/bind/etc/',NULL,'Path to the directory where named.conf is stored','DNS Config','true'),
+(57,'named_conf','Named Config','named.conf',NULL,'Named configuration file','DNS Config','true'),
+(58,'zone_dir','Zone Directory','/etc/sentora/configs/bind/zones/',NULL,'Path to where DNS zone files are stored','DNS Config','true'),
+(59,'refresh_ttl','SOA Refesh TTL','21600',NULL,'Global refresh TTL.  Default = 21600 (6 hours)','DNS Config','true'),
+(60,'retry_ttl','SOA Retry TTL','3600',NULL,'Global retry TTL. Default = 3600 (1 hour)','DNS Config','true'),
+(61,'expire_ttl','SOA Expire TTL','86400',NULL,'Global expire TTL. Default = 86400 (1 day)','DNS Config','true'),
+(62,'minimum_ttl','SOA Minimum TTL','86400',NULL,'Global minimum TTL. Default = 86400 (1 day)','DNS Config','true'),
+(63,'custom_ip','Allow Custom IP','true','true|false','Allow users to change IP settings in A records. If set to false, IP is locked to server IP setting in Sentora Config','DNS Config','true'),
+(64,'bind_dir','Path to BIND Root','',NULL,'Path to the root directory where BIND is installed.','DNS Config','true'),
+(65,'bind_service','BIND Service Name','',NULL,'Name of the BIND service','DNS Config','true'),
+(66,'allow_xfer','Allow Zone Transfers','trusted-servers',NULL,'Setting to restrict zone transfers in setting: allow-transfer {}; Default = all','DNS Config','true'),
+(67,'allowed_types','Allowed Record Types','A AAAA CNAME MX TXT SRV SPF NS',NULL,'Types of records allowed seperated by a space. Default = A AAAA CNAME MX TXT SRV SPF NS','DNS Config','true'),
+(68,'bind_log','Bind Log','/var/sentora/logs/bind/bind.log',NULL,'Path and name of the Bind Log','DNS Config','true'),
 (6,'dbversion','Sentora version','2.1.0',NULL,'Database Version','Sentora Config','false'),
 (7,'sentora_root','Sentora root path','/etc/sentora/panel/',NULL,'Sentora Web Root','Sentora Config','true'),
 (8,'module_icons_pr','Icons per Row','10',NULL,'Set the number of icons to display before beginning a new line.','Sentora Config','false'),
@@ -635,8 +652,6 @@ insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx
 (14,'root_drive','Root Drive','/',NULL,'The root drive where Sentora is installed.','Sentora Config','true'),
 (16,'php_exer','PHP executable','php',NULL,'PHP Executable','Sentora Config','false'),
 (17,'temp_dir','Temp Directory','/var/sentora/temp/',NULL,'Global temp directory.','Sentora Config','true'),
-(18,'news_url','Sentora News API URL','http://api.sentora.org/latestnews.json',NULL,'Sentora News URL','Sentora Config','false'),
-(19,'update_url','Sentora Update API URL','http://api.sentora.org/latestversion.json',NULL,'Sentora Update URL','Sentora Config','false'),
 (21,'server_ip','Server IP Address','',NULL,'If set this will use this manually entered server IP address which is the prefered method for use behind a firewall.','Sentora Config','true'),
 (22,'zip_exe','ZIP Exe','zip',NULL,'Path to the ZIP Executable','Sentora Config','true'),
 (24,'disable_hostsen','Disable auto HOSTS file entry','false','true|false','Disable Host Entries','Sentora Config','false'),
@@ -660,31 +675,12 @@ insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx
 (42,'purge_bu','Purge Backups','true','true|false','Delete client backups after allotted time has elapsed to help save diskspace (true/false)','Backup Config','true'),
 (43,'purge_date','Purge Date','30',NULL,'Time in days backups are safe from being deleted. After days have elapsed, older backups will be deleted on Daemon Day Run','Backup Config','true'),
 (44,'disk_bu','Disk Backups','true','true|false','Allow users to create and save backups of their home directories to disk. (true/false)','Backup Config','true'),
-(45,'schedule_bu','Daily Backups','false','true|false','Make a daily backup of each clients data, including MySQL databases to their backup folder. Backups will still be created if Disk Backups are set to false. (true/false)','Backup Config','true'),
 (46,'ftp_db','FTP Database','sentora_proftpd',NULL,'The name of the ftp server database','FTP Config','true'),
 (47,'ftp_php','FTP PHP','proftpd.php',NULL,'Name of PHP to include when adding FTP data.','FTP Config','true'),
 (48,'ftp_service','FTP Service Name','proftpd',NULL,'The name of the FTP service','FTP Config','true'),
-(49,'ftp_service_root','FTP Service Root','/etc/init.d/',NULL,'The path to the service executable if applicable.','FTP Config','true');
+(49,'ftp_service_root','FTP Service Root','/etc/init.d/',NULL,'The path to the service executable if applicable.','FTP Config','true'),
+(45,'schedule_bu','Daily Backups','false','true|false','Make a daily backup of each clients data, including MySQL databases to their backup folder. Backups will still be created if Disk Backups are set to false. (true/false)','Backup Config','true');
 insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx`,`so_defvalues_tx`,`so_desc_tx`,`so_module_vc`,`so_usereditable_en`) values 
-(50,'ftp_config_file','FTP Config File','',NULL,'The path to the configuration file if applicable.','FTP Config','true'),
-(51,'mailserver_db','Mailserver Database','sentora_postfix',NULL,'The name of the mail server database','Mail Config','true'),
-(52,'hmailserver_et','Hmail Encryption Type','2',NULL,'Type of encryption uses for hMailServer passwords','Mail Config','false'),
-(53,'max_mail_size','Max Mailbox Size','200',NULL,'Maximum size in megabytes allowed for mailboxes. Default = 200','Mail Config','true'),
-(54,'mailserver_php','Mailserver PHP','postfix.php',NULL,'Name of PHP to include when adding mailbox data.','Mail Config','true'),
-(55,'remove_orphan','Remove Orphans','true','true|false','When domains are deleted, also delete all mailboxes for that domain when the daemon runs. (true/false)','Mail Config','true'),
-(56,'named_dir','Named Directory','/etc/sentora/configs/bind/etc/',NULL,'Path to the directory where named.conf is stored','DNS Config','true'),
-(57,'named_conf','Named Config','named.conf',NULL,'Named configuration file','DNS Config','true'),
-(58,'zone_dir','Zone Directory','/etc/sentora/configs/bind/zones/',NULL,'Path to where DNS zone files are stored','DNS Config','true'),
-(59,'refresh_ttl','SOA Refesh TTL','21600',NULL,'Global refresh TTL.  Default = 21600 (6 hours)','DNS Config','true'),
-(60,'retry_ttl','SOA Retry TTL','3600',NULL,'Global retry TTL. Default = 3600 (1 hour)','DNS Config','true'),
-(61,'expire_ttl','SOA Expire TTL','86400',NULL,'Global expire TTL. Default = 86400 (1 day)','DNS Config','true'),
-(62,'minimum_ttl','SOA Minimum TTL','86400',NULL,'Global minimum TTL. Default = 86400 (1 day)','DNS Config','true'),
-(63,'custom_ip','Allow Custom IP','true','true|false','Allow users to change IP settings in A records. If set to false, IP is locked to server IP setting in Sentora Config','DNS Config','true'),
-(64,'bind_dir','Path to BIND Root','',NULL,'Path to the root directory where BIND is installed.','DNS Config','true'),
-(65,'bind_service','BIND Service Name','',NULL,'Name of the BIND service','DNS Config','true'),
-(66,'allow_xfer','Allow Zone Transfers','trusted-servers',NULL,'Setting to restrict zone transfers in setting: allow-transfer {}; Default = all','DNS Config','true'),
-(67,'allowed_types','Allowed Record Types','A AAAA CNAME MX TXT SRV SPF NS',NULL,'Types of records allowed seperated by a space. Default = A AAAA CNAME MX TXT SRV SPF NS','DNS Config','true'),
-(68,'bind_log','Bind Log','/var/sentora/logs/bind/bind.log',NULL,'Path and name of the Bind Log','DNS Config','true'),
 (69,'hosted_dir','Vhosts Directory','/var/sentora/hostdata/',NULL,'Virtual host directory','Apache Config','true'),
 (70,'disable_hostsen','Disable HOSTS file entries','false','true|false','Disable host entries','Apache Config','true'),
 (71,'apache_vhost','Apache VHOST Conf','/etc/sentora/configs/apache/httpd-vhosts.conf',NULL,'The full system path and filename of the Apache VHOST configuration name.','Apache Config','true'),
@@ -697,14 +693,12 @@ insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx
 (79,'upload_temp_dir','Upload Temp Directory','/var/sentora/temp/',NULL,'The path to the Apache Upload directory (with trailing slash)','Apache Config','true'),
 (80,'apache_port','Apache Port','80',NULL,'Apache service port','Apache Config','true'),
 (81,'dir_index','Directory Indexes','DirectoryIndex index.html index.htm index.php index.asp index.aspx index.jsp index.jspa index.shtml index.shtm',NULL,'Directory Index','Apache Config','true'),
-(82,'suhosin_value','Suhosin Value','php_admin_value suhosin.executor.func.blacklist \"passthru, show_source, shell_exec, system, pcntl_exec, popen, pclose, proc_open, proc_nice, proc_terminate, proc_get_status, proc_close, leak, apache_child_terminate, posix_kill, posix_mkfifo, posix_setpgid, posix_setsid, posix_setuid, escapeshellcmd, escapeshellarg, exec\"',NULL,'Suhosin configuration for virtual host  blacklisting commands','Apache Config','false'),
 (83,'openbase_seperator','Open Base Seperator',':',NULL,'Seperator flag used in open_base_directory setting','Apache Config','false'),
 (84,'openbase_temp','Open Base Temp Directory','/var/sentora/temp/',NULL,'Temp directory used in open_base_directory setting','Apache Config','true'),
 (85,'access_log_format','Access Log Format','combined','combined|common','Log format for the Apache access log','Apache Config','true'),
 (86,'bandwidth_log_format','Bandwidth Log Format','common','combined|common','Log format for the Apache bandwidth log','Apache Config','true'),
 (87,'global_zpcustom','Global Sentora Entry',NULL,NULL,'Extra directives for Sentora default vhost.','Apache Config','true'),
 (88,'use_openbase','Use Open Base Dir','true','true|false','Enable openbase directory for all vhosts','Apache Config','true'),
-(89,'use_suhosin','Use Suhosin','true','true|false','Enable Suhosin for all vhosts','Apache Config','true'),
 (90,'sentora_domain','Sentora Domain','sentora.ztest.com',NULL,'Domain that the control panel is installed under.','Sentora Config','false'),
 (91,'log_dir','Log Directory','/var/sentora/logs/',NULL,'Root path to directory log folders','Sentora Config','true'),
 (92,'apache_changed','Apache Changed','true','true|false','If set, Apache Config daemon hook will write the vhost config file changes.','Apache Config','false'),

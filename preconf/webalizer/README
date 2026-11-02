@@ -1,0 +1,13 @@
+Webalizer 2.23-08 for Sentora on Ubuntu 26.04
+
+Ubuntu stopped packaging webalizer, so the installer builds it from this
+source when no webalizer package is available.
+
+webalizer_2.23.08.orig.tar.gz  upstream source, from the Ubuntu archive
+patches/01..27                 Debian/Ubuntu patches (security, apache logio,
+                               search engines, gcc 10 fixes), without the
+                               translation patches
+patches/30_gcc15_int_return    fixes "return NULL" in an int function, which
+                               GCC 14 and later reject
+
+Webalizer is licensed under the GNU GPL (see COPYING in the source).

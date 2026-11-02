@@ -1,0 +1,14 @@
+TLS certificate for this server
+
+The installer creates a self-signed certificate here:
+  sentora.crt   certificate (public)
+  sentora.key   private key (root only)
+
+Apache (the panel and webmail), Postfix (ports 25, 465, 587) and Dovecot
+(IMAP, POP3, ManageSieve) all use these two files.
+
+To use a trusted certificate later (Let's Encrypt or your own company CA),
+replace both files with the new certificate (full chain) and key, keep the
+names, then run:
+  chmod 600 sentora.key
+  systemctl reload apache2 postfix dovecot
