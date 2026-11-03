@@ -760,10 +760,27 @@ echo -e "\n-- Installing Sentora configuration files from $SENTORA_DOWNLOAD_URL/
 # The staged copies are no longer needed
 rm -rf "$SRC_STAGE"
 
+#--- The panel's own user
+# The panel runs as "sentora" (through its own PHP-FPM pool, set up with Apache
+# below), while every hosted site's PHP runs as the web server user. So a site
+# can not read the panel's passwords, change its code, read its sessions or use
+# zsudo. "sentora" is also in the web server group, so the files it makes in
+# hosting folders stay usable by the sites and FTP.
+PANEL_USER="sentora"
+getent group "$PANEL_USER" > /dev/null || groupadd -r "$PANEL_USER"
+id -u "$PANEL_USER" > /dev/null 2>&1 || useradd -r -g "$PANEL_USER" -M -d "$PANEL_PATH/panel" -s /usr/sbin/nologin -c "Sentora control panel" "$PANEL_USER"
+usermod -a -G "$PANEL_USER,www-data" "$PANEL_USER"
+mkdir -p /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/tmp/phpmyadmin /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
+chown -R "$PANEL_USER:$PANEL_USER" /var/lib/sentora
+chmod 755 /var/lib/sentora
+chmod 700 /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
+
 #--- Prepare zsudo (the panel and daemon use it to reload Apache and run root tasks)
-if cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_CONF/bin/zsudo.c; then
-    chown root $PANEL_PATH/panel/bin/zsudo
-    chmod +s $PANEL_PATH/panel/bin/zsudo
+# zsudo only runs a fixed list of reload commands (see zsudo.c); only root and
+# the panel's user may execute it - not the hosted sites
+if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_CONF/bin/zsudo.c; then
+    chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo
+    chmod 4750 $PANEL_PATH/panel/bin/zsudo
 else
     echo -e "\n\e[1;31mERROR: zsudo did not compile. Sentora will not be able to reload Apache.\e[0m"
     echo "Check $PANEL_CONF/bin/zsudo.c and build-essential, then run:"
@@ -1009,9 +1026,6 @@ if ! grep -q "Include $PANEL_CONF/apache/httpd.conf" "$HTTP_CONF_PATH"; then
 fi
 add_local_domain "$(hostname)"
 
-if ! grep -q "apache ALL=NOPASSWD: $PANEL_PATH/panel/bin/zsudo" /etc/sudoers; then
-    echo "apache ALL=NOPASSWD: $PANEL_PATH/panel/bin/zsudo" >> /etc/sudoers;
-fi
 
 # Create root directory for public HTTP docs
 mkdir -p $PANEL_DATA/hostdata/zadmin/public_html
@@ -1225,9 +1239,53 @@ if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
 ReadWritePaths=$PANEL_PATH
 ProtectProc=default
 ProcSubset=all
+# Files the sites make are group-writable, so the panel's File Manager (same group) can edit them
+UMask=0002
 EOF_UNIT
     systemctl daemon-reload
 fi
+
+#--- The panel's PHP-FPM pool (PHP $PHPVER, runs as $PANEL_USER)
+echo -e "\n-- Setting up the panel's own PHP-FPM pool"
+install_available php"$PHPVER"-fpm
+# The same extensions and settings as the PHP the sites use
+mapfile -t PANEL_PHP_MODS < <(find /etc/php/"$PHPVER"/mods-available -name '*.ini' -printf '%f\n' | sed 's/\.ini$//')
+phpenmod -v "$PHPVER" -s fpm "${PANEL_PHP_MODS[@]}" 2> /dev/null
+cp "$PHP_INI_PATH" /etc/php/"$PHPVER"/fpm/php.ini
+# Only the panel's pool: no general-purpose www-data pool
+[ -f /etc/php/"$PHPVER"/fpm/pool.d/www.conf ] && mv /etc/php/"$PHPVER"/fpm/pool.d/www.conf /etc/php/"$PHPVER"/fpm/pool.d/www.conf.disabled
+cat > /etc/php/"$PHPVER"/fpm/pool.d/sentora.conf <<EOF_POOL
+; The Sentora control panel (and phpMyAdmin, webmail) - never the hosted sites
+[sentora]
+user = $PANEL_USER
+group = $HTTP_GROUP
+listen = /run/php/sentora-panel.sock
+listen.owner = $HTTP_USER
+listen.group = $HTTP_GROUP
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 30
+pm.process_idle_timeout = 60s
+pm.max_requests = 500
+request_terminate_timeout = 3600
+security.limit_extensions = .php .phtml
+; Sessions and uploads in folders only the panel can read
+php_admin_value[session.save_path] = /var/lib/sentora/sessions
+php_admin_value[upload_tmp_dir] = /var/lib/sentora/tmp
+php_admin_value[sys_temp_dir] = /var/lib/sentora/tmp
+php_admin_value[error_log] = $PANEL_DATA/logs/sentora-php.log
+EOF_POOL
+touch "$PANEL_DATA/logs/sentora-php.log"; chown "$PANEL_USER" "$PANEL_DATA/logs/sentora-php.log"
+mkdir -p /etc/systemd/system/php"$PHPVER"-fpm.service.d
+cat > /etc/systemd/system/php"$PHPVER"-fpm.service.d/sentora.conf <<EOF_UNIT
+[Service]
+# Files the panel makes in hosting folders are group-writable for the sites and FTP
+UMask=0002
+EOF_UNIT
+a2enmod proxy_fcgi setenvif > /dev/null
+systemctl daemon-reload
+systemctl enable php"$PHPVER"-fpm
+systemctl restart php"$PHPVER"-fpm || echo -e "\e[1;31mWARNING: php$PHPVER-fpm (the panel's PHP) did not start.\e[0m"
 
 # Register apache(+php) services for autostart and start it
 if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
@@ -1459,8 +1517,15 @@ sed -i "s|!USER!|root|" "$PANEL_CONF/cron/zdaemon"
 cp "$PANEL_CONF/cron/zdaemon" /etc/cron.d/zdaemon
 chmod 644 /etc/cron.d/zdaemon
 
-# prepare user crontabs
-CRON_FILE="$CRON_DIR/$CRON_USER"
+# prepare user crontabs: the panel writes the jobs to its own file and zsudo has
+# root install it as the web server user's crontab
+CRON_FILE="/var/lib/sentora/crontab-www-data"
+{
+    echo "SHELL=/bin/bash"
+    echo "PATH=/sbin:/bin:/usr/sbin:/usr/bin"
+} > "$CRON_FILE"
+chown "$PANEL_USER:$PANEL_USER" "$CRON_FILE"
+chmod 644 "$CRON_FILE"
 mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$CRON_FILE' WHERE so_name_vc='cron_file'"
 mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$CRON_FILE' WHERE so_name_vc='cron_reload_path'"
 mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$CRON_USER' WHERE so_name_vc='cron_reload_user'"
@@ -1491,7 +1556,10 @@ fi
 ##
 echo -e "\n-- Configuring phpMyAdmin"
 phpmyadminsecret=$(passwordgen 32);
-chmod 644 $PANEL_CONF/phpmyadmin/config.inc.php
+chown root:"$PANEL_USER" $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 640 $PANEL_CONF/phpmyadmin/config.inc.php
+# Its compiled templates are PHP: keep them where the sites can not write
+sed -i "s|^\$cfg\['TempDir'\] = .*|\$cfg['TempDir'] = '/var/lib/sentora/tmp/phpmyadmin/';|" $PANEL_CONF/phpmyadmin/config.inc.php
 sed -i "s|\$cfg\['blowfish_secret'\] = 'SENTORA';|\$cfg\['blowfish_secret'\] = '$phpmyadminsecret';|" $PANEL_CONF/phpmyadmin/config.inc.php
 ln -sf $PANEL_CONF/phpmyadmin/config.inc.php $PANEL_PATH/panel/etc/apps/phpmyadmin/config.inc.php
 # Remove phpMyAdmin's setup folder, it is not needed and should not be reachable
@@ -1530,10 +1598,12 @@ rm -rf "$RC_PATH/SQL" "$RC_PATH/installer" "$RC_PATH/public_html/installer.php"
 
 # Logs and temporary files live outside the application folder
 mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/temp/roundcube"
-chown "$HTTP_USER:$HTTP_GROUP" "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/temp/roundcube"
+chown "$PANEL_USER:$HTTP_GROUP" "$PANEL_DATA/logs/roundcube"
+# Attachments being written go to the panel's private folder, not the shared temp
+sed -i "s|\$config\['temp_dir'\] = .*|\$config['temp_dir'] = '/var/lib/sentora/roundcube/';|" $PANEL_CONF/roundcube/roundcube_config.inc.php
 
 # Config files hold database passwords: readable by root and Apache only
-chown root:$HTTP_GROUP $PANEL_CONF/roundcube/*.inc.php
+chown root:"$PANEL_USER" $PANEL_CONF/roundcube/*.inc.php
 chmod 640 $PANEL_CONF/roundcube/*.inc.php
 
 ln -sf $PANEL_CONF/roundcube/roundcube_config.inc.php "$RC_PATH/config/config.inc.php"
@@ -1621,8 +1691,27 @@ fi
 #--- Lock down files that hold passwords
 # Everything under $PANEL_PATH was made world-writable earlier (chmod -R 777),
 # which included the MySQL root password and the service database passwords.
-chown root:$HTTP_GROUP $PANEL_PATH/panel/cnf/db.php $PANEL_PATH/panel/cnf/security.php
+# The panel's code belongs to root and can not be changed by the panel or the sites
+chown -R root:root $PANEL_PATH/panel
+find $PANEL_PATH/panel -type d -exec chmod 755 {} +
+find $PANEL_PATH/panel -type f -exec chmod 644 {} +
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin 2> /dev/null
+chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
+# What the panel itself writes: its template cache. Modules and Repo Browser's
+# package cache belong to root: the panel queues module changes and the root
+# daemon makes them, so a break-in to the panel can not plant code root would run
+chown -R "$PANEL_USER:$HTTP_GROUP" $PANEL_PATH/panel/etc/tmp
+# The database password and the encryption key: the panel and root only
+chown root:"$PANEL_USER" $PANEL_PATH/panel/cnf/db.php $PANEL_PATH/panel/cnf/security.php
 chmod 640 $PANEL_PATH/panel/cnf/db.php $PANEL_PATH/panel/cnf/security.php
+# Service configuration: written by root (the daemon), read by the services
+chown -R root:root $PANEL_CONF
+# (earlier chmod -R 777 left every file world-writable: nobody but root may write now)
+chmod -R u+rwX,go-w,go+rX $PANEL_CONF
+chown root:mail $PANEL_CONF/dovecot2/dovecot-mysql.conf; chmod 640 $PANEL_CONF/dovecot2/dovecot-mysql.conf
+chown root:"$PANEL_USER" $PANEL_CONF/roundcube/*.inc.php $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 640 $PANEL_CONF/roundcube/*.inc.php $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 600 $PANEL_CONF/ssl/sentora.key
 chown root:root $PANEL_CONF/proftpd/proftpd-mysql.conf
 chmod 600 $PANEL_CONF/proftpd/proftpd-mysql.conf
 chown root:postfix $PANEL_CONF/postfix/mysql-*.cf

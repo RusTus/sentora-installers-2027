@@ -15,7 +15,7 @@ $cfg['Servers'][$i]['AllowNoPassword'] = false;
 $cfg['Servers'][$i]['hide_db'] = '^(information_schema|sys|performance_schema)$';
 
 // Writable folders outside the read-only application tree
-$cfg['TempDir'] = '/var/sentora/temp/';
+$cfg['TempDir'] = '/var/lib/sentora/tmp/phpmyadmin/';
 $cfg['UploadDir'] = '/var/sentora/temp/';
 $cfg['SaveDir'] = '/var/sentora/temp/';
 

@@ -67,6 +67,20 @@ Passwords are saved in `/root/passwords.txt`.
   are protected. Installing a module runs its code, so only add trusted
   repositories; the two default sentora.org repositories may be offline.
 
+## Security layout
+
+* The panel (with phpMyAdmin and webmail) runs as its own user, `sentora`,
+  through the PHP-FPM pool `/etc/php/8.5/fpm/pool.d/sentora.conf`. Hosted
+  sites run as `www-data`, so a site can not read the panel's database
+  password, sessions or configs, change its code, or run `zsudo`.
+* `/etc/sentora/panel` and `/etc/sentora/configs` belong to root. The panel
+  writes only `etc/tmp`, plus `/var/lib/sentora` (sessions, uploads, cron
+  jobs). Repo Browser and Module Admin queue module changes; the root daemon
+  makes them within 5 minutes.
+* Logins lock for 15 minutes after 5 wrong passwords for an account or 20 from
+  one address. "Remember me" is a random token (stored hashed, replaced on use).
+* `zsudo` runs a fixed list of reloads only, for root and the panel user.
+
 ## Upgrades
 
 Upgrading an existing Sentora or ZPanel server is not supported. The installer

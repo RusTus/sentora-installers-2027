@@ -47,6 +47,6 @@ $config['display_next'] = false;
 
 // Logs and temporary files outside the application folder
 $config['log_dir'] = '/var/sentora/logs/roundcube/';
-$config['temp_dir'] = '/var/sentora/temp/roundcube/';
+$config['temp_dir'] = '/var/lib/sentora/roundcube/';
 
 $config['enable_installer'] = false;

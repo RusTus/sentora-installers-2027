@@ -1,115 +1,72 @@
-/*****************************************************************************
-* Sentora *
-*----------------------------------------------------------------------------*
-* COMPILE NOTES *
-* make sure to chmod +s the binary after compiling: *
-* cc -o zsudo zsudo.c ; chmod +s zsudo *
-*
-*
-* [*] 1/Feb/2014 -> (Japp from 0xlabs. japp[@]0xlabs.com) :
-* - Command Injection patched.
-* - Buffer Overflow patched.
-* - Added dynamic number of arguments (MAX_ARGS)
-*
-*
-*
-*
-*
-******************************************************************************/
-
+/*
+ * zsudo - lets the panel (web server user) ask root for a few fixed actions.
+ *
+ * The original zsudo ran ANY command line as root through "at now". Every
+ * hosted website runs as the same web server user as the panel, so any site
+ * (or anyone who could upload a PHP file) could run "zsudo <anything>" and
+ * become root.
+ *
+ * This version only accepts the exact commands the panel uses and runs a
+ * fixed command line for each; nothing from the caller reaches a shell.
+ * Only the panel's user can run it (see below).
+ *
+ * Accepted:
+ *   zsudo service <apache2|httpd> <reload|restart|graceful>
+ *   zsudo service <named|bind9> <start|stop|reload|restart>
+ *   zsudo crontab -u www-data /var/lib/sentora/crontab-www-data
+ *
+ * The panel runs as its own user ("sentora"); zsudo is installed root:sentora
+ * 4750, so the hosted sites (www-data) can not run it at all.
+ */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>  /* setuid, geteuid: GCC 14+ treats a missing declaration as an error */
+#include <unistd.h>
 
-#define MAX_ARGS 11     // Max. arguments : argv[0] + 10
-#define MIN_LEN 47      // strlen ("/bin/echo ' > /dev/null 2>&1' | /usr/bin/at now")
-
-int ParamsLen (int argc, char **argv)
+static int one_of(const char *s, const char *const *list)
 {
-        int i;
-        int len = 0;
-        
-        for ( i = 0; i < argc; i++ )
-                len += strlen(argv[i]) + 1; // 1 == ' '
-        
-        return len;
-}
-
-int EscapeArgs (char *parsed, int argc, char **argv)
-{
-        int i, a, j = 0;
-        
-        for ( i = 0; i < argc; i++, j++ )
-        {
-                for ( a = 0; a < strlen(argv[i]); a++ )
-                {
-                        if ( argv[i][a] != '\'' )
-                        {
-                                parsed[j] = argv[i][a];
-                                j++;
-                        }
-                }
-                parsed[j] = ' ';
-        }
-        
-        parsed[j] = 0x0;
-        
-        return j;
-                
-}
-
-void MemError ( void )
-{
-        perror ("Error allocating memory:");
-        exit (-1);
+    for (; *list; list++)
+        if (strcmp(s, *list) == 0)
+            return 1;
+    return 0;
 }
 
 int main(int argc, char *argv[])
 {
-        if ( argc < 2 )
-        {
-                printf ("Argument needed\n");
-                return 1;
-        }
-        else if ( argc > MAX_ARGS )
-        {
-                printf ("Too much arguments\n");
-                return 1;
-        }
-        else
-        {
-         
-                if ( !setuid( geteuid() ) )
-                {
-                        char *parsed  = NULL;
-                        char *str     = NULL;                        
-                        int total_len = 0;
-                        
-                        total_len = ParamsLen ((argc-1), &argv[1]);
-                                
-                        parsed = (char *) malloc ( total_len + 1 );
-                        if ( parsed == NULL ) MemError();
-                        
-                        total_len = EscapeArgs (parsed, argc-1, &argv[1]);
-                        
-                        total_len += MIN_LEN + 1;
-                        
-                        str = (char *) malloc ( total_len );
-                        if ( str == NULL ) MemError();
-                        
-                        snprintf (str, total_len, "/bin/echo '%s > /dev/null 2>&1' | /usr/bin/at now", parsed);
-                                        
-                        system(str);
-                        
-                        free (parsed);
-                        free (str);
-                }
-                else
-                {
-                            printf("Couldn't set UID to effective UID\n");
-                            return 1;
-                }
-        }
-        return 0;
+    static const char *const apache[] = { "apache2", "httpd", NULL };
+    static const char *const apache_act[] = { "reload", "restart", "graceful", NULL };
+    static const char *const bind[] = { "named", "bind9", NULL };
+    static const char *const bind_act[] = { "start", "stop", "reload", "restart", NULL };
+    char cmd[256];
+
+    cmd[0] = '\0';
+    if (argc == 4 && strcmp(argv[1], "service") == 0
+        && ((one_of(argv[2], apache) && one_of(argv[3], apache_act))
+            || (one_of(argv[2], bind) && one_of(argv[3], bind_act)))) {
+        /* Every word is one of the constants above */
+        snprintf(cmd, sizeof cmd, "/usr/sbin/service %s %s", argv[2], argv[3]);
+    } else if (argc == 5 && strcmp(argv[1], "crontab") == 0 && strcmp(argv[2], "-u") == 0
+               && strcmp(argv[3], "www-data") == 0
+               && strcmp(argv[4], "/var/lib/sentora/crontab-www-data") == 0) {
+        /* The panel writes the jobs to this file (owned by the panel user, not
+           writable by the sites); root installs it as www-data's crontab */
+        snprintf(cmd, sizeof cmd, "/usr/bin/crontab -u www-data /var/lib/sentora/crontab-www-data");
+    } else {
+        fprintf(stderr, "zsudo: command not allowed\n");
+        return 2;
+    }
+
+    if (setgid(0) != 0 || setuid(0) != 0) {
+        fprintf(stderr, "zsudo: must be installed setuid root\n");
+        return 1;
+    }
+    /* Run it through atd (outside the web server's systemd sandbox), detached
+       from the calling web request, exactly as before - but only this fixed line */
+    FILE *at = popen("/usr/bin/at now > /dev/null 2>&1", "w");
+    if (at == NULL) {
+        perror("zsudo: at");
+        return 1;
+    }
+    fprintf(at, "%s > /dev/null 2>&1\n", cmd);
+    return pclose(at) == 0 ? 0 : 1;
 }
