@@ -1,14 +1,19 @@
 TLS certificate for this server
 
 The installer creates a self-signed certificate here:
-  sentora.crt   certificate (public)
-  sentora.key   private key (root only)
+  sentora.crt         certificate plus any intermediate certificates (public)
+  sentora-chain.crt   intermediate certificates only, for ProFTPD (public)
+  sentora.key         private key (root only)
 
-Apache (the panel and webmail), Postfix (ports 25, 465, 587) and Dovecot
-(IMAP, POP3, ManageSieve) all use these two files.
+Apache (the panel and webmail), Postfix (ports 25, 465, 587), Dovecot (IMAP,
+POP3, ManageSieve) and ProFTPD (FTPS) all use these files.
 
-To use a trusted certificate later (Let's Encrypt or your own company CA),
-replace both files with the new certificate (full chain) and key, keep the
-names, then run:
+Let's Encrypt through Sencrypt: once you issue a certificate for the panel
+domain in Sencrypt, the daemon copies it here within 5 minutes, after every
+renewal too, and reloads Postfix, Dovecot and ProFTPD. Apache uses the Sencrypt
+files directly. The self-signed pair is kept as selfsigned.crt/selfsigned.key.
+
+To use a certificate from somewhere else (your own company CA), replace the
+three files, keep the names, then run:
   chmod 600 sentora.key
-  systemctl reload apache2 postfix dovecot
+  systemctl reload apache2 postfix dovecot proftpd

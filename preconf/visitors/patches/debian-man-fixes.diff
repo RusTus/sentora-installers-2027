@@ -1,0 +1,17 @@
+Misc. fixes to the man page.
+
+---
+ visitors.1 |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/visitors.1
++++ b/visitors.1
+@@ -291,7 +291,7 @@
+ Set the max number of entries in the domains report.
+ .PP
+ .TP 8
+-.BI "\-P \-\-prefix" " number"
++.BI "\-P \-\-prefix" " string"
+ Prefixes specify to visitors how a link should look like to be
+ classified as internal to your site. This option is required for
+ .B --trails

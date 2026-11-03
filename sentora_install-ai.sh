@@ -288,10 +288,10 @@ download_file() {
     local url="$SENTORA_DOWNLOAD_URL/$1" dest="$2" try
     for try in 1 2 3; do
         echo "Downloading $url (attempt $try)"
-        if wget -nv -O "$dest" "$url" && [ -s "$dest" ] && unzip -tq "$dest" > /dev/null 2>&1; then
+        if wget -nv -O "$dest" "$url" && [ -s "$dest" ] && { unzip -tq "$dest" > /dev/null 2>&1 || tar -tzf "$dest" > /dev/null 2>&1; }; then
             return 0
         fi
-        echo "Download of $url failed or the file is not a valid zip."
+        echo "Download of $url failed or the file is not a valid zip or tar.gz."
         sleep 5
     done
     return 1
@@ -887,9 +887,12 @@ if [ ! -s "$SSL_DIR/sentora.crt" ]; then
         -keyout "$SSL_DIR/sentora.key" -out "$SSL_DIR/sentora.crt" \
         -subj "/CN=$PANEL_FQDN" -addext "subjectAltName=$SSL_SAN" > /dev/null 2>&1
 fi
-chown root:root "$SSL_DIR/sentora.key" "$SSL_DIR/sentora.crt"
+# ProFTPD takes intermediate certificates from a separate file. A self-signed
+# certificate has none, so it starts as a copy; Sencrypt replaces all three files.
+[ -s "$SSL_DIR/sentora-chain.crt" ] || cp "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
+chown root:root "$SSL_DIR/sentora.key" "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
 chmod 600 "$SSL_DIR/sentora.key"
-chmod 644 "$SSL_DIR/sentora.crt"
+chmod 644 "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
 
 # Serve the panel (and webmail) over HTTPS; the daemon adds an http:// redirect
 mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='443' WHERE so_name_vc='sentora_port'"
@@ -1234,6 +1237,104 @@ if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
 fi
 
 ##
+#--- Extra PHP versions for hosted domains (PHP-FPM)
+##
+# The panel and every domain without a choice keep using the system PHP 8.5
+# (Apache mod_php). These versions are built for Ubuntu 26.04 and hosted next
+# to the other installer files; each runs as its own PHP-FPM service and is
+# enabled or disabled in the panel's PHP Versions module.
+PHP_EXTRA_VERSIONS="8.1 8.2 8.3 8.4"
+echo -e "\n-- Installing extra PHP versions: $PHP_EXTRA_VERSIONS"
+# Libraries the builds link against (all part of Ubuntu 26.04)
+install_available libxml2-16 libcurl4t64 libonig5 libzip5 libicu78 libsodium23 libargon2-1 \
+    libxslt1.1 libwebp7 libjpeg-turbo8 libfreetype6 libpng16-16t64 libgmp10 libsqlite3-0 libssl3t64
+a2enmod proxy_fcgi setenvif > /dev/null
+PHP_STAGE=$(mktemp -d /tmp/sentora-php.XXXXXX)
+PHP_INSTALLED=""
+for PV in $PHP_EXTRA_VERSIONS; do
+    PHP_TAR="sentora-php-$PV-ubuntu26.04-amd64.tar.gz"
+    if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR"; then
+        echo -e "\e[1;33mPHP $PV skipped: $PHP_TAR is not on $SENTORA_DOWNLOAD_URL\e[0m"
+        continue
+    fi
+    # The archive holds opt/sentora-php/<version>/
+    # -m: use the install time, the build machine clock may differ from this server
+    tar -xzmf "$PHP_STAGE/$PHP_TAR" -C /
+    PP="/opt/sentora-php/$PV"
+    if ! "$PP/sbin/php-fpm" -v > /dev/null 2>&1; then
+        echo -e "\e[1;31mWARNING: PHP $PV does not run on this server, skipped.\e[0m"
+        "$PP/sbin/php-fpm" -v 2>&1 | head -3
+        continue
+    fi
+
+    # php.ini: PHP's production defaults with the same changes as the system PHP
+    mkdir -p "$PP/etc/conf.d" "$PP/etc/php-fpm.d"
+    cp "$PP/lib/php.ini-production" "$PP/etc/php.ini"
+    sed -i "s|^memory_limit = .*|memory_limit = 256M|" "$PP/etc/php.ini"
+    sed -i "s|^expose_php = .*|expose_php = Off|" "$PP/etc/php.ini"
+    sed -i "s|^;date.timezone =.*|date.timezone = $tz|" "$PP/etc/php.ini"
+    sed -i "s|^;upload_tmp_dir =.*|upload_tmp_dir = $PANEL_DATA/temp/|" "$PP/etc/php.ini"
+    # These builds do not know Ubuntu's MySQL socket path, so tell them
+    sed -i "s|^mysqli.default_socket =.*|mysqli.default_socket = /var/run/mysqld/mysqld.sock|" "$PP/etc/php.ini"
+    sed -i "s|^pdo_mysql.default_socket *=.*|pdo_mysql.default_socket = /var/run/mysqld/mysqld.sock|" "$PP/etc/php.ini"
+    echo "zend_extension=opcache.so" > "$PP/etc/conf.d/10-opcache.ini"
+
+    cat > "$PP/etc/php-fpm.conf" <<EOF_FPM
+[global]
+pid = /run/sentora-php/php$PV-fpm.pid
+error_log = $PANEL_DATA/logs/php$PV-fpm.log
+include = $PP/etc/php-fpm.d/*.conf
+EOF_FPM
+    # One pool for all domains on this version. Processes start on demand, so a
+    # version nobody uses costs only its small master process. Each request gets
+    # the domain's open_basedir, upload and session folders from Apache.
+    cat > "$PP/etc/php-fpm.d/www.conf" <<EOF_POOL
+[www]
+user = $HTTP_USER
+group = $HTTP_GROUP
+listen = /run/sentora-php/php$PV-fpm.sock
+listen.owner = $HTTP_USER
+listen.group = $HTTP_GROUP
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 20
+pm.process_idle_timeout = 60s
+pm.max_requests = 500
+security.limit_extensions = .php .phtml .php3
+EOF_POOL
+
+    cat > "/etc/systemd/system/sentora-php$PV-fpm.service" <<EOF_UNIT
+[Unit]
+Description=PHP $PV FastCGI Process Manager for Sentora hosted domains
+After=network.target
+
+[Service]
+Type=simple
+RuntimeDirectory=sentora-php
+RuntimeDirectoryPreserve=yes
+ExecStartPre=$PP/sbin/php-fpm --test --fpm-config $PP/etc/php-fpm.conf
+ExecStart=$PP/sbin/php-fpm --nodaemonize --fpm-config $PP/etc/php-fpm.conf
+ExecReload=/bin/kill -USR2 \$MAINPID
+Restart=on-failure
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF_UNIT
+    touch "$PANEL_DATA/logs/php$PV-fpm.log"
+    PHP_INSTALLED="$PHP_INSTALLED,$PV"
+done
+rm -rf "$PHP_STAGE"
+systemctl daemon-reload
+PHP_INSTALLED="${PHP_INSTALLED#,}"
+for PV in ${PHP_INSTALLED//,/ }; do
+    systemctl enable --now "sentora-php$PV-fpm" > /dev/null 2>&1 || echo -e "\e[1;31mWARNING: sentora-php$PV-fpm did not start.\e[0m"
+done
+# All installed versions start enabled; the PHP Versions module can switch them off
+mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$PHP_INSTALLED' WHERE so_name_vc='php_versions_enabled'"
+echo "Extra PHP versions installed: ${PHP_INSTALLED:-none}"
+
+##
 #--- ProFTPd
 ##
 echo -e "\n-- Installing ProFTPD"
@@ -1458,6 +1559,18 @@ if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
 	rm -rf /etc/webalizer/webalizer.conf
 fi
 
+#--- Visitors (Visitor Stats module): not packaged on Ubuntu 26.04, built from the bundled 0.7 source
+echo -e "\n-- Building Visitors"
+if ! bash $PANEL_CONF/visitors/build-visitors.sh $PANEL_CONF/visitors; then
+	echo -e "\n\e[1;31mWARNING: visitors did not build, Visitor Stats will stay empty.\e[0m"
+fi
+# Reports live outside the web root and are shown by the module to each domain's owner only
+mkdir -p $PANEL_DATA/stats/visitors $PANEL_DATA/stats/webalizer
+chmod 755 $PANEL_DATA/stats $PANEL_DATA/stats/visitors $PANEL_DATA/stats/webalizer
+
+#--- Apache status page (Apache Status module): mod_status, reachable from this server only
+a2enmod status > /dev/null
+
 #--- Set some Sentora database entries using. setso and setzadmin (require PHP)
 echo -e "\n-- Configuring Sentora"
 zadminpassword=$(passwordgen);
@@ -1517,6 +1630,13 @@ chmod 640 $PANEL_CONF/postfix/mysql-*.cf
 chmod 644 $PANEL_CONF/postfix/main.cf $PANEL_CONF/postfix/master.cf
 chown root:root $PANEL_CONF/bind/rndc.conf 2> /dev/null; chmod 600 $PANEL_CONF/bind/rndc.conf 2> /dev/null
 chmod 640 /etc/bind/rndc.conf 2> /dev/null
+# The File Manager's own program files must not be writable by the web server
+# (it edits users' files, never itself)
+chown -R root:root $PANEL_PATH/panel/modules/file_manager
+chmod -R u=rwX,go=rX $PANEL_PATH/panel/modules/file_manager
+# Same for Apache Status: its settings are fixed files, nothing in it should be writable
+chown -R root:root $PANEL_PATH/panel/modules/apache_status
+chmod -R u=rwX,go=rX $PANEL_PATH/panel/modules/apache_status
 
 ## Leaving this just incase. ***
 #--- Restart all services to capture output messages, if any

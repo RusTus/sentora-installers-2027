@@ -11,6 +11,9 @@ sentora.org.
 * `sentora_install-ai.sh` - the installer (kept next to these zips)
 * `sentora-core-2_0_2.zip` - the panel, with phpMyAdmin 5.2.3 and Roundcube 1.7.5
 * `sentora-installers-master.zip` - this folder: the `preconf/` configuration files
+* `sentora-php-8.1-ubuntu26.04-amd64.tar.gz` ... `sentora-php-8.4-ubuntu26.04-amd64.tar.gz` -
+  extra PHP versions (PHP-FPM) that domains can choose. Optional: a missing
+  file just means that version is not installed.
 
 Both zips are downloaded by the installer from
 `http://hembackup1.hemsaw.local/installers/` (set at the top of the installer).
@@ -40,6 +43,29 @@ Passwords are saved in `/root/passwords.txt`.
 * DNS: BIND 9.20
 * FTP: ProFTPD with required FTPS (explicit TLS on port 21)
 * Webalizer statistics, built from `preconf/webalizer/` (not packaged on 26.04)
+* PHP 8.5 for the panel and by default for every domain; PHP 8.1, 8.2, 8.3 and
+  8.4 (PHP-FPM, in `/opt/sentora-php/`) that each domain or subdomain can choose
+  in the Domains and Sub Domains modules. The admin's PHP Versions module turns
+  each extra version on or off. PHP 8.1 gets no security fixes since 31 Dec
+  2025 and PHP 8.2 none after 31 Dec 2026.
+
+* File Manager (File Management): each user's own hosting folder in the
+  browser (upload, edit, zip/unzip). Built on Tiny File Manager, bundled with
+  all its libraries (no CDN), behind the panel login and confined to that
+  user's folder. See modules/file_manager/app/VERSION.
+* Visitor Stats (Advanced): per-domain visitor reports from Visitors 0.7,
+  built from preconf/visitors/ (not packaged on 26.04), shown only to the
+  domain's owner.
+* Apache Status (Admin > Server Admin, administrators only): Pimped Apache
+  Status 2.04.17 reading this server's own /server-status (mod_status).
+* System Log Viewer (Admin > Server Admin, administrators only): follow the
+  panel, Apache, mail, FTP, DNS, PHP-FPM and domain logs live in the browser.
+* Webalizer and Visitor reports are kept in /var/sentora/stats/ (outside the
+  web root) and shown only to the domain's owner.
+* Repo Browser (Admin > Server Admin): add module repositories and install,
+  update or remove add-on modules with zppy. Modules that ship with the panel
+  are protected. Installing a module runs its code, so only add trusted
+  repositories; the two default sentora.org repositories may be offline.
 
 ## Upgrades
 

@@ -1,0 +1,45 @@
+Update the built-in browser list with newer browsers.
+
+---
+ visitors.c |   12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+--- a/visitors.c
++++ b/visitors.c
+@@ -1435,10 +1435,12 @@
+ 		"MSIE 4", "Explorer 4.x",
+ 		"MSIE 5", "Explorer 5.x",
+ 		"MSIE 6", "Explorer 6.x",
++		"MSIE 7", "Explorer 7.x",
+ 		"MSIE", "Explorer unknown version",
+ 		"Safari", NULL,
+ 		"Konqueror", NULL,
+ 		"Galeon", NULL,
++		"Iceweasel", NULL,
+ 		"Firefox", NULL,
+ 		"MultiZilla", NULL,
+ 		"Gecko", "Other Mozilla based",
+@@ -1447,6 +1449,7 @@
+ 		"Links ", "Links",
+ 		"ELinks ", "Links",
+ 		"Elinks ", "Links",
++		"Liferea", NULL,
+ 		"w3m", "W3M",
+ 		"NATSU-MICAN", NULL,
+ 		"msnbot", "MSNbot",
+@@ -1460,6 +1463,15 @@
+ 		"NSPlayer", NULL,
+ 		"Googlebot", "GoogleBot",
+ 		"googlebot", "GoogleBot",
++		"yacybot", "YaCy-Bot",
++		"Sogou", "Sogou.com Bot",
++		"psbot", "Picsearch.com Bot",
++		"sosospider", "Soso.com Bot",
++		"Baiduspider+", "Baidu.com Bot",
++		"Yandex", "Yandex.com Bot",
++		"Yeti", "Nava.com Bot",
++		"APT-HTTP", "Apt",
++		"git", "Git",
+ 		"", "Unknown",
+ 		NULL, NULL,
+ 	};

@@ -433,6 +433,12 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (26,8,'FTP Accounts',200,'ftp_management','user','Using this module you can create FTP accounts which will enable you and any other accounts you create to have the ability to upload and manage files on your hosting space.',NULL,'true',NULL,''),
 (27,3,'FAQ\'s',200,'faqs','user','Please find a list of the most common questions from users, if you are unable to find a solution to your problem below please then contact your hosting provider. Simply click on the FAQ below to view the solution.',NULL,'true',NULL,''),
 (28,0,'Apache Config',200,'apache_admin','modadmin','This module enables you to configure Apache Vhost settings for your hosting accounts.',NULL,'true',NULL,''),
+(65,2,'System Log Viewer',200,'system_logviewer','user','Follow the server\'s log files live in the browser: the panel, Apache, mail, FTP, DNS, PHP and every hosted domain.',NULL,'true',NULL,''),
+(63,3,'Visitor Stats',200,'visitor_stats','user','See who has been visiting your websites: visitors per day, pages, referrers, search terms and browsers, made with Visitors 0.7.',NULL,'true',NULL,''),
+(64,2,'Apache Status',200,'apache_status','user','See what Apache is doing right now: load, traffic, workers and every request in progress, sortable and searchable (Pimped Apache Status 2.04).',NULL,'true',NULL,''),
+(62,8,'File Manager',200,'file_manager','user','Manage the files in your hosting folder: upload by drag and drop, edit text files, create folders, and zip or unzip archives.',NULL,'true',NULL,''),
+(61,2,'Repo Browser',101,'repo_browser','user','Browse module repositories and install, update or remove add-on modules with zppy.',NULL,'true',NULL,''),
+(60,0,'PHP Versions',200,'php_versions','modadmin','Enable or disable the extra PHP versions that domains and subdomains can choose. The panel always runs on the default PHP.',NULL,'true',NULL,''),
 (29,5,'DNS Manager',200,'dns_manager','user',NULL,NULL,'true',NULL,''),
 (30,0,'DNS Config',200,'dns_admin','modadmin','This module enables you to configure DNS settings for the DNS Manager',NULL,'true',NULL,''),
 (31,7,'Manage Groups',200,'manage_groups','user','Manage user groups to enable greater control over module permission.',NULL,'true',NULL,''),
@@ -536,7 +542,7 @@ CREATE TABLE `x_permissions` (
 /*Data for the table `x_permissions` */
 
 insert  into `x_permissions` (`pe_id_pk`,`pe_group_fk`,`pe_module_fk`) values
- (87,1,10), (88,2,10), (89,3,10), (2,1,35), (3,2,35), (4,3,35), (18,1,34), (19,2,34), (20,3,34), (31,1,33), (32,2,33), (33,3,33), (38,1,36), (39,1,32), (40,2,32), (41,3,32), (21,1,30), (22,1,29), (23,2,29), (24,3,29), (34,1,26), (35,2,26), (36,3,26), (37,1,40), (63,1,8), (64,2,8), (65,3,8), (1,1,18),  (5,1,28),  (6,1,12),  (7,2,12),  (8,3,12),  (9,1,41), (10,1,11),
+ (113,1,65), (109,1,63), (110,2,63), (111,3,63), (112,1,64), (106,1,62), (107,2,62), (108,3,62), (105,1,61), (104,1,60), (87,1,10), (88,2,10), (89,3,10), (2,1,35), (3,2,35), (4,3,35), (18,1,34), (19,2,34), (20,3,34), (31,1,33), (32,2,33), (33,3,33), (38,1,36), (39,1,32), (40,2,32), (41,3,32), (21,1,30), (22,1,29), (23,2,29), (24,3,29), (34,1,26), (35,2,26), (36,3,26), (37,1,40), (63,1,8), (64,2,8), (65,3,8), (1,1,18),  (5,1,28),  (6,1,12),  (7,2,12),  (8,3,12),  (9,1,41), (10,1,11),
 (11,2,11), (12,3,11), (13,1,42), (14,2,42), (15,1,22), (16,2,22), (17,3,22), 
 (25,1,15), (26,2,15), (27,3,15), (28,1,27), (29,2,27), (30,3,27),
 
@@ -702,6 +708,7 @@ insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx
 (90,'sentora_domain','Sentora Domain','sentora.ztest.com',NULL,'Domain that the control panel is installed under.','Sentora Config','false'),
 (91,'log_dir','Log Directory','/var/sentora/logs/',NULL,'Root path to directory log folders','Sentora Config','true'),
 (92,'apache_changed','Apache Changed','true','true|false','If set, Apache Config daemon hook will write the vhost config file changes.','Apache Config','false'),
+(130,'php_versions_enabled','PHP Versions Enabled','',NULL,'Extra PHP versions domains may choose (comma separated). Managed in the PHP Versions module.',NULL,'false'),
 (94,'apache_allow_disabled','Allow Disabled','true','true|false','Allow webhosts to remain active even if a user has been disabled.','Apache Config','true'),
 (95,'apache_budir','VHost Backup Dir','/var/sentora/backups/',NULL,'Directory that vhost.conf backups are stored.','Apache Config','true'),
 (96,'apache_purgebu','Purge Backups','true','true|false','Old backups are deleted after the date set in Puge Date','Apache Config','true'),
@@ -824,6 +831,7 @@ CREATE TABLE `x_vhosts` (
   `vh_ssl_tx` text DEFAULT NULL, 
   `vh_ssl_port_in` int(6) DEFAULT NULL,
   `vh_custom_sp_tx` text DEFAULT NULL,
+  `vh_php_version_vc` varchar(10) DEFAULT NULL,
   `vh_custom_tx` text DEFAULT NULL,
   `vh_custom_port_in` int(6) DEFAULT NULL,
   `vh_custom_ip_vc` varchar(45) DEFAULT NULL,

@@ -1,0 +1,34 @@
+--- a/visitors.c	2026-11-03 16:16:18.966203586 +0000
++++ b/visitors.c	2026-11-03 16:16:18.967287998 +0000
+@@ -2183,7 +2183,10 @@
+ 	om_html_entities(fp, key1);
+ 	fprintf(fp, "</td><td align=\"left\" class=\"keyentry\">");
+ 	if (!strncmp(key2, "http://", 7)) {
+-		fprintf(fp, "<a class=\"url\" href=\"%s\">", key2);
++		/* escaped: a quote in a logged URL could add attributes (script) to the link */
++		fprintf(fp, "<a class=\"url\" rel=\"noreferrer nofollow\" href=\"");
++		om_html_entities_abbr(fp, key2, -1);
++		fprintf(fp, "\">");
+ 		om_html_entities(fp, key2);
+ 		fprintf(fp, "</a>");
+ 	} else {
+@@ -2201,11 +2204,17 @@
+ 	fprintf(fp, "%d", val);
+ 	fprintf(fp, "</td><td align=\"left\" class=\"keyentry\">");
+ 	if (link != NULL) {
+-		fprintf(fp, "<a class=\"url\" href=\"%s\">", link);
++		/* escaped: a quote in a logged URL could add attributes (script) to the link */
++		fprintf(fp, "<a class=\"url\" rel=\"noreferrer nofollow\" href=\"");
++		om_html_entities_abbr(fp, link, -1);
++		fprintf(fp, "\">");
+ 		om_html_entities(fp, key);
+ 		fprintf(fp, "</a>");
+ 	} else if (!strncmp(key, "http://", 7)) {
+-		fprintf(fp, "<a class=\"url\" href=\"%s\">", key);
++		/* escaped: a quote in a logged URL could add attributes (script) to the link */
++		fprintf(fp, "<a class=\"url\" rel=\"noreferrer nofollow\" href=\"");
++		om_html_entities_abbr(fp, key, -1);
++		fprintf(fp, "\">");
+ 		om_html_entities(fp, key);
+ 		fprintf(fp, "</a>");
+ 	} else {
