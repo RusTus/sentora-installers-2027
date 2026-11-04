@@ -118,7 +118,7 @@ fi
 if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
 	if [[ "$VER" = "24.04" || "$VER" = "26.04" ]]; then
 
-		PACKAGE_INSTALLER="apt-get -yqq install"
+		PACKAGE_INSTALLER="apt-get -yqq -o DPkg::Lock::Timeout=1800 install"
 	
 		inst() {
 		   dpkg -l "$1" 2> /dev/null | grep '^ii' &> /dev/null
@@ -129,7 +129,7 @@ if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
 
 	elif [[ "$VER" = "12" ]]; then
 	
-		PACKAGE_INSTALLER="apt-get -yqq install"
+		PACKAGE_INSTALLER="apt-get -yqq -o DPkg::Lock::Timeout=1800 install"
 	
 		inst() {
 		   dpkg -l "$1" 2> /dev/null | grep '^ii' &> /dev/null
@@ -191,12 +191,42 @@ if [ -e "/etc/sentora" ] || [ -e "/etc/zpanel" ] || [ -e "/var/sentora" ] || [ -
 fi
 
 # *************************************************
+#--- The clock must be right: apt refuses package lists "not valid yet" from a
+# server whose clock is behind, and certificates and TOTP codes depend on it too
+if command -v timedatectl > /dev/null 2>&1 && [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ]; then
+    timedatectl set-ntp true > /dev/null 2>&1
+    for _ in $(seq 1 30); do
+        [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" = "yes" ] && break
+        sleep 2
+    done
+fi
+# If time sync can not reach a time server, take the time from the download server
+CLOCK_REF=""
+[ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ] && command -v wget > /dev/null 2>&1 && CLOCK_REF=$(wget -qS --spider --timeout=10 "$SENTORA_DOWNLOAD_URL/$SENTORA_CORE_ZIP" 2>&1 | sed -n 's/^ *Date: *//p' | head -1)
+if [ -n "$CLOCK_REF" ]; then
+    CLOCK_DIFF=$(( $(date -d "$CLOCK_REF" +%s 2> /dev/null || date +%s) - $(date +%s) ))
+    if [ "${CLOCK_DIFF#-}" -gt 300 ]; then
+        echo -e "\e[1;33mThe clock is off by ${CLOCK_DIFF}s compared with $SENTORA_DOWNLOAD_URL: setting it to $CLOCK_REF\e[0m"
+        date -s "$CLOCK_REF" > /dev/null
+        command -v hwclock > /dev/null 2>&1 && hwclock --systohc > /dev/null 2>&1
+    fi
+fi
+if [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ]; then
+    echo -e "\e[1;33mWARNING: this server's clock is not synchronised with a time server.\e[0m"
+    echo "   Point systemd-timesyncd at a reachable time server (/etc/systemd/timesyncd.conf, NTP=...)."
+fi
+
 #--- Prepare or query informations required to install
 
 # Update repositories and Install wget and util used to grab server IP
 echo -e "\n-- Installing wget and dns utils required to manage inputs"
 if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
-    apt-get -yqq update   #ensure we can install
+    # A fresh server runs its automatic updates right after boot and holds the
+    # package lock: wait for it (up to 30 minutes) instead of failing
+    if pgrep -x unattended-upgr > /dev/null 2>&1 || pgrep -f unattended-upgrade > /dev/null 2>&1; then
+        echo "Ubuntu's automatic updates are running; waiting for them to finish..."
+    fi
+    apt-get -yqq -o DPkg::Lock::Timeout=1800 update   #ensure we can install
     if [[ "$VER" = "26.04" ]]; then
         install_available bind9-dnsutils
     else
@@ -685,8 +715,8 @@ fi
 #--- Ensures that all packages are up to date
 echo -e "\n-- Updating+upgrading system, it may take some time..."
 if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
-    apt-get -yqq update
-    apt-get -yqq upgrade
+    apt-get -yqq -o DPkg::Lock::Timeout=1800 update
+    apt-get -yqq -o DPkg::Lock::Timeout=1800 upgrade
 fi
 
 #--- Install utility packages required by the installer and/or Sentora.
@@ -697,6 +727,16 @@ if [[ "$OS" = "Ubuntu" || "$OS" = "debian" ]]; then
         # default sudo-rs of Ubuntu 26.04 is left alone.
         command -v sudo &> /dev/null || install_available sudo
         install_available vim make zip unzip debconf-utils at build-essential bash-completion ca-certificates e2fsprogs
+        # zsudo, mcrypt, Webalizer and Visitors are compiled here: without a compiler
+        # the panel can not reload Apache, so stop with a clear message
+        for tool in cc make unzip zip at; do
+            if ! command -v "$tool" > /dev/null 2>&1; then
+                echo -e "\n\e[1;31mERROR: '$tool' did not install, so the installation can not continue.\e[0m"
+                echo "Check that 'apt-get install build-essential zip unzip at' works on this server"
+                echo "(package lock held? clock wrong? repositories reachable?), then run the installer again."
+                exit 1
+            fi
+        done
     else
         $PACKAGE_INSTALLER sudo vim make zip unzip debconf-utils at build-essential bash-completion ca-certificates e2fslibs
     fi
@@ -1245,6 +1285,16 @@ EOF_UNIT
     systemctl daemon-reload
 fi
 
+#--- Every hosted account runs its PHP as its own Linux user (web<account id>), in
+# its own PHP-FPM pool that the daemon creates; Apache no longer runs PHP itself
+# (no mod_php), so it uses the faster event engine with HTTP/2
+install_available acl
+a2dismod -q "php$PHPVER" > /dev/null 2>&1
+a2dismod -q mpm_prefork > /dev/null 2>&1
+a2enmod -q mpm_event http2 > /dev/null 2>&1
+mkdir -p /var/lib/sentora/accounts
+chmod 700 /var/lib/sentora/accounts
+
 #--- The panel's PHP-FPM pool (PHP $PHPVER, runs as $PANEL_USER)
 echo -e "\n-- Setting up the panel's own PHP-FPM pool"
 install_available php"$PHPVER"-fpm
@@ -1343,22 +1393,20 @@ pid = /run/sentora-php/php$PV-fpm.pid
 error_log = $PANEL_DATA/logs/php$PV-fpm.log
 include = $PP/etc/php-fpm.d/*.conf
 EOF_FPM
-    # One pool for all domains on this version. Processes start on demand, so a
-    # version nobody uses costs only its small master process. Each request gets
-    # the domain's open_basedir, upload and session folders from Apache.
-    cat > "$PP/etc/php-fpm.d/www.conf" <<EOF_POOL
-[www]
-user = $HTTP_USER
-group = $HTTP_GROUP
-listen = /run/sentora-php/php$PV-fpm.sock
-listen.owner = $HTTP_USER
-listen.group = $HTTP_GROUP
-listen.mode = 0660
+    # Accounts get their own pools here (web<id>.conf, written by the daemon).
+    # PHP-FPM needs at least one pool to start, so a version nobody uses yet keeps
+    # this idle one: no one can connect to it (root-only socket), and with
+    # processes started on demand it costs only the small master process.
+    cat > "$PP/etc/php-fpm.d/00-idle.conf" <<EOF_POOL
+[sentora-idle]
+user = nobody
+group = nogroup
+listen = /run/sentora-php/php$PV-idle.sock
+listen.owner = root
+listen.group = root
+listen.mode = 0600
 pm = ondemand
-pm.max_children = 20
-pm.process_idle_timeout = 60s
-pm.max_requests = 500
-security.limit_extensions = .php .phtml .php3
+pm.max_children = 1
 EOF_POOL
 
     cat > "/etc/systemd/system/sentora-php$PV-fpm.service" <<EOF_UNIT
@@ -1611,6 +1659,41 @@ ln -sf $PANEL_CONF/roundcube/sieve_config.inc.php "$RC_PATH/plugins/managesieve/
 ln -sf $PANEL_CONF/roundcube/password_config.inc.php "$RC_PATH/plugins/password/config.inc.php"
 
 ##
+#--- SOGo groupware: webmail, calendars and contacts, with ActiveSync for phones and Outlook
+##
+echo -e "\n-- Installing SOGo groupware with ActiveSync"
+install_available sogo sogo-activesync memcached
+if command -v sogod > /dev/null 2>&1; then
+    sogopassword=$(passwordgen);
+    mysql -u root -p"$mysqlpassword" -e "CREATE DATABASE IF NOT EXISTS sentora_sogo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        mysql -u root -p"$mysqlpassword" -e "CREATE USER IF NOT EXISTS 'sogo'@'$SOGO_HOST' IDENTIFIED BY '$sogopassword'; GRANT ALL PRIVILEGES ON sentora_sogo.* TO 'sogo'@'$SOGO_HOST'"
+    done
+    # SOGo logs in with the panel's mailboxes: a read-only view of them (passwords
+    # are the panel's {PLAIN-MD5} hashes without the prefix)
+    mysql -u root -p"$mysqlpassword" -e "CREATE OR REPLACE SQL SECURITY DEFINER VIEW sentora_postfix.sogo_users AS SELECT username AS c_uid, username AS c_name, SUBSTRING_INDEX(password, '}', -1) AS c_password, COALESCE(NULLIF(name, ''), username) AS c_cn, username AS mail, domain AS c_domain FROM sentora_postfix.mailbox WHERE active = '1'"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        mysql -u root -p"$mysqlpassword" -e "GRANT SELECT ON sentora_postfix.sogo_users TO 'sogo'@'$SOGO_HOST'"
+    done
+    sed -e "s|!SOGO_PASSWORD!|$sogopassword|g" -e "s|!MYSQL_PORT!|3306|g" -e "s|!PANEL_FQDN!|$PANEL_FQDN|" -e "s|!TIMEZONE!|${tz:-UTC}|" \
+        $PANEL_CONF/sogo/sogo.conf > /etc/sogo/sogo.conf
+    chown root:sogo /etc/sogo/sogo.conf
+    chmod 640 /etc/sogo/sogo.conf
+    # SOGo's settings live in Admin > Mail Config; start from this server's time zone
+    $PANEL_PATH/panel/bin/setso --set sogo_timezone "${tz:-UTC}" > /dev/null
+    mkdir -p /var/backups/sogo $PANEL_CONF/sogo
+    chown sogo:sogo /var/backups/sogo
+    # Apache serves /SOGo (web, CalDAV, CardDAV) and /Microsoft-Server-ActiveSync
+    cp $PANEL_CONF/sogo/sogo-apache.conf /etc/apache2/conf-available/sogo.conf
+    a2enmod proxy proxy_http headers rewrite expires > /dev/null
+    a2enconf sogo > /dev/null
+    systemctl enable memcached sogo
+    systemctl restart memcached sogo || echo -e "\e[1;31mWARNING: SOGo did not start.\e[0m"
+else
+    echo -e "\e[1;31mWARNING: SOGo is not available in the repositories, groupware and ActiveSync were skipped.\e[0m"
+fi
+
+##
 #--- Webalizer
 ##
 echo -e "\n-- Configuring Webalizer"
@@ -1688,9 +1771,43 @@ fi
 #--- Resolv.conf deprotect
 [ -L /etc/resolv.conf ] || chattr -f -i /etc/resolv.conf
 
+##
+#--- fail2ban: block addresses that keep guessing passwords
+##
+echo -e "\n-- Installing fail2ban"
+install_available fail2ban python3-systemd
+# The log files the jails read must exist before fail2ban starts
+mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/logs/proftpd" /var/lib/sentora
+touch /var/log/dovecot.log /var/log/dovecot-info.log "$PANEL_DATA/logs/roundcube/errors.log" "$PANEL_DATA/logs/proftpd/auth.log" /var/lib/sentora/sentora-auth.log
+[ -d /var/log/sogo ] && touch /var/log/sogo/sogo.log && chown sogo:sogo /var/log/sogo/sogo.log
+chown "$PANEL_USER:$HTTP_GROUP" "$PANEL_DATA/logs/roundcube/errors.log"
+chown "$PANEL_USER:$PANEL_USER" /var/lib/sentora/sentora-auth.log
+# Logs fail2ban acts on must not be writable by the sites (a forged line could
+# get any address blocked): root's own, the panel's own, or root-only folders
+chown root:root "$PANEL_DATA/logs/proftpd"; chmod 755 "$PANEL_DATA/logs/proftpd"
+cp $PANEL_CONF/fail2ban/filter.d/*.conf /etc/fail2ban/filter.d/
+sed "s|!SERVER_IP!|$PUBLIC_IP|" $PANEL_CONF/fail2ban/sentora.conf > /etc/fail2ban/jail.d/sentora.conf
+if [ -f /var/log/sogo/sogo.log ]; then
+    # SOGo's failed logins (web, CalDAV/CardDAV and ActiveSync), with fail2ban's own filter
+    printf '[sogo-auth]\nenabled = true\nbackend = auto\nport = http,https\nlogpath = /var/log/sogo/sogo.log\n' > /etc/fail2ban/jail.d/sentora-sogo.conf
+fi
+if fail2ban-client -t > /dev/null 2>&1; then
+    systemctl enable fail2ban
+    systemctl restart fail2ban
+else
+    echo -e "\e[1;31mWARNING: the fail2ban configuration did not pass its test, fail2ban was not started.\e[0m"
+    fail2ban-client -t 2>&1 | tail -5
+fi
+
 #--- Lock down files that hold passwords
 # Everything under $PANEL_PATH was made world-writable earlier (chmod -R 777),
 # which included the MySQL root password and the service database passwords.
+# Hosting folders: each account folder is set up by the daemon (owner web<id>,
+# access lists for the panel and Apache, nothing for anyone else); the parent
+# only lets users pass through to their own
+chown root:root "$PANEL_DATA/hostdata"
+chmod 711 "$PANEL_DATA/hostdata"
+
 # The panel's code belongs to root and can not be changed by the panel or the sites
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
@@ -1767,6 +1884,8 @@ echo -e "Restarting Postfix..."
 systemctl restart postfix
 echo -e "Restarting Dovecot..."
 systemctl restart dovecot
+echo -e "Restarting SOGo..."
+systemctl restart sogo 2> /dev/null
 echo -e "Restarting BIND..."
 systemctl restart "$BIND_SERVICE"
 echo -e "Restarting Proftpd..."
@@ -1778,6 +1897,57 @@ systemctl restart atd
 
 echo -e "\n--- Finished Restarting Services...\n"
 
+##
+#--- Matomo web analytics (etc/apps/matomo, in the panel's own PHP pool)
+##
+# Set up with Matomo's own installer pages (driven here, the same steps as in a
+# browser); the Sentora daemon then creates a Matomo site per domain and a
+# view-only Matomo user per account, and imports the access logs every hour.
+MATOMO="$PANEL_PATH/panel/etc/apps/matomo"
+matomopassword=""
+matomoadminpassword=""
+if [ -f "$MATOMO/index.php" ]; then
+    echo -e "\n-- Setting up Matomo"
+    install_available python3
+    matomopassword=$(passwordgen)
+    matomoadminpassword=$(passwordgen)
+    mysql -u root -p"$mysqlpassword" -e "CREATE DATABASE IF NOT EXISTS sentora_matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    for MH in localhost 127.0.0.1; do
+        mysql -u root -p"$mysqlpassword" -e "CREATE USER IF NOT EXISTS 'matomo'@'$MH' IDENTIFIED BY '$matomopassword'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$MH'"
+    done
+    chown -R "$PANEL_USER:$HTTP_GROUP" "$MATOMO/tmp" "$MATOMO/config"
+    grep -q " $PANEL_FQDN" /etc/hosts || echo "127.0.0.1 $PANEL_FQDN" >> /etc/hosts
+    mkdir -p /var/lib/sentora/matomo; chown root:"$PANEL_USER" /var/lib/sentora/matomo; chmod 750 /var/lib/sentora/matomo
+    MI="https://127.0.0.1/etc/apps/matomo/index.php"
+    MC=$(mktemp)
+    mstep() { curl -sk -o /dev/null -w "%{http_code}" -c "$MC" -b "$MC" -H "Host: $PANEL_FQDN" "$@"; }
+    mstep "$MI" > /dev/null
+    mstep "$MI?action=systemCheck" > /dev/null
+    mstep --data-urlencode "password=$matomopassword" -d "host=127.0.0.1&username=matomo&dbname=sentora_matomo&tables_prefix=matomo_&adapter=PDO\MYSQL&schema=Mysql&submit=Next" "$MI?action=databaseSetup" > /dev/null
+    mstep "$MI?action=tablesCreation&module=Installation" > /dev/null
+    mstep --data-urlencode "password=$matomoadminpassword" --data-urlencode "password_bis=$matomoadminpassword" -d "login=sentora_admin&email=postmaster@$PANEL_FQDN&subscribe_newsletter_piwikorg=0&subscribe_newsletter_professionalservices=0&submit=Next" "$MI?action=setupSuperUser&module=Installation" > /dev/null
+    mstep -d "siteName=$PANEL_FQDN&url=https://$PANEL_FQDN&timezone=${tz:-UTC}&ecommerce=0&submit=Next" "$MI?action=firstWebsiteSetup&module=Installation" > /dev/null
+    mstep "$MI?action=trackingCode&module=Installation&site_idSite=1&site_name=$PANEL_FQDN" > /dev/null
+    mstep -d "do_not_track=1&anonymise_ip=1&submit=Continue" "$MI?action=finished&module=Installation&site_idSite=1&site_name=$PANEL_FQDN" > /dev/null
+    rm -f "$MC"
+    if [ -f "$MATOMO/config/config.ini.php" ]; then
+        mconsole() { (cd "$MATOMO" && setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --init-groups --reset-env /usr/bin/php"$PHPVER" console "$@" > /dev/null 2>&1); }
+        mconsole plugin:activate SentoraSync
+        # The panel opens Matomo in a frame; reports are built by the hourly job, not by visitors
+        mconsole config:set --section=General --key=enable_framed_pages --value=1
+        mconsole config:set --section=General --key=enable_browser_archiving_triggering --value=0
+        mconsole config:set --section=General --key=enable_load_data_infile --value=0
+        # No calls home: no marketplace, news feed, update checks, adverts or "what's new" tours
+        mconsole config:set --section=General --key=enable_internet_features --value=0
+        mconsole plugin:deactivate ProfessionalServices Marketplace Tour Feedback
+        chown root:"$PANEL_USER" "$MATOMO/config/config.ini.php"
+        chmod 660 "$MATOMO/config/config.ini.php"
+        echo "Matomo is set up (super user sentora_admin)."
+    else
+        echo -e "\e[1;31mWARNING: Matomo setup did not finish; open https://$PANEL_FQDN/etc/apps/matomo/ to finish it by hand.\e[0m"
+    fi
+fi
+
 #--- Store the passwords for user reference
 {
     echo "Server IP address : $PUBLIC_IP"
@@ -1787,6 +1957,9 @@ echo -e "\n--- Finished Restarting Services...\n"
     echo "MySQL Root Password      : $mysqlpassword"
     echo "MySQL Postfix Password   : $postfixpassword"
     echo "MySQL Roundcube Password : $roundcubepassword"
+    echo "MySQL SOGo Password      : $sogopassword"
+    echo "MySQL Matomo Password    : $matomopassword"
+    echo "Matomo super user        : sentora_admin / $matomoadminpassword"
     echo "MySQL ProFTPd Password   : $proftpdpassword"
 } >> /root/passwords.txt
 chmod 600 /root/passwords.txt
@@ -1805,6 +1978,8 @@ echo ""
 echo " MySQL Root Password      : $mysqlpassword"
 echo " MySQL Postfix Password   : $postfixpassword"
 echo " MySQL Roundcube Password : $roundcubepassword"
+echo " MySQL SOGo Password      : $sogopassword"
+echo " Matomo super user        : sentora_admin / $matomoadminpassword"
 echo " MySQL ProFTPd Password   : $proftpdpassword"
 echo "   (theses passwords are saved in /root/passwords.txt)"
 echo "########################################################"

@@ -40,6 +40,9 @@ Passwords are saved in `/root/passwords.txt`.
   `/etc/sentora/configs/ssl/` (see the README there to replace it)
 * Mail: Postfix (25, 465, 587) and Dovecot (993, 995, 143/110 with STARTTLS,
   4190 ManageSieve), Roundcube webmail with filters and Out of Office
+* Groupware: SOGo 5.12 (Ubuntu package) at /SOGo - webmail, calendars, contacts
+  (CalDAV/CardDAV) and ActiveSync at /Microsoft-Server-ActiveSync for phones and
+  Outlook; users log in with their mailbox address and password
 * DNS: BIND 9.20
 * FTP: ProFTPD with required FTPS (explicit TLS on port 21)
 * Webalizer statistics, built from `preconf/webalizer/` (not packaged on 26.04)
@@ -58,6 +61,10 @@ Passwords are saved in `/root/passwords.txt`.
   domain's owner.
 * Apache Status (Admin > Server Admin, administrators only): Pimped Apache
   Status 2.04.17 reading this server's own /server-status (mod_status).
+* Matomo 5.14 (Advanced > Matomo, etc/apps/matomo): a Matomo site per domain
+  and a view-only Matomo user per account, opened from the panel. Visits come
+  from the access logs (imported hourly) or, per domain, from tracking code.
+  Super user sentora_admin (password in /root/passwords.txt).
 * System Log Viewer (Admin > Server Admin, administrators only): follow the
   panel, Apache, mail, FTP, DNS, PHP-FPM and domain logs live in the browser.
 * Webalizer and Visitor reports are kept in /var/sentora/stats/ (outside the
@@ -73,12 +80,24 @@ Passwords are saved in `/root/passwords.txt`.
   through the PHP-FPM pool `/etc/php/8.5/fpm/pool.d/sentora.conf`. Hosted
   sites run as `www-data`, so a site can not read the panel's database
   password, sessions or configs, change its code, or run `zsudo`.
+* Every hosting account runs its PHP as its own Linux user (web<account id>) in
+  its own PHP-FPM pool, created by the daemon for each PHP version its domains
+  use. Its folder belongs to that user; access lists give the panel read-write
+  and Apache read-only, nobody else anything. FTP logins and cron jobs
+  (/etc/cron.d/sentora-accounts) run as the account's user. Apache has no
+  mod_php and uses the event engine with HTTP/2.
 * `/etc/sentora/panel` and `/etc/sentora/configs` belong to root. The panel
   writes only `etc/tmp`, plus `/var/lib/sentora` (sessions, uploads, cron
   jobs). Repo Browser and Module Admin queue module changes; the root daemon
   makes them within 5 minutes.
 * Logins lock for 15 minutes after 5 wrong passwords for an account or 20 from
   one address. "Remember me" is a random token (stored hashed, replaced on use).
+* Two-factor login (authenticator app codes) is off until Sentora Config >
+  Two-factor login is set to true; each account then turns it on in My Account.
+  If an administrator loses the phone: setso --set twofactor_enabled false
+* fail2ban blocks an address for an hour after 5 failures in 10 minutes on SSH,
+  SMTP login, IMAP/POP3, webmail, FTP or the panel (/etc/fail2ban/jail.d/sentora.conf).
+  Unblock: fail2ban-client set <jail> unbanip <address>
 * `zsudo` runs a fixed list of reloads only, for root and the panel user.
 
 ## Upgrades
