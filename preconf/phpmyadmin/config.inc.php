@@ -8,6 +8,9 @@ $cfg['blowfish_secret'] = 'SENTORA';
 $i = 0;
 $i++;
 $cfg['Servers'][$i]['auth_type'] = 'cookie';
+// Failed logins go to a file only the panel can write; fail2ban (sentora-phpmyadmin
+// jail) blocks addresses that keep guessing
+$cfg['AuthLog'] = '/var/lib/sentora/phpmyadmin-auth.log';
 // localhost connects over the MySQL socket
 $cfg['Servers'][$i]['host'] = 'localhost';
 $cfg['Servers'][$i]['compress'] = false;

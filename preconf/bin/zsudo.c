@@ -13,7 +13,6 @@
  * Accepted:
  *   zsudo service <apache2|httpd> <reload|restart|graceful>
  *   zsudo service <named|bind9> <start|stop|reload|restart>
- *   zsudo crontab -u www-data /var/lib/sentora/crontab-www-data
  *
  * The panel runs as its own user ("sentora"); zsudo is installed root:sentora
  * 4750, so the hosted sites (www-data) can not run it at all.
@@ -45,12 +44,6 @@ int main(int argc, char *argv[])
             || (one_of(argv[2], bind) && one_of(argv[3], bind_act)))) {
         /* Every word is one of the constants above */
         snprintf(cmd, sizeof cmd, "/usr/sbin/service %s %s", argv[2], argv[3]);
-    } else if (argc == 5 && strcmp(argv[1], "crontab") == 0 && strcmp(argv[2], "-u") == 0
-               && strcmp(argv[3], "www-data") == 0
-               && strcmp(argv[4], "/var/lib/sentora/crontab-www-data") == 0) {
-        /* The panel writes the jobs to this file (owned by the panel user, not
-           writable by the sites); root installs it as www-data's crontab */
-        snprintf(cmd, sizeof cmd, "/usr/bin/crontab -u www-data /var/lib/sentora/crontab-www-data");
     } else {
         fprintf(stderr, "zsudo: command not allowed\n");
         return 2;

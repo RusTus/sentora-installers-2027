@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Build an extra PHP version for Sentora on Ubuntu 26.04 (amd64) and package it
-# the way sentora_install-ai.sh expects:
+# the way sentora2027-ub26.04 expects:
 #     sentora-php-<major.minor>-ubuntu26.04-amd64.tar.gz
 #
 # Usage (as root, on an Ubuntu 26.04 machine; a spare VM is best):

@@ -1,106 +1,94 @@
-Sentora installer files for Ubuntu 26.04
-========================================
+# Sentora-2027 installer files
 
-This is a private build of Sentora 2.0.2 for Ubuntu 26.04 (PHP 8.5, MySQL 8.4,
-Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9). It is not the
-upstream Sentora installer and does not download anything from GitHub or
-sentora.org.
+Service configuration, database setup and build sources used by the Sentora-2027 installer for **Ubuntu 26.04**.
 
-## Files
+![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white)
+![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?logo=php&logoColor=white)
+![License](https://img.shields.io/badge/license-GPLv3-blue)
 
-* `sentora_install-ai.sh` - the installer (kept next to these zips)
-* `sentora-core-2_0_2.zip` - the panel, with phpMyAdmin 5.2.3 and Roundcube 1.7.5
-* `sentora-installers-master.zip` - this folder: the `preconf/` configuration files
-* `sentora-php-8.1-ubuntu26.04-amd64.tar.gz` ... `sentora-php-8.4-ubuntu26.04-amd64.tar.gz` -
-  extra PHP versions (PHP-FPM) that domains can choose. Optional: a missing
-  file just means that version is not installed.
+This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04`) downloads it with the panel and copies these files into place. It isn't run on its own.
 
-Both zips are downloaded by the installer from
-`http://hembackup1.hemsaw.local/installers/` (set at the top of the installer).
+> [!NOTE]
+> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9). It downloads nothing from GitHub or sentora.org.
 
-## Install
+## Release files
+
+All of these go in one folder on the download server (`SENTORA_DOWNLOAD_URL` at the top of the installer, by default `http://hembackup1.hemsaw.local/installers`):
+
+| File | What it is |
+| --- | --- |
+| `sentora2027-ub26.04` | The installer |
+| `sentora-core-2027.zip` | The panel, with phpMyAdmin 5.2 and Roundcube 1.7 |
+| `sentora-installers-2027.zip` | This repository |
+| `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions (a missing file means that version is not installed) |
+| `SHA256SUMS` | Checksums, used by `sentora-update` |
+
+To build the zip from a clone:
+
+```bash
+git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
+```
+
+## Installing
 
 On a clean Ubuntu 26.04 server, as root:
 
-```
-bash sentora_install-ai.sh
-```
-
-or unattended:
-
-```
-bash sentora_install-ai.sh -t America/Chicago -d panel.example.com -i public
+```bash
+bash sentora2027-ub26.04
 ```
 
-Passwords are saved in `/root/passwords.txt`.
+Or without questions:
+
+```bash
+bash sentora2027-ub26.04 -t America/Chicago -d panel.example.com -i public
+```
+
+Every generated password is shown at the end and saved in `/root/passwords.txt`.
+
+> [!IMPORTANT]
+> Upgrading an existing Sentora or ZPanel server isn't supported. The installer stops if it finds one. It also stops if the server's clock is more than 2 minutes off.
 
 ## What gets installed
 
-* Panel and webmail over HTTPS (port 80 redirects), self-signed certificate in
-  `/etc/sentora/configs/ssl/` (see the README there to replace it)
-* Mail: Postfix (25, 465, 587) and Dovecot (993, 995, 143/110 with STARTTLS,
-  4190 ManageSieve), Roundcube webmail with filters and Out of Office
-* Groupware: SOGo 5.12 (Ubuntu package) at /SOGo - webmail, calendars, contacts
-  (CalDAV/CardDAV) and ActiveSync at /Microsoft-Server-ActiveSync for phones and
-  Outlook; users log in with their mailbox address and password
-* DNS: BIND 9.20
-* FTP: ProFTPD with required FTPS (explicit TLS on port 21)
-* Webalizer statistics, built from `preconf/webalizer/` (not packaged on 26.04)
-* PHP 8.5 for the panel and by default for every domain; PHP 8.1, 8.2, 8.3 and
-  8.4 (PHP-FPM, in `/opt/sentora-php/`) that each domain or subdomain can choose
-  in the Domains and Sub Domains modules. The admin's PHP Versions module turns
-  each extra version on or off. PHP 8.1 gets no security fixes since 31 Dec
-  2025 and PHP 8.2 none after 31 Dec 2026.
+| Service | Details |
+| --- | --- |
+| Panel and webmail | HTTPS only (port 80 redirects), self-signed certificate in `/etc/sentora/configs/ssl/` until Sencrypt issues a Let's Encrypt one |
+| Mail | Postfix (25, 465, 587), Dovecot (993, 995, and 143/110 with STARTTLS, 4190 ManageSieve), Roundcube with filters and Out of Office, SpamAssassin and ClamAV |
+| Groupware | SOGo 5.12 at `/SOGo`: webmail, calendars and contacts (CalDAV/CardDAV), ActiveSync for phones and Outlook |
+| DNS | BIND 9.20 |
+| FTP | ProFTPD with FTPS required (explicit TLS on port 21) |
+| PHP | 8.5 for the panel and every domain by default; 8.2, 8.3 and 8.4 in `/opt/sentora-php/`, chosen per domain or subdomain |
+| Statistics | Matomo 5 and GoAccess 1.12 (built at install from `preconf/goaccess`); Webalizer and Visitor Stats as add-on packages from the module repository |
+| Protection | fail2ban for SSH, mail, webmail, FTP and the panel (`/etc/fail2ban/jail.d/sentora.conf`) |
 
-* File Manager (File Management): each user's own hosting folder in the
-  browser (upload, edit, zip/unzip). Built on Tiny File Manager, bundled with
-  all its libraries (no CDN), behind the panel login and confined to that
-  user's folder. See modules/file_manager/app/VERSION.
-* Visitor Stats (Advanced): per-domain visitor reports from Visitors 0.7,
-  built from preconf/visitors/ (not packaged on 26.04), shown only to the
-  domain's owner.
-* Apache Status (Admin > Server Admin, administrators only): Pimped Apache
-  Status 2.04.17 reading this server's own /server-status (mod_status).
-* Matomo 5.14 (Advanced > Matomo, etc/apps/matomo): a Matomo site per domain
-  and a view-only Matomo user per account, opened from the panel. Visits come
-  from the access logs (imported hourly) or, per domain, from tracking code.
-  Super user sentora_admin (password in /root/passwords.txt).
-* System Log Viewer (Admin > Server Admin, administrators only): follow the
-  panel, Apache, mail, FTP, DNS, PHP-FPM and domain logs live in the browser.
-* Webalizer and Visitor reports are kept in /var/sentora/stats/ (outside the
-  web root) and shown only to the domain's owner.
-* Repo Browser (Admin > Server Admin): add module repositories and install,
-  update or remove add-on modules with zppy. Modules that ship with the panel
-  are protected. Installing a module runs its code, so only add trusted
-  repositories; the two default sentora.org repositories may be offline.
+> [!WARNING]
+> PHP 8.2 gets no security fixes after 31 December 2026. Move sites to a newer version before then.
 
 ## Security layout
 
-* The panel (with phpMyAdmin and webmail) runs as its own user, `sentora`,
-  through the PHP-FPM pool `/etc/php/8.5/fpm/pool.d/sentora.conf`. Hosted
-  sites run as `www-data`, so a site can not read the panel's database
-  password, sessions or configs, change its code, or run `zsudo`.
-* Every hosting account runs its PHP as its own Linux user (web<account id>) in
-  its own PHP-FPM pool, created by the daemon for each PHP version its domains
-  use. Its folder belongs to that user; access lists give the panel read-write
-  and Apache read-only, nobody else anything. FTP logins and cron jobs
-  (/etc/cron.d/sentora-accounts) run as the account's user. Apache has no
-  mod_php and uses the event engine with HTTP/2.
-* `/etc/sentora/panel` and `/etc/sentora/configs` belong to root. The panel
-  writes only `etc/tmp`, plus `/var/lib/sentora` (sessions, uploads, cron
-  jobs). Repo Browser and Module Admin queue module changes; the root daemon
-  makes them within 5 minutes.
-* Logins lock for 15 minutes after 5 wrong passwords for an account or 20 from
-  one address. "Remember me" is a random token (stored hashed, replaced on use).
-* Two-factor login (authenticator app codes) is off until Sentora Config >
-  Two-factor login is set to true; each account then turns it on in My Account.
-  If an administrator loses the phone: setso --set twofactor_enabled false
-* fail2ban blocks an address for an hour after 5 failures in 10 minutes on SSH,
-  SMTP login, IMAP/POP3, webmail, FTP or the panel (/etc/fail2ban/jail.d/sentora.conf).
-  Unblock: fail2ban-client set <jail> unbanip <address>
-* `zsudo` runs a fixed list of reloads only, for root and the panel user.
+- The panel (with phpMyAdmin and webmail) runs as its own user, `sentora`, in the PHP-FPM pool `/etc/php/8.5/fpm/pool.d/sentora.conf`.
+- Every hosting account runs its PHP as its own Linux user (`web<account id>`) in its own PHP-FPM pool. Its folder belongs to that user; access lists give the panel read-write and Apache read-only, and nobody else anything. FTP logins and cron jobs run as the account's user too.
+- `/etc/sentora/panel` and `/etc/sentora/configs` belong to root. The panel writes only `etc/tmp` and `/var/lib/sentora`; the root daemon applies queued changes within 5 minutes.
+- `zsudo` runs a fixed list of reloads only, for root and the panel user.
+- Logins lock for 15 minutes after 5 wrong passwords for an account, or 20 from one address. Two-factor login is turned on in **Sentora Config**.
 
-## Upgrades
+To unblock an address in fail2ban:
 
-Upgrading an existing Sentora or ZPanel server is not supported. The installer
-stops if it finds one.
+```bash
+fail2ban-client set <jail> unbanip <address>
+```
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `preconf/sentora-install/sql/` | The panel's database (`sentora_core.sql`) and the Postfix and ProFTPD databases |
+| `preconf/apache/`, `postfix/`, `dovecot2/`, `bind/`, `proftpd/`, `sogo/` ... | Configuration templates for each service |
+| `preconf/fail2ban/` | fail2ban jails and filters |
+| `preconf/goaccess/` | GoAccess source, built at install |
+| `preconf/bin/zsudo.c` | `zsudo` source, built at install |
+| `preconf/php-build/` | Scripts to build and update the extra PHP versions |
+
+## License
+
+GNU General Public License v3. See [LICENSE.md](LICENSE.md). Changes from Sentora 2.0.2 are listed in the [change log](CHANGELOG.md). Report problems in the [core repository's issues](https://github.com/RusTus/sentora-core-2027/issues).

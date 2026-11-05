@@ -1,0 +1,6 @@
+GoAccess 1.12 (https://goaccess.io/), built at install by build-goaccess.sh into
+/opt/sentora-goaccess. The Sentora "GoAccess" module (Server Admin) builds its HTML
+reports from the domain and panel access logs every hour. GoAccess runs as its own
+user, sentora-stats, which can read nothing else: the hourly job (root) hands it only
+the new log lines. Query strings are left out of the reports. For the terminal view over SSH:
+  /opt/sentora-goaccess/bin/goaccess /var/sentora/logs/domains/<user>/<domain>-access.log --log-format=COMBINED
