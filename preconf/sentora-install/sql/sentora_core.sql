@@ -441,7 +441,7 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (67,3,'GoAccess',200,'goaccess_stats','user','Web traffic reports from GoAccess for your websites: visitors, pages, referrers, browsers, status codes and more, updated every hour.',NULL,'true',NULL,''),
 (66,3,'Matomo',200,'matomo','user','Detailed website analytics with Matomo: visitors, pages, referrers, search terms, devices and more, from the server logs or from tracking code on your pages.',NULL,'true',NULL,''),
 (65,2,'System Log Viewer',200,'system_logviewer','user','Follow the server\'s log files live in the browser: the panel, Apache, mail, FTP, DNS, PHP and every hosted domain.',NULL,'true',NULL,''),
-(64,2,'Apache Status',200,'apache_status','user','See what Apache is doing right now: load, traffic, workers and every request in progress, sortable and searchable (Pimped Apache Status 2.04).',NULL,'true',NULL,''),
+(64,2,'Apache Status',200,'apache_status','user','See what Apache is doing right now: requests, traffic, response time, workers and connections as they change, every request in progress (sortable and searchable), the busiest URLs, hosts and clients, and the worker scoreboard.',NULL,'true',NULL,''),
 (62,8,'File Manager',200,'file_manager','user','Manage the files in your hosting folder: upload by drag and drop, edit text files, create folders, and zip or unzip archives.',NULL,'true',NULL,''),
 (61,2,'Repo Browser',101,'repo_browser','user','Browse module repositories and install, update or remove add-on modules with zppy.',NULL,'true',NULL,''),
 (60,0,'PHP Versions',200,'php_versions','modadmin','Enable or disable the extra PHP versions that domains and subdomains can choose. The panel always runs on the default PHP.',NULL,'true',NULL,''),
