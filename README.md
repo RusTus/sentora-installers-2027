@@ -9,21 +9,22 @@ Service configuration, database setup and build sources used by the Sentora-2027
 This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04`) downloads it with the panel and copies these files into place. It isn't run on its own.
 
 > [!NOTE]
-> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9). It downloads nothing from GitHub or sentora.org.
+> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9). It downloads from these GitHub releases only, not from sentora.org.
 
 ## Release files
 
-All of these go in one folder on the download server (`SENTORA_DOWNLOAD_URL` at the top of the installer, by default `http://hembackup1.hemsaw.local/installers`):
+The installer downloads from the GitHub releases of both repositories, from the tag set by `SENTORA_RELEASE_TAG` at its top. Both releases use the same tag.
 
-| File | What it is |
-| --- | --- |
-| `sentora2027-ub26.04` | The installer |
-| `sentora-core-2027.zip` | The panel, with phpMyAdmin 5.2 and Roundcube 1.7 |
-| `sentora-installers-2027.zip` | This repository |
-| `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions (a missing file means that version is not installed) |
-| `SHA256SUMS` | Checksums, used by `sentora-update` |
+| Release | File | What it is |
+| --- | --- | --- |
+| [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer |
+| | `sentora-installers-2027.zip` | This repository |
+| | `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions (a missing file means that version is not installed) |
+| [sentora-core-2027](https://github.com/RusTus/sentora-core-2027/releases) | `sentora-core-2027.zip` | The panel, with phpMyAdmin 5.2 and Roundcube 1.7 |
 
-To build the zip from a clone:
+Every download is checked against the SHA-256 GitHub lists for it. To download from your own web server instead, put all the files in one folder and set `SENTORA_DOWNLOAD_URL` at the top of the installer.
+
+To build this repository's zip from a clone:
 
 ```bash
 git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
@@ -34,6 +35,7 @@ git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip mas
 On a clean Ubuntu 26.04 server, as root:
 
 ```bash
+wget https://github.com/RusTus/sentora-installers-2027/releases/download/2025.6/sentora2027-ub26.04
 bash sentora2027-ub26.04
 ```
 
@@ -88,6 +90,7 @@ fail2ban-client set <jail> unbanip <address>
 | `preconf/goaccess/` | GoAccess source, built at install |
 | `preconf/bin/zsudo.c` | `zsudo` source, built at install |
 | `preconf/php-build/` | Scripts to build and update the extra PHP versions |
+| `sentora-repo/` | The add-on module repository (PHP-Adminer, Webalizer Stats, Visitor Stats), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
 
 ## License
 

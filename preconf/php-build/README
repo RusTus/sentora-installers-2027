@@ -1,8 +1,8 @@
-Extra PHP versions (8.1 - 8.4) for Sentora on Ubuntu 26.04
+Extra PHP versions (8.2 - 8.4) for Sentora on Ubuntu 26.04
 ==========================================================
 
-The installer downloads sentora-php-<version>-ubuntu26.04-amd64.tar.gz from
-hembackup1 and installs each in /opt/sentora-php/<version>/ as the service
+The installer downloads sentora-php-<version>-ubuntu26.04-amd64.tar.gz from the
+GitHub release of RusTus/sentora-installers-2027 and installs each in /opt/sentora-php/<version>/ as the service
 sentora-php<version>-fpm. These builds are not updated by apt: when PHP
 publishes a release for one of them (https://www.php.net/releases/), rebuild
 and update it with the two scripts here.
@@ -17,13 +17,15 @@ and update it with the two scripts here.
    runs, and writes sentora-php-8.3-ubuntu26.04-amd64.tar.gz in the current
    folder. Compiling takes 10-30 minutes depending on the machine.
 
-2. Publish: copy the .tar.gz to hembackup1/installers/ (new installs use it).
+2. Publish: attach the .tar.gz to the newest sentora-installers-2027 release on
+   GitHub, replacing the old file (new installs and step 3 use it).
 
 3. Update a running server (as root on that server):
 
        bash update-sentora-php.sh 8.3
 
-   It downloads the bundle from hembackup1, checks the new build runs with the
+   It downloads the bundle from the newest GitHub release (TAG=2025.6 picks
+   one), checks its SHA-256 against the release, checks the new build runs with the
    server's current settings, swaps the program files (keeping etc/: php.ini,
    php-fpm.conf, the pool), restarts sentora-php8.3-fpm, and puts the old
    files back if it does not start. Domains on that version are only offline

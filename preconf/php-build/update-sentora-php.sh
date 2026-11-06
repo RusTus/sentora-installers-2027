@@ -4,13 +4,18 @@
 # made by build-sentora-php.sh. The version's settings (etc/) are kept.
 #
 # Usage, as root on the Sentora server:
-#     bash update-sentora-php.sh 8.3                       # from hembackup1
+#     bash update-sentora-php.sh 8.3                       # newest GitHub release
 #     bash update-sentora-php.sh 8.3 /root/sentora-php-8.3-ubuntu26.04-amd64.tar.gz
+#
+# The bundle comes from the newest release of RusTus/sentora-installers-2027 (pre-
+# releases included; TAG=2025.6 in the environment picks one) and is checked against
+# the SHA-256 GitHub lists for it.
 set -euo pipefail
 
 MM="${1:-}"
 FILE="${2:-}"
-DOWNLOAD_URL="http://hembackup1.hemsaw.local/installers"
+REPO="RusTus/sentora-installers-2027"
+TAG="${TAG:-latest}"
 if [[ ! "$MM" =~ ^8\.[0-9]+$ ]]; then
     echo "Usage: $0 <major.minor, e.g. 8.3> [bundle file]"
     exit 2
@@ -24,7 +29,40 @@ WORK=$(mktemp -d /tmp/sentora-php-update.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 if [ -z "$FILE" ]; then
     FILE="$WORK/$NAME"
-    wget -nv -O "$FILE" "$DOWNLOAD_URL/$NAME"
+    if [ "$TAG" = "latest" ]; then
+        API="https://api.github.com/repos/$REPO/releases?per_page=1"
+    else
+        API="https://api.github.com/repos/$REPO/releases/tags/$TAG"
+    fi
+    # the release's tag and the bundle's SHA-256 (empty when the API does not answer)
+    INFO=$(wget -q -T 20 -O - --header="Accept: application/vnd.github+json" "$API" 2> /dev/null | php -r '
+        $d = json_decode(stream_get_contents(STDIN), true);
+        if (isset($d[0])) { $d = $d[0]; }
+        if (!is_array($d) || empty($d["tag_name"])) { exit(1); }
+        $sum = "-";
+        foreach ((array) ($d["assets"] ?? array()) as $a) {
+            if (($a["name"] ?? "") === $argv[1] && !empty($a["digest"])) { $sum = preg_replace("/^sha256:/", "", $a["digest"]); }
+        }
+        echo $d["tag_name"], " ", $sum;
+    ' "$NAME" 2> /dev/null) || INFO=""
+    RTAG="${INFO%% *}"; WANT="${INFO#* }"
+    if [ -z "$INFO" ]; then
+        RTAG="$TAG"; WANT="-"
+        if [ "$TAG" = "latest" ]; then   # the release feed lists pre-releases too
+            RTAG=$(wget -q -T 20 -O - "https://github.com/$REPO/releases.atom" 2> /dev/null \
+                | grep -o 'releases/tag/[^"<]*' | head -1 | sed 's|releases/tag/||') || true
+            [ -n "$RTAG" ] || { echo "Could not find the newest release of $REPO."; exit 1; }
+        fi
+        echo "GitHub's release API did not answer: the download is not checked."
+    fi
+    echo "Downloading $NAME from release $RTAG of $REPO"
+    wget -q -O "$FILE" "https://github.com/$REPO/releases/download/$RTAG/$NAME" \
+        || { echo "Could not download $NAME from release $RTAG."; exit 1; }
+    if [ "$WANT" != "-" ]; then
+        [ "$(sha256sum "$FILE" | cut -d' ' -f1)" = "$WANT" ] \
+            || { echo "$NAME does not match the SHA-256 GitHub lists for it, nothing changed."; exit 1; }
+        echo "SHA-256 matches the release."
+    fi
 fi
 tar -tzf "$FILE" "opt/sentora-php/$MM/sbin/php-fpm" > /dev/null || { echo "$FILE is not a PHP $MM bundle."; exit 1; }
 

@@ -38,13 +38,21 @@
 SENTORA_INSTALLER_VERSION="2027"
 SENTORA_CORE_VERSION="2027"
 # Time servers this server should use, separated by spaces (for example a server or
-# router on your own network: "hembackup1.hemsaw.local 172.16.1.1"). Empty keeps
+# router on your own network: "ntp.example.lan 192.168.1.1"). Empty keeps
 # Ubuntu's own (ntp.ubuntu.com). The clock must be right before anything is installed.
 SENTORA_NTP_SERVERS=""
 
-# Sentora is downloaded from the internal server instead of GitHub.
-# Change these if the files are renamed or moved.
-SENTORA_DOWNLOAD_URL="http://hembackup1.hemsaw.local/installers"
+# Sentora is downloaded from the GitHub releases of these two repositories. Both need a
+# release with the tag below, holding the files named here (the extra PHP versions are
+# optional). SENTORA_RELEASE_TAG="latest" takes each repository's newest release,
+# pre-releases included.
+SENTORA_GITHUB="https://github.com"
+SENTORA_CORE_REPO="RusTus/sentora-core-2027"
+SENTORA_INSTALLERS_REPO="RusTus/sentora-installers-2027"
+SENTORA_RELEASE_TAG="2025.6"
+# Or download every file from one folder on your own web server instead of GitHub
+# (for example "http://files.example.lan/sentora"). Empty uses GitHub.
+SENTORA_DOWNLOAD_URL=""
 SENTORA_CORE_ZIP="sentora-core-2027.zip"
 SENTORA_INSTALLERS_ZIP="sentora-installers-2027.zip"
 
@@ -207,7 +215,12 @@ ui_exit() {
 trap 'ui_exit' EXIT
 
 #--- Display the 'welcome' splash/user warning info..
-ui_banner "Installer $SENTORA_INSTALLER_VERSION, downloading from $SENTORA_DOWNLOAD_URL"
+if [ -n "$SENTORA_DOWNLOAD_URL" ]; then
+    SENTORA_SOURCE="$SENTORA_DOWNLOAD_URL"
+else
+    SENTORA_SOURCE="GitHub (release $SENTORA_RELEASE_TAG)"
+fi
+ui_banner "Installer $SENTORA_INSTALLER_VERSION, downloading from $SENTORA_SOURCE"
 
 ui_note "Checking that minimal requirements are ok"
 
@@ -407,7 +420,7 @@ clock_from() {
 # installer does not set the clock itself: if it is off, or can not be checked, it stops.
 CLOCK_REF=""
 CLOCK_SRC=""
-for CLOCK_SRC in "http://archive.ubuntu.com/ubuntu/" "$SENTORA_DOWNLOAD_URL/$SENTORA_CORE_ZIP"; do
+for CLOCK_SRC in "http://archive.ubuntu.com/ubuntu/" "${SENTORA_DOWNLOAD_URL:-https://github.com}/"; do
     echo "   checking the time at ${CLOCK_SRC%/*}/"
     CLOCK_REF=$(clock_from "$CLOCK_SRC")
     [ -n "$CLOCK_REF" ] && date -d "$CLOCK_REF" > /dev/null 2>&1 && break
@@ -423,7 +436,7 @@ if [ -z "$CLOCK_REF" ]; then
     echo
     ui_bar "$BG_WARN" "  Stopped: this server's clock could not be checked"
     echo
-    echo "  Neither archive.ubuntu.com nor the download server answered, so this"
+    echo "  Neither archive.ubuntu.com nor the download site answered, so this"
     echo "  server's time ($(date '+%Y-%m-%d %H:%M:%S %Z')) can not be confirmed."
     echo "  Nothing was installed. Check the network, set the right time if needed,"
     echo "  then run the installer again:"
@@ -560,15 +573,84 @@ if [[ -n "$PUBLIC_IP" ]] && ! is_ipv4 "$PUBLIC_IP"; then
 fi
 
 #--- Download and unpack Sentora before asking anything
-# Download $1 from the internal server to $2, retrying a few times.
+# GitHub's release API: the release's tag (for "latest") and each file's SHA-256, so
+# a download is checked against what was uploaded. Without it (no network to
+# api.github.com, or its hourly limit reached) a pinned tag still downloads, unchecked.
+REL_DIR=$(mktemp -d /tmp/sentora-release.XXXXXX)
+release_info() {   # $1 repository: its release's details, saved once
+    local repo="$1" f api
+    f="$REL_DIR/${repo//\//_}.json"
+    if [ ! -e "$f" ]; then
+        if [ "$SENTORA_RELEASE_TAG" = "latest" ]; then
+            api="https://api.github.com/repos/$repo/releases?per_page=1"
+        else
+            api="https://api.github.com/repos/$repo/releases/tags/$SENTORA_RELEASE_TAG"
+        fi
+        # one key per line, whatever the layout of the answer
+        wget -q -T 20 -O - --header="Accept: application/vnd.github+json" "$api" 2> /dev/null \
+            | sed 's/\([,{[]\) *"/\1\n"/g' > "$f" || true
+    fi
+    cat "$f"
+}
+release_tag() {    # $1 repository: the tag to download from
+    local tag
+    if [ "$SENTORA_RELEASE_TAG" != "latest" ]; then
+        echo "$SENTORA_RELEASE_TAG"
+        return
+    fi
+    tag=$(release_info "$1" | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+    if [ -z "$tag" ]; then   # no API: the release feed lists pre-releases too, newest first
+        tag=$(wget -q -T 20 -O - "$SENTORA_GITHUB/$1/releases.atom" 2> /dev/null \
+            | grep -o 'releases/tag/[^"<]*' | head -1 | sed 's|releases/tag/||')
+    fi
+    echo "${tag:-latest}"
+}
+release_digest() { # $1 repository, $2 file: its SHA-256 as GitHub lists it
+    release_info "$1" | awk -v want="$2" '
+        /^ *"name": *"/ { n = $0; sub(/^ *"name": *"/, "", n); sub(/".*/, "", n) }
+        /^ *"digest": *"sha256:/ && n == want { d = $0; sub(/^ *"digest": *"sha256:/, "", d); sub(/".*/, "", d); print d; exit }'
+}
+release_url() {    # $1 file, $2 repository
+    local tag
+    if [ -n "$SENTORA_DOWNLOAD_URL" ]; then
+        echo "$SENTORA_DOWNLOAD_URL/$1"
+        return
+    fi
+    tag=$(release_tag "$2")
+    if [ "$tag" = "latest" ]; then   # no API: GitHub's newest full release
+        echo "$SENTORA_GITHUB/$2/releases/latest/download/$1"
+    else
+        echo "$SENTORA_GITHUB/$2/releases/download/$tag/$1"
+    fi
+}
+
+# Download $1 (a file of the GitHub repository $3) to $2, retrying a few times;
+# checked against GitHub's SHA-256 when the API answered.
 download_file() {
-    local url="$SENTORA_DOWNLOAD_URL/$1" dest="$2" try
+    local url dest="$2" repo="$3" try want="" rc
+    url=$(release_url "$1" "$repo")
+    [ -z "$SENTORA_DOWNLOAD_URL" ] && want=$(release_digest "$repo" "$1")
     for try in 1 2 3; do
         echo "Downloading $url (attempt $try)"
-        if wget -nv -O "$dest" "$url" && [ -s "$dest" ] && { unzip -tq "$dest" > /dev/null 2>&1 || tar -tzf "$dest" > /dev/null 2>&1; }; then
-            return 0
+        # (GitHub sends the file from a signed address: its long query is left out of the log)
+        wget -nv -O "$dest" "$url" > "$REL_DIR/wget.log" 2>&1
+        rc=$?
+        sed 's/?[^ ]*//' "$REL_DIR/wget.log"
+        if [ "$rc" -eq 0 ] && [ -s "$dest" ] \
+           && { unzip -tq "$dest" > /dev/null 2>&1 || tar -tzf "$dest" > /dev/null 2>&1; }; then
+            if [ -z "$want" ]; then
+                [ -z "$SENTORA_DOWNLOAD_URL" ] && echo "(not checked: GitHub's release API did not answer)"
+                return 0
+            fi
+            if [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$want" ]; then
+                echo "SHA-256 matches the release"
+                return 0
+            fi
+            echo "$1 does not match the SHA-256 GitHub lists for it."
+        else
+            echo "Download of $url failed or the file is not a valid zip or tar.gz."
         fi
-        echo "Download of $url failed or the file is not a valid zip or tar.gz."
+        rm -f "$dest"
         sleep 5
     done
     return 1
@@ -593,20 +675,27 @@ stage_zip() {
 
 SRC_STAGE=$(mktemp -d /tmp/sentora-src.XXXXXX)
 
-if ! download_file "$SENTORA_CORE_ZIP" "$SRC_STAGE/$SENTORA_CORE_ZIP" \
+if ! download_file "$SENTORA_CORE_ZIP" "$SRC_STAGE/$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO" \
    || ! stage_zip "$SRC_STAGE/$SENTORA_CORE_ZIP" "dryden" "$SRC_STAGE/core" \
    || [ ! -f "$STAGED_DIR/index.php" ]; then
-    echo "Install failed: could not get the Sentora core from $SENTORA_DOWNLOAD_URL/$SENTORA_CORE_ZIP"
-    echo "Check that hembackup1.hemsaw.local resolves from this server and the file is there."
+    echo "Install failed: could not get the Sentora core:"
+    echo "  $(release_url "$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO")"
+    echo "Check that this server can reach it and that the release holds that file."
     rm -rf "$SRC_STAGE"
     exit 3
 fi
 CORE_DIR="$STAGED_DIR"
+# what sentora-update compares with later (the zip's SHA-256 and the release)
+CORE_SUM=$(sha256sum "$SRC_STAGE/$SENTORA_CORE_ZIP" | cut -d' ' -f1)
+CORE_TAG=""
+[ -z "$SENTORA_DOWNLOAD_URL" ] && CORE_TAG=$(release_tag "$SENTORA_CORE_REPO")
+[ "$CORE_TAG" = "latest" ] && CORE_TAG=""
 
-if ! download_file "$SENTORA_INSTALLERS_ZIP" "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP" \
+if ! download_file "$SENTORA_INSTALLERS_ZIP" "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO" \
    || ! stage_zip "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP" "preconf" "$SRC_STAGE/preconf"; then
-    echo "Install failed: could not get the Sentora configuration files from $SENTORA_DOWNLOAD_URL/$SENTORA_INSTALLERS_ZIP"
-    echo "Check that hembackup1.hemsaw.local resolves from this server and the file is there."
+    echo "Install failed: could not get the Sentora configuration files:"
+    echo "  $(release_url "$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO")"
+    echo "Check that this server can reach it and that the release holds that file."
     rm -rf "$SRC_STAGE"
     exit 3
 fi
@@ -1031,7 +1120,7 @@ done
 # Sentora Core Install (downloaded and unpacked at the start)
 ###
 ui_step "Installing the Sentora core"
-echo "from $SENTORA_DOWNLOAD_URL/$SENTORA_CORE_ZIP"
+echo "from $(release_url "$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO")"
 mkdir -p $PANEL_PATH
 mkdir -p $PANEL_PATH/panel
 mkdir -p $PANEL_DATA
@@ -1093,7 +1182,7 @@ ln -s $PANEL_PATH/panel/bin/setzadmin /usr/bin/setzadmin
 #--- Install Sentora preconfig (downloaded and unpacked at the start)
 #
 ui_step "Installing the Sentora configuration files"
-echo "from $SENTORA_DOWNLOAD_URL/$SENTORA_INSTALLERS_ZIP"
+echo "from $(release_url "$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO")"
 /bin/cp -rf "$PRECONF_DIR/preconf/." $PANEL_CONF
 
 # The staged copies are no longer needed
@@ -1112,6 +1201,15 @@ usermod -a -G "$PANEL_USER,www-data" "$PANEL_USER"
 mkdir -p /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/tmp/phpmyadmin /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
 chown -R "$PANEL_USER:$PANEL_USER" /var/lib/sentora
 chmod 755 /var/lib/sentora
+# sentora-update: this release is the one installed, and updates come from the same place
+echo "$CORE_SUM ${CORE_TAG:+$CORE_TAG, }$(date '+%Y-%m-%d %H:%M') (installed)" > /var/lib/sentora/last-update
+{
+    echo "# sentora-update settings (written by the installer)"
+    echo "REPO=\"$SENTORA_CORE_REPO\""
+    echo "TAG=\"latest\""
+    echo "URL=\"$SENTORA_DOWNLOAD_URL\""
+} > /etc/sentora/update.conf
+chmod 644 /etc/sentora/update.conf
 chmod 700 /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
 
 #--- Prepare zsudo (the panel and daemon use it to reload Apache and run root tasks)
@@ -1642,8 +1740,8 @@ PHP_STAGE=$(mktemp -d /tmp/sentora-php.XXXXXX)
 PHP_INSTALLED=""
 for PV in $PHP_EXTRA_VERSIONS; do
     PHP_TAR="sentora-php-$PV-ubuntu26.04-amd64.tar.gz"
-    if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR"; then
-        echo -e "\e[1;33mPHP $PV skipped: $PHP_TAR is not on $SENTORA_DOWNLOAD_URL\e[0m"
+    if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR" "$SENTORA_INSTALLERS_REPO"; then
+        echo -e "\e[1;33mPHP $PV skipped: $PHP_TAR could not be downloaded\e[0m"
         continue
     fi
     # The archive holds opt/sentora-php/<version>/
@@ -1713,7 +1811,7 @@ EOF_UNIT
     touch "$PANEL_DATA/logs/php$PV-fpm.log"
     PHP_INSTALLED="$PHP_INSTALLED,$PV"
 done
-rm -rf "$PHP_STAGE"
+rm -rf "$PHP_STAGE" "$REL_DIR"
 systemctl daemon-reload
 PHP_INSTALLED="${PHP_INSTALLED#,}"
 for PV in ${PHP_INSTALLED//,/ }; do
@@ -1944,8 +2042,8 @@ else
     echo -e "\e[1;31mWARNING: SOGo is not available in the repositories, groupware and ActiveSync were skipped.\e[0m"
 fi
 
-#--- Webalizer Stats and Visitor Stats are add-on modules now (Repo Browser,
-#    hembackup1.hemsaw.local/sentora-repo): their packages build the programs
+#--- Webalizer Stats and Visitor Stats are add-on modules now (Repo Browser, the
+#    sentora-repo folder of RusTus/sentora-installers-2027): their packages build the programs
 # Statistics reports live outside the web root (GoAccess, and the add-on modules)
 mkdir -p $PANEL_DATA/stats
 chmod 755 $PANEL_DATA/stats
@@ -1980,6 +2078,8 @@ $PANEL_PATH/panel/bin/setso --set apache_changed "true"
 # Server alerts wait until the installer is done (services are still being set up)
 touch /etc/sentora/.installing
 # (its report goes where the scheduled runs put theirs, for sentora-post-install-check)
+# Repo Browser lists the add-on modules from GitHub (not fatal without network)
+php -q $PANEL_PATH/panel/bin/zppy update > /dev/null 2>&1 || true
 php -q $PANEL_PATH/panel/bin/daemon.php > "$PANEL_DATA/logs/daemon-last-run.log" 2>&1
 cat "$PANEL_DATA/logs/daemon-last-run.log"
 
@@ -2265,7 +2365,7 @@ ui_heading "Next"
 echo "  1. Restart the server (below), then wait 5 minutes for the first daemon run."
 echo "  2. Check it:    sentora-post-install-check   then   sentora-smoke-test"
 echo "  3. Add-on modules (Webalizer Stats, Visitor Stats, PHP-Adminer):"
-echo "     Admin > Repo Browser > add hembackup1.hemsaw.local/sentora-repo"
+echo "     Admin > Repo Browser lists them; install the ones you want"
 echo "  4. Later: sentora-update-check (bundled apps) and sentora-update (the panel;"
 echo "     --rollback undoes it); the off-server backup is in Admin > Backup Config."
 

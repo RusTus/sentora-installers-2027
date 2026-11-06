@@ -1,0 +1,6 @@
+# Sentora-2027 add-on modules: one module name per line; each module is <name>.zpp
+# in this folder. Add the repository in Admin > Repo Browser as:
+#   https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo
+PHP-Adminer
+webalizer_stats
+visitor_stats

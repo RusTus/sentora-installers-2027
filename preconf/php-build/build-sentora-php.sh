@@ -8,7 +8,7 @@
 #     bash build-sentora-php.sh 8.3.37                      # downloads from php.net
 #     bash build-sentora-php.sh 8.3.37 php-8.3.37.tar.xz    # uses a file you downloaded
 #
-# Then copy the .tar.gz to hembackup1/installers/ for new installs, or see
+# Then attach the .tar.gz to the sentora-installers-2027 GitHub release for new installs, or see
 # README in this folder to update a running server.
 set -euo pipefail
 
