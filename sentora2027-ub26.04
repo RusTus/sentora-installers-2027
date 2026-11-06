@@ -1152,6 +1152,9 @@ chown -R root:root $PANEL_PATH
 ## Copy the core into place
 # -m: use the install time, so clock differences with the download server do not cause warnings
 tar -C "$CORE_DIR" -cf - . | tar -C "$PANEL_PATH/panel" -xmf -
+# Empty working folders the bundled apps need (git keeps no empty folders, so a core
+# zip built from the repository does not have them)
+mkdir -p "$PANEL_PATH/panel/etc/apps/matomo/tmp" "$PANEL_PATH/panel/etc/apps/phpmyadmin/libraries/cache"
 
 # Remove PHPUnit module test files and files not needed on a server
 rm -rf $PANEL_PATH/panel/modules/*/tests/
@@ -1255,9 +1258,23 @@ old_hostname=$(cat /etc/hostname)
 # In file hostname
 echo "$PANEL_FQDN" > /etc/hostname
 
-# In file hosts
-sed -i "/127.0.1.1[\t ]*$old_hostname/d" /etc/hosts
-sed -i "s|$old_hostname|$PANEL_FQDN|" /etc/hosts
+# In file hosts: the old name becomes the panel's name where it is a whole name on a
+# line (a plain text replace also changed it inside "<old name>.example.com"), and
+# Ubuntu's 127.0.1.1 line for the old name goes
+hosts_has() {   # is $1 a name on an active line of /etc/hosts?
+    awk -v n="$1" '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == n) f = 1 } END { exit !f }' /etc/hosts
+}
+if [ -n "$old_hostname" ] && [ "$old_hostname" != "$PANEL_FQDN" ] && [ "$old_hostname" != "localhost" ]; then
+    awk -v o="$old_hostname" -v n="$PANEL_FQDN" '
+        $1 == "127.0.1.1" && NF == 2 && $2 == o { next }
+        $1 !~ /^#/ {
+            has = 0; for (i = 2; i <= NF; i++) if ($i == n) has = 1
+            line = $1; for (i = 2; i <= NF; i++) if ($i != o) line = line " " $i; else if (!has) { line = line " " n; has = 1 }
+            print line; next
+        }
+        { print }' /etc/hosts > /etc/hosts.sentora-new && cat /etc/hosts.sentora-new > /etc/hosts
+    rm -f /etc/hosts.sentora-new
+fi
 
 # For current session
 hostname "$PANEL_FQDN"
@@ -1272,9 +1289,7 @@ passwordgen() {
 
 # Add first parameter in hosts file as local IP domain
 add_local_domain() {
-    if ! grep -q "127.0.0.1 $1" /etc/hosts; then
-        echo "127.0.0.1 $1" >> /etc/hosts;
-    fi
+    hosts_has "$1" || echo "127.0.0.1 $1" >> /etc/hosts
 }
 #-----------------------------------------------------------
 # Install all softwares and dependencies required by Sentora.
@@ -1906,8 +1921,12 @@ mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value
 # Setup logging directory
 mkdir -p $PANEL_DATA/logs/bind
 touch $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
-chown $BIND_USER $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
-chmod 660 $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+# BIND owns and writes the logs; the panel (in the bind group, see below) reads them.
+# 640 keeps them unreadable to anyone else - the old "Set Permissions" button in
+# DNS Admin used to chmod these 0777, which is why it is gone.
+chown "$BIND_USER":"$BIND_USER" $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+chmod 640 $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+usermod -a -G "$BIND_USER" "$PANEL_USER"
 
 mkdir -p /var/named/dynamic /var/named/data
 touch /var/named/dynamic/managed-keys.bind
@@ -2296,7 +2315,7 @@ if [ -f "$MATOMO/index.php" ]; then
         mysql -u root -p"$mysqlpassword" -e "CREATE USER IF NOT EXISTS 'matomo'@'$MH' IDENTIFIED BY '$matomopassword'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$MH'"
     done
     chown -R "$PANEL_USER:$HTTP_GROUP" "$MATOMO/tmp" "$MATOMO/config"
-    grep -q " $PANEL_FQDN" /etc/hosts || echo "127.0.0.1 $PANEL_FQDN" >> /etc/hosts
+    hosts_has "$PANEL_FQDN" || echo "127.0.0.1 $PANEL_FQDN" >> /etc/hosts
     mkdir -p /var/lib/sentora/matomo; chown root:"$PANEL_USER" /var/lib/sentora/matomo; chmod 750 /var/lib/sentora/matomo
     MI="https://127.0.0.1/etc/apps/matomo/index.php"
     MC=$(mktemp)
