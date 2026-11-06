@@ -216,6 +216,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Custom vhost entries written for mod_php (`php_value`, `php_admin_flag`) are kept but commented out, so they cannot stop Apache.
 - Manage Clients: new clients' hosting folders are created by the root daemon within 5 minutes (the panel can no longer write to the hosting folder's parent), so creating a client no longer half-fails; the duplicate-email check now ignores letter case.
 - HTTPS for a domain without a working certificate (SSL not set up, or failed) now answers 404 instead of showing the panel's login page under the customer's domain.
+- Theme and module files (styles, scripts, images) are sent with `Cache-Control: no-cache`: browsers keep them but check for a newer copy on each use, so after an update nobody is left with old styles (mod_headers is now always enabled).
 - Themes (Modern, Kerf): full-width layout; the content area grows and shrinks with the browser window instead of stopping at a fixed width.
 - The panel also answers on the server's own IP addresses (https://&lt;server IP&gt;), so it can be opened by IP as well as by name; other unknown names still get 404.
 - The installer's self-signed certificate is a proper server certificate (not marked as a CA) and includes the server's IP addresses.

@@ -1514,6 +1514,8 @@ HTTP_SERVICE="apache2"
 HTTP_USER="www-data"
 HTTP_GROUP="www-data"
 a2enmod rewrite
+# mod_headers: the panel tells browsers to revalidate theme and module files
+a2enmod -q headers > /dev/null 2>&1
 # mod_lua: sentora-guard.lua checks what a hosted site's request may be handed to
 a2enmod -q lua > /dev/null 2>&1
 
