@@ -2013,13 +2013,6 @@ ln -sf $PANEL_CONF/phpmyadmin/config.inc.php $PANEL_PATH/panel/etc/apps/phpmyadm
 rm -rf $PANEL_PATH/panel/etc/apps/phpmyadmin/setup
 
 ##
-#--- PHPsysinfo
-##
-ui_step "Configuring phpSysInfo"
-# Setup config file
-mv -f /etc/sentora/panel/etc/apps/phpsysinfo/phpsysinfo.ini.new /etc/sentora/panel/etc/apps/phpsysinfo/phpsysinfo.ini
-
-##
 #--- Roundcube 1.7 (webmail)
 ##
 ui_step "Configuring Roundcube"

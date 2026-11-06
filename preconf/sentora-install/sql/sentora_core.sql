@@ -428,7 +428,6 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (19,7,'Manage Clients',200,'manage_clients','user','The account manager enables you to view, update and create client accounts.',NULL,'true',NULL,''),
 (20,7,'Package Manager',200,'packages','user','Welcome to the Package Manager, using this module enables you to create and manage existing reseller packages on your Sentora hosting account.',NULL,'true',NULL,''),
 (22,3,'Cron Manager',200,'cron','user','Here you can configure PHP scripts to run automatically at different time intervals.',NULL,'true',NULL,''),
-(23,2,'phpSysInfo',200,'phpsysinfo','user','phpSysInfo is a web-based server hardware monitoring tool which enables you to see detailed hardware statistics of your server.',NULL,'true',NULL,''),
 (24,4,'MySQL Database',200,'mysql_databases','user','MySQL&reg; databases are used by many PHP applications such as forums and ecommerce systems, below you can manage and create MySQL&reg; databases.',NULL,'true',NULL,''),
 (25,1,'Usage Viewer',200,'usage_viewer','user','The account usage screen enables you to see exactly what you are currently using on your hosting package.',NULL,'true',NULL,''),
 (26,8,'FTP Accounts',200,'ftp_management','user','Using this module you can create FTP accounts which will enable you and any other accounts you create to have the ability to upload and manage files on your hosting space.',NULL,'true',NULL,''),
@@ -562,7 +561,7 @@ insert  into `x_permissions` (`pe_id_pk`,`pe_group_fk`,`pe_module_fk`) values
 
 (42,1,19), (43,2,19), (44,1,31), (45,2,31), (46,1,9),  (47,2,9),  (48,3,9),  (49,1,24), (50,2,24),
 (51,3,24), (52,1,39), (53,2,39), (54,3,39), (55,1,20), (56,2,20), (57,1,16), (58,2,16), (59,3,16), (60,1,1),
-(61,2,1),  (62,3,1),  (66,1,23), (70,1,14),
+(61,2,1),  (62,3,1),  (70,1,14),
 (71,2,14), (72,3,14), (73,1,3),  (74,2,3),  (75,1,17), (76,2,17), (77,3,17), (78,1,46), (79,2,46), 
 (81,1,25), (82,2,25), (83,3,25), (90,1,4),
 (92,1,48), (93,2,48), (94,3,48), (95,1,49), (98,1,50), (99,2,50), (100,3,50),
