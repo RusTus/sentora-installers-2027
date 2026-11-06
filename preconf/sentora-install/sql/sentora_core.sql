@@ -463,7 +463,7 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 
 
 (49,2,'AutoIP Updater',102,'autoip','user','Automatically update your control panel IP address.',1701028845,'true',NULL,''),
-(50,3,'View Logs',101,'user_logviewer','user','Allows user to view several logs of their sites',1701028845,'true',NULL,'http://zppy-repo.mach-hosting.com/repo/user_logviewer.xml'),
+(50,3,'View Logs',101,'user_logviewer','user','Follow your websites'' error and access logs live, and download them.',1701028845,'true',NULL,''),
 (51,5,'Sencrypt SSL',201,'sencrypt','user','Add or remove Let\'s Encrypt SSL certificates for your domains and sub domains',1701028845,'true',NULL,'http://zppy-repo.mach-hosting.com/testing/sencrypt.zpp');
 
 /*Table structure for table `x_mysql_databases` */
