@@ -826,11 +826,19 @@ if [[ "$PANEL_FQDN" == "" ]] ; then
     echo ' 2) The public IP of the server.'
     echo ''
 
-    PANEL_FQDN="$(/bin/hostname)"
+    # Default the panel sub-domain to "sentora" under this server's own domain
+    # (for example sentora.example.com), falling back to just "sentora" when the
+    # server has no domain part set.
+    host_domain="$(/bin/hostname -d 2> /dev/null)"
+    if [[ -n "$host_domain" ]]; then
+        PANEL_FQDN="sentora.$host_domain"
+    else
+        PANEL_FQDN="sentora"
+    fi
     PUBLIC_IP=$extern_ip
     while true; do
         echo ""
-        ui_ask "The sub-domain for the Sentora panel (for example panel.example.com):" "$PANEL_FQDN" PANEL_FQDN
+        ui_ask "The sub-domain for the Sentora panel (example: subdomain.yourdomain.org):" "$PANEL_FQDN" PANEL_FQDN
 
         if [[ "$PUBLIC_IP" != "$local_ip" ]]; then
           echo -e "\nThe public IP of the server is $PUBLIC_IP. Its local IP is $local_ip"

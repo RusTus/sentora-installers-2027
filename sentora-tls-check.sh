@@ -14,10 +14,12 @@
 #   <service>.json     the same results in JSON
 #
 # testssl.sh is looked for next to this script, in /opt/testssl, or unpacked from
-# testssl_sh-3_2_5.zip (next to this script, or downloaded from hembackup1).
+# testssl_sh-3_2_5.zip (next to this script, or downloaded from the installers release).
 
 set -u
-TESTSSL_ZIP_URL="http://hembackup1.hemsaw.local/installers/testssl_sh-3_2_5.zip"
+TESTSSL_ZIP_URL="https://github.com/RusTus/sentora-installers-2027/releases/download/current/testssl_sh-3_2_5.zip"
+# SHA-256 of testssl_sh-3_2_5.zip; a download is checked against this before it is used.
+TESTSSL_ZIP_SHA256="79ed1af15dcc0c101f8c7615cce085be1d903cac9c63f15f83a8ce4f412cdbd4"
 TESTSSL_DIR="/opt/testssl"
 
 HOST="${1:-$(hostname -f 2> /dev/null || hostname)}"
@@ -38,6 +40,9 @@ command -v dig > /dev/null || command -v host > /dev/null || need+=(bind9-dnsuti
 command -v ps > /dev/null || need+=(procps)
 command -v openssl > /dev/null || need+=(openssl)
 command -v python3 > /dev/null || need+=(python3)
+# socat lets testssl.sh run its STARTTLS command-injection check (ftp/smtp/submission);
+# without it that check is skipped rather than actually tested.
+command -v socat > /dev/null || need+=(socat)
 if [ ${#need[@]} -gt 0 ]; then
     say "Installing the tools testssl.sh needs: ${need[*]}"
     apt-get -qq update && apt-get -y -qq install "${need[@]}" > /dev/null || die "could not install: ${need[*]}"
@@ -56,8 +61,11 @@ if [ -z "$TESTSSL" ]; then
     if [ -z "$ZIP" ]; then
         say "Downloading testssl.sh from $TESTSSL_ZIP_URL"
         ZIP="$(mktemp --suffix=.zip)"
-        wget -q -O "$ZIP" "$TESTSSL_ZIP_URL" || curl -fsS -o "$ZIP" "$TESTSSL_ZIP_URL" \
-            || die "testssl.sh not found: put testssl_sh-3_2_5.zip next to this script or on hembackup1"
+        wget -q -O "$ZIP" "$TESTSSL_ZIP_URL" || curl -fsSL -o "$ZIP" "$TESTSSL_ZIP_URL" \
+            || die "could not download testssl.sh: put testssl_sh-3_2_5.zip next to this script, or check the installers release at $TESTSSL_ZIP_URL"
+        have="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+        [ "$have" = "$TESTSSL_ZIP_SHA256" ] \
+            || die "testssl.sh download failed its checksum (got $have, expected $TESTSSL_ZIP_SHA256); refusing to use it"
     fi
     if ! command -v unzip > /dev/null; then
         apt-get -qq update && apt-get -y -qq install unzip > /dev/null || die "could not install unzip"
