@@ -162,7 +162,8 @@ Ten modules were added to the core. Most started from older ZPanel add-ons and w
 | Matomo | All | Matomo 5.14.2 | New: see Statistics |
 | Server Monitor | Admin | New | Live dashboard of the server: CPU (overall and per core), load, memory and swap, network and disk traffic, disk space, the busiest processes and whether Sentora's services are running; charts of the last 10 minutes, updated every 1 to 10 seconds; read straight from the kernel, nothing loaded from outside |
 | GoAccess | All (Advanced) | GoAccess 1.12 (built from source) | New: hourly traffic reports with a year of history; each account sees its own domains, administrators also the panel and all domains together; GoAccess runs as its own user (`sentora-stats`) that can read nothing else and is given only the new log lines; query strings (tokens, reset keys) left out; shown sandboxed (no access to the panel, the network or pop-ups); Bright theme by default |
-| Kerf theme | All | New | Optional theme; Sentora_Default stays the default |
+| Modern theme | All | New (replaces Sentora_Default) | The default theme: the original layout in the Server Monitor colours, in two variations, Light and Dark (Theme Manager); dashboard boxes as cards with a coloured top edge, and new module icons (Lucide) tinted to match. sentora-update moves accounts on Sentora_Default to Modern, Light |
+| Kerf theme | All | New | Optional theme |
 
 The Webmail page also gained the SOGo button and ActiveSync setup details, and Mail Config the SOGo settings.
 
@@ -215,7 +216,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Custom vhost entries written for mod_php (`php_value`, `php_admin_flag`) are kept but commented out, so they cannot stop Apache.
 - Manage Clients: new clients' hosting folders are created by the root daemon within 5 minutes (the panel can no longer write to the hosting folder's parent), so creating a client no longer half-fails; the duplicate-email check now ignores letter case.
 - HTTPS for a domain without a working certificate (SSL not set up, or failed) now answers 404 instead of showing the panel's login page under the customer's domain.
-- Themes (Sentora_Default, Kerf): full-width layout; the content area grows and shrinks with the browser window instead of stopping at a fixed width.
+- Themes (Modern, Kerf): full-width layout; the content area grows and shrinks with the browser window instead of stopping at a fixed width.
 - The panel also answers on the server's own IP addresses (https://&lt;server IP&gt;), so it can be opened by IP as well as by name; other unknown names still get 404.
 - The installer's self-signed certificate is a proper server certificate (not marked as a CA) and includes the server's IP addresses.
 - Everything inside an account's folder is owned by the account's own user: new domain folders within 5 minutes, and anything else the panel (File Manager), the daemon or an old install made every hour, so a site's PHP can change permissions on its own files and FTP shows the right owner.
