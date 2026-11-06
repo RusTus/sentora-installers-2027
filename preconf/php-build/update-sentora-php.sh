@@ -4,18 +4,18 @@
 # made by build-sentora-php.sh. The version's settings (etc/) are kept.
 #
 # Usage, as root on the Sentora server:
-#     bash update-sentora-php.sh 8.3                       # newest GitHub release
+#     bash update-sentora-php.sh 8.3                       # from the GitHub release
 #     bash update-sentora-php.sh 8.3 /root/sentora-php-8.3-ubuntu26.04-amd64.tar.gz
 #
-# The bundle comes from the newest release of RusTus/sentora-installers-2027 (pre-
-# releases included; TAG=2025.6 in the environment picks one) and is checked against
-# the SHA-256 GitHub lists for it.
+# The bundle comes from the "current" release of RusTus/sentora-installers-2027
+# (TAG=latest in the environment takes the newest release, TAG=<tag> another one) and
+# is checked against the SHA-256 GitHub lists for it.
 set -euo pipefail
 
 MM="${1:-}"
 FILE="${2:-}"
 REPO="RusTus/sentora-installers-2027"
-TAG="${TAG:-latest}"
+TAG="${TAG:-current}"
 if [[ ! "$MM" =~ ^8\.[0-9]+$ ]]; then
     echo "Usage: $0 <major.minor, e.g. 8.3> [bundle file]"
     exit 2

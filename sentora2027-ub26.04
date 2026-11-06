@@ -42,14 +42,14 @@ SENTORA_CORE_VERSION="2027"
 # Ubuntu's own (ntp.ubuntu.com). The clock must be right before anything is installed.
 SENTORA_NTP_SERVERS=""
 
-# Sentora is downloaded from the GitHub releases of these two repositories. Both need a
-# release with the tag below, holding the files named here (the extra PHP versions are
-# optional). SENTORA_RELEASE_TAG="latest" takes each repository's newest release,
-# pre-releases included.
+# Sentora is downloaded from the GitHub releases of these two repositories. Both have a
+# release with the tag below ("current": a new version replaces its files), holding the
+# files named here (the extra PHP versions are optional). SENTORA_RELEASE_TAG="latest"
+# takes each repository's newest release instead, pre-releases included.
 SENTORA_GITHUB="https://github.com"
 SENTORA_CORE_REPO="RusTus/sentora-core-2027"
 SENTORA_INSTALLERS_REPO="RusTus/sentora-installers-2027"
-SENTORA_RELEASE_TAG="2025.6"
+SENTORA_RELEASE_TAG="current"
 # Or download every file from one folder on your own web server instead of GitHub
 # (for example "http://files.example.lan/sentora"). Empty uses GitHub.
 SENTORA_DOWNLOAD_URL=""
@@ -106,13 +106,28 @@ ui_warn() { printf '  %s%s %s%s\n' "$C_YELLOW" "$UI_WARNSIGN" "$1" "$C_RESET"; }
 ui_err() { printf '  %s%s %s%s\n' "$C_RED$C_BOLD" "$UI_CROSS" "$1" "$C_RESET"; }
 ui_note() { printf '%s-- %s%s\n' "$C_CYAN" "$1" "$C_RESET"; }
 # a question on its own line, answered on a plain input line: ui_ask "Question" default VAR
+# Without a keyboard (input from a file, a script or /dev/null) a question takes its
+# preset answer, if it has one; otherwise the installer stops instead of asking forever.
+ui_no_input() {
+    echo
+    echo "  Stopped: no answer to \"$1\" (no keyboard input). For an install without"
+    echo "  questions, give -t, -d and -i, and set these before running the installer:"
+    echo "    ADMIN_NAME ADMIN_EMAIL ADMIN_PHONE ADMIN_ADDRESS ADMIN_PROVINCE"
+    echo "    ADMIN_POSTALCODE ADMIN_COUNTRY"
+    echo "  for example: ADMIN_NAME='Jo Smith' ADMIN_EMAIL=jo@example.com ... bash $0 ..."
+    exit 1
+}
 ui_ask() {
     printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET"
-    read -r -e -p "  > " -i "$2" "$3"
+    if ! read -r -e -p "  > " -i "$2" "$3"; then
+        [ -n "$2" ] || ui_no_input "$1"
+        printf -v "$3" '%s' "$2"
+        echo "$2"
+    fi
 }
 ui_yesno() { # question -> sets yn
     printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET"
-    read -r -e -p "  (y/n) > " yn
+    read -r -e -p "  (y/n) > " yn || ui_no_input "$1"
 }
 
 # Installation steps: ui_step "Title" ends the step before it (a line with its time
@@ -493,7 +508,7 @@ if printf '%s' "$APT_OUT" | grep -qi "not valid yet\|is in the future"; then
     exit 1
 fi
 install_available bind9-dnsutils
-$PACKAGE_INSTALLER wget unzip
+$PACKAGE_INSTALLER wget unzip iproute2
 
 # Valid dotted IPv4 address?
 is_ipv4() {
@@ -517,7 +532,12 @@ detect_public_ip() {
 }
 
 # First IPv4 address on a real interface (the old command printed one per interface)
-local_ip=$(ip -4 addr show scope global | awk '$1 == "inet" { sub(/\/.*/, "", $2); print $2; exit }')
+local_ip=$(ip -4 addr show scope global 2> /dev/null | awk '$1 == "inet" { sub(/\/.*/, "", $2); print $2; exit }')
+if [[ -z "$local_ip" ]]; then
+    for local_ip in $(hostname -I 2> /dev/null) ""; do
+        [[ "$local_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && break
+    done
+fi
 extern_ip="$(detect_public_ip)"
 [[ -z "$extern_ip" ]] && extern_ip="$local_ip"
 
@@ -542,10 +562,12 @@ while getopts d:i:t: opt; do
       ;;
   i)
       PUBLIC_IP=$OPTARG
-      if [[ "$PUBLIC_IP" == "local" ]] ; then
-          PUBLIC_IP=$local_ip
-      elif [[ "$PUBLIC_IP" == "public" ]] ; then
-          PUBLIC_IP=$extern_ip
+      if [[ "$PUBLIC_IP" == "local" || "$PUBLIC_IP" == "public" ]] ; then
+          if [[ "$PUBLIC_IP" == "local" ]] ; then PUBLIC_IP=$local_ip; else PUBLIC_IP=$extern_ip; fi
+          if [[ -z "$PUBLIC_IP" ]] ; then
+              echo "-i $OPTARG: this server's IPv4 address could not be found. Give it with -i <address>."
+              exit 2
+          fi
       fi
       ;;
   t)
@@ -870,7 +892,7 @@ if [[ "$PANEL_FQDN" == "" ]] ; then
             echo "There are some warnings..."
             echo "Are you really sure that you want to setup Sentora with these parameters?"
             printf '\n  %s%s%s\n' "$C_BOLD$C_YELLOW" "There are warnings above. Install with these settings anyway?" "$C_RESET"
-            read -r -e -p "  (y) install, (n) change the name or IP, (q) quit > " yn
+            read -r -e -p "  (y) install, (n) change the name or IP, (q) quit > " yn || ui_no_input "Install with these settings anyway?"
             case $yn in
                 [Yy]* ) break;;
                 [Nn]* ) continue;;
@@ -1202,11 +1224,11 @@ mkdir -p /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/tmp/php
 chown -R "$PANEL_USER:$PANEL_USER" /var/lib/sentora
 chmod 755 /var/lib/sentora
 # sentora-update: this release is the one installed, and updates come from the same place
-echo "$CORE_SUM ${CORE_TAG:+$CORE_TAG, }$(date '+%Y-%m-%d %H:%M') (installed)" > /var/lib/sentora/last-update
+echo "$CORE_SUM ${CORE_TAG:+$CORE_TAG, }$(date '+%Y-%m-%d %H:%M') by the installer" > /var/lib/sentora/last-update
 {
     echo "# sentora-update settings (written by the installer)"
     echo "REPO=\"$SENTORA_CORE_REPO\""
-    echo "TAG=\"latest\""
+    echo "TAG=\"$SENTORA_RELEASE_TAG\""
     echo "URL=\"$SENTORA_DOWNLOAD_URL\""
 } > /etc/sentora/update.conf
 chmod 644 /etc/sentora/update.conf

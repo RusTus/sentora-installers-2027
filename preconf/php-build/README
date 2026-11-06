@@ -17,15 +17,15 @@ and update it with the two scripts here.
    runs, and writes sentora-php-8.3-ubuntu26.04-amd64.tar.gz in the current
    folder. Compiling takes 10-30 minutes depending on the machine.
 
-2. Publish: attach the .tar.gz to the newest sentora-installers-2027 release on
+2. Publish: attach the .tar.gz to the "current" sentora-installers-2027 release on
    GitHub, replacing the old file (new installs and step 3 use it).
 
 3. Update a running server (as root on that server):
 
        bash update-sentora-php.sh 8.3
 
-   It downloads the bundle from the newest GitHub release (TAG=2025.6 picks
-   one), checks its SHA-256 against the release, checks the new build runs with the
+   It downloads the bundle from the "current" GitHub release (TAG=<tag> picks
+   another), checks its SHA-256 against the release, checks the new build runs with the
    server's current settings, swaps the program files (keeping etc/: php.ini,
    php-fpm.conf, the pool), restarts sentora-php8.3-fpm, and puts the old
    files back if it does not start. Domains on that version are only offline

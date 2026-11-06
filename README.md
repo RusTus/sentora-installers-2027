@@ -13,7 +13,7 @@ This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sent
 
 ## Release files
 
-The installer downloads from the GitHub releases of both repositories, from the tag set by `SENTORA_RELEASE_TAG` at its top. Both releases use the same tag.
+The installer downloads from the GitHub releases of both repositories with the tag set by `SENTORA_RELEASE_TAG` at its top: `current`. A new version replaces the files on the `current` release in both repositories.
 
 | Release | File | What it is |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip mas
 On a clean Ubuntu 26.04 server, as root:
 
 ```bash
-wget https://github.com/RusTus/sentora-installers-2027/releases/download/2025.6/sentora2027-ub26.04
+wget https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-ub26.04
 bash sentora2027-ub26.04
 ```
 
