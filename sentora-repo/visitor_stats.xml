@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
+<updateserver>
+    <latestversion>200</latestversion>
+    <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/visitor_stats.zpp</downloadurl>
+    <name>Visitor Stats</name>
+    <desc>See who has been visiting your websites: visitors per day, pages, referrers, search terms and browsers, made with Visitors 0.7.</desc>
+    <ostype>lin</ostype>
+    <authorname>Sentora for Ubuntu 26.04 (from the ZPanel module by RusTus)</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+</updateserver>

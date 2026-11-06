@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
+<updateserver>
+    <latestversion>630</latestversion>
+    <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/PHP-Adminer.zpp</downloadurl>
+    <name>PHP-Adminer</name>
+    <desc>Manage your MySQL databases in the browser with Adminer: tables, data, SQL queries, import and export. Log in with one of your own MySQL users.</desc>
+    <ostype>lin</ostype>
+    <authorname>Sentora for Ubuntu 26.04 (Adminer 6.3.0 by Jakub Vrana, adminer.org)</authorname>
+    <authoremail></authoremail>
+    <authorurl>https://www.adminer.org/</authorurl>
+</updateserver>
