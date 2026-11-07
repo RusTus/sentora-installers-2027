@@ -94,48 +94,70 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload current ${{ steps.compare.outputs.upload }} --clobber --repo "$GITHUB_REPOSITORY"
 
-      - name: Update the release page (title and text from the repository)
+      - name: Release pages (current, and one release per version)
         env:
           GH_TOKEN: ${{ github.token }}
+          UPLOADED: ${{ steps.compare.outputs.upload }}
         run: |
-          # The title is Sentora-<VERSION> (the core's VERSION file); the text is what's new in this
-          # version (its "- Release <version>:" line in CHANGELOG.md), then README.md, with
-          # links to files in the repository made full GitHub links (relative ones do not work on a
-          # release page). Written on every run, so an edited README shows after the next run.
+          # The version is the core's VERSION file. "What's new" is every line added to CHANGELOG.md since
+          # the previous version (since the commit that added its "- Release <previous>:" line), so the
+          # change log stays one file, written as always. The current release gets the title
+          # Sentora-<VERSION> and What's new above the README; a release per version (tag v<VERSION>) is
+          # made once, with What's new, the whole CHANGELOG.md and a copy of every file of the current
+          # release, so the Releases page lists the versions and their files.
           VERSION=$(wget -q -O - https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/VERSION || true)
           VERSION=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._-')
-          python3 - "$VERSION" "$GITHUB_REPOSITORY" README.md > release-notes.md <<'EOF'
+          [ -n "$VERSION" ] || { echo "No VERSION: release pages left as they are."; exit 0; }
+          PREV=$(grep -oE '^- Release [0-9][0-9.]*' CHANGELOG.md | awk '{print $3}' | sort -uV | awk -v v="$VERSION" '$0 != v' \
+              | { cat; echo "$VERSION"; } | sort -V | awk -v v="$VERSION" '$0 == v {print p; exit} {p = $0}')
+          BASE=""
+          [ -n "$PREV" ] && BASE=$(git log --format=%H -S"- Release $PREV:" -- CHANGELOG.md | tail -1)
+          if [ -n "$BASE" ]; then
+              git diff -U0 "$BASE" HEAD -- CHANGELOG.md | grep -E '^\+[^+]' | sed 's/^+//' > whats-new.md || true
+              echo "What's new in $VERSION: $(wc -l < whats-new.md) change log line(s) since $PREV (${BASE:0:8})"
+          else
+              grep -E "^- Release $VERSION[: ]" CHANGELOG.md > whats-new.md || true
+              echo "No previous version found: What's new is the version's own line"
+          fi
+          python3 - "$VERSION" "$GITHUB_REPOSITORY" whats-new.md > release-notes.md <<'EOF'
           import re, sys
-          version, repo, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+          version, repo, new = sys.argv[1], sys.argv[2], sys.argv[3]
           base = 'https://github.com/' + repo + '/blob/master2027/'
-          def links(text, folder):
+          def links(text):
               def fix(m):
                   bang, label, url = m.group(1), m.group(2), m.group(3)
                   if re.match(r'^([a-z][a-z0-9+.-]*:|#|/)', url, re.I):
                       return m.group(0)
-                  path = url[2:] if url.startswith('./') else url
-                  full = base + folder + path
+                  full = base + (url[2:] if url.startswith('./') else url)
                   return bang + '[' + label + '](' + full + ('?raw=1' if bang else '') + ')'
               return re.sub(r'(!?)\[([^\]]*)\]\(([^)\s]+)\)', fix, text)
-          new = ''
-          for line in open('CHANGELOG.md', encoding='utf-8'):
-              m = re.match(r'^- Release ' + re.escape(version) + r'(?: \([^)]*\))?:\s*(.*)', line)
-              if m:
-                  new = m.group(1).strip()
-                  break
-          out = ['## Sentora-' + version if version else '## Sentora-2027', '']
-          if new:
-              out += [links(new, ''), '']
-          out += ['Every change, with the commands to apply service changes: [CHANGELOG.md](' + base + 'CHANGELOG.md)', '', '---', '']
-          for i, f in enumerate(files):
-              if i:
-                  out += ['', '---', '']
-              folder = f.rsplit('/', 1)[0] + '/' if '/' in f else ''
-              out.append(links(open(f, encoding='utf-8').read().replace('\r\n', '\n').rstrip(), folder))
-          text = '\n'.join(out) + '\n'
+          whats = links(open(new, encoding='utf-8').read().strip())
+          head = ['## What\'s new in Sentora-' + version, '', whats or '(no change log lines)', '',
+                  'Every change, with the commands to apply service changes: [CHANGELOG.md](' + base + 'CHANGELOG.md)', '']
+          open('version-notes.md', 'w', encoding='utf-8').write('\n'.join(head))
+          readme = links(open('README.md', encoding='utf-8').read().replace('\r\n', '\n').rstrip())
+          text = '\n'.join(head + ['---', '', readme]) + '\n'
           if len(text) > 120000:
               sys.exit('The release text is %d characters; GitHub allows 125000.' % len(text))
           sys.stdout.write(text)
           EOF
-          echo "Title: Sentora-$VERSION ($(wc -c < release-notes.md) characters of text)"
-          gh release edit current --repo "$GITHUB_REPOSITORY" --title "Sentora-${VERSION:-2027}" --notes-file release-notes.md
+          gh release edit current --repo "$GITHUB_REPOSITORY" --title "Sentora-$VERSION" --notes-file release-notes.md
+          echo "current: Sentora-$VERSION ($(wc -c < release-notes.md) characters)"
+
+          # the version's own release: made once; later runs of the same version add the files they changed
+          TAG="v$VERSION"
+          mkdir -p version-files
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              if [ -n "$UPLOADED" ]; then
+                  gh release upload "$TAG" $UPLOADED --clobber --repo "$GITHUB_REPOSITORY"
+                  echo "$TAG: replaced $UPLOADED"
+              else
+                  echo "$TAG: already made, nothing new"
+              fi
+          else
+              gh release download current --repo "$GITHUB_REPOSITORY" -D version-files
+              cp CHANGELOG.md version-files/CHANGELOG.md
+              gh release create "$TAG" version-files/* --repo "$GITHUB_REPOSITORY" --target master2027 \
+                  --title "Sentora-$VERSION" --notes-file version-notes.md
+              echo "$TAG: made, with $(ls version-files | wc -l) files"
+          fi
