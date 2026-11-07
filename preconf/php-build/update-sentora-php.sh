@@ -10,6 +10,8 @@
 # The bundle comes from the "current" release of RusTus/sentora-installers-2027
 # (TAG=latest in the environment takes the newest release, TAG=<tag> another one) and
 # is checked against the SHA-256 GitHub lists for it.
+#
+# Panels from 2027.12 do this with their own command: sentora-php-install 8.3 (it asks first).
 set -euo pipefail
 
 MM="${1:-}"

@@ -22,7 +22,11 @@ and update it with the two scripts here.
 
 3. Update a running server (as root on that server):
 
-       bash update-sentora-php.sh 8.3
+       sentora-php-install 8.3
+
+   (installed with the panel; for a version the server already has, it shows the
+   installed and the new build and asks first; --yes skips the question.
+   update-sentora-php.sh in this folder does the same, for older panels.)
 
    It downloads the bundle from the "current" GitHub release (TAG=<tag> picks
    another), checks its SHA-256 against the release, checks the new build runs with the
