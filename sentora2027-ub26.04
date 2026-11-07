@@ -1137,12 +1137,13 @@ ln -s $PANEL_PATH/panel/bin/setso /usr/bin/setso
 chmod +x $PANEL_PATH/panel/bin/setzadmin
 # Checks run by hand: the bundled apps against their latest releases, and the
 # whole installation (services, jails, ports, permissions, stored passwords, TLS)
-chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain
+chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export
 ln -sf $PANEL_PATH/panel/bin/sentora-web-probe /usr/local/sbin/sentora-web-probe
 # Notices to the panel's accounts from the shell or a script (see ctrl_notices)
 ln -sf $PANEL_PATH/panel/bin/sentora-notice /usr/local/sbin/sentora-notice
 ln -sf $PANEL_PATH/panel/bin/sentora-php-install /usr/local/sbin/sentora-php-install
 ln -sf $PANEL_PATH/panel/bin/sentora-change-domain /usr/local/sbin/sentora-change-domain
+ln -sf $PANEL_PATH/panel/bin/sentora-migrate-import /usr/local/sbin/sentora-migrate-import
 ln -sf $PANEL_PATH/panel/bin/sentora-offsite-backup /usr/local/sbin/sentora-offsite-backup
 ln -sf $PANEL_PATH/panel/bin/sentora-panel-restore /usr/local/sbin/sentora-panel-restore
 # (its nightly job is written by the daemon from Admin > Backup Config > Off-server backup)
@@ -2110,7 +2111,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
