@@ -36,3 +36,27 @@ Security support (PHP project):
    8.2  until 31 Dec 2026
    8.3  until 31 Dec 2027
    8.4  until 31 Dec 2028
+
+PHP 7.1 - only for moving old Sentora 2.0.2 websites
+====================================================
+
+PHP 7.1 has had no security fixes since 1 Dec 2019. It is offered only so that websites
+moved from an old Sentora 2.0.2 server that do not run on PHP 8 yet keep working while
+they are fixed. The installer installs it switched OFF and does not start it; an
+administrator switches it on in PHP Versions for a move (the page asks first), and should
+move each site to PHP 8 and switch 7.1 off again.
+
+Build (as root, on Ubuntu 24.04 or 26.04 amd64):
+
+       bash build-sentora-php71.sh
+
+It builds PHP 7.1.33 (the last 7.1 release) with its own OpenSSL 1.1.1w, curl 7.88.1,
+libxml2 2.9.14 and libmcrypt 2.5.8 compiled in (PHP 7.1 does not build against Ubuntu
+26.04's OpenSSL 3 or libxml2), checks every source against its published checksum, and
+writes sentora-php-7.1-ubuntu26.04-amd64.tar.gz. Attach it to the "current" release like
+the other bundles. Besides the C library it links only zlib, libpng16, libjpeg-turbo,
+freetype, libwebp and gmp, which are the same on Ubuntu 24.04 and 26.04. No intl.
+
+Add it to a server installed before it (as root):
+
+       sentora-php-install 7.1
