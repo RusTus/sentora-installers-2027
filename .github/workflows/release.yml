@@ -1,7 +1,11 @@
-# Builds sentora-installers-2027.zip and the installer sentora2027-ub26.04 from master2027, takes
-# sentora-migrate-export from sentora-core-2027's master2027 (its only copy; the old server wgets it
-# from this release), and replaces the files of the same names on the release tagged "current"
-# (no new release or tag). The PHP bundles are not touched.
+# Builds the files of the installers release and replaces those of the same names on the release
+# tagged "current" (no new release or tag):
+#   from this repository's master2027: sentora-installers-2027.zip, sentora2027-ub26.04 (the
+#     installer), sentora-tls-check.sh
+#   from sentora-core-2027's master2027 (bin/, their only copy): sentora-migrate-export (the old
+#     server wgets it from here), sentora-smoke-test, sentora-web-probe
+# Not touched: the PHP bundles and testssl_sh-3_2_5.zip (uploaded by hand; sentora-tls-check.sh
+# checks the testssl zip against its SHA-256).
 # Run it from Actions > Release > Run workflow.
 #
 # A file is uploaded only when its content differs from the one on the release. git archive stamps
@@ -35,12 +39,15 @@ jobs:
           ref: master2027
           fetch-depth: 0
 
-      - name: Build sentora-installers-2027.zip and sentora2027-ub26.04, fetch sentora-migrate-export
+      - name: Build the files
         run: |
           git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
           git show master2027:sentora2027-ub26.04 > sentora2027-ub26.04
-          wget -nv -O sentora-migrate-export https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/bin/sentora-migrate-export
-          head -1 sentora-migrate-export | grep -qx '#!/bin/bash' || { echo "sentora-migrate-export did not download"; exit 1; }
+          git show master2027:sentora-tls-check.sh > sentora-tls-check.sh
+          for f in sentora-migrate-export sentora-smoke-test sentora-web-probe; do
+            wget -nv -O "$f" "https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/bin/$f"
+            [ "$(head -c 2 "$f")" = '#!' ] || { echo "$f did not download"; exit 1; }
+          done
 
       - name: Compare with the files on the current release
         id: compare
@@ -62,7 +69,7 @@ jobs:
           EOF
           mkdir -p old
           upload=""
-          for f in sentora-installers-2027.zip sentora2027-ub26.04 sentora-migrate-export; do
+          for f in sentora-installers-2027.zip sentora2027-ub26.04 sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             sha256sum "$f"
             if [ "$FORCE" = "true" ]; then
               echo "$f: upload (forced)"; upload="$upload $f"; continue
