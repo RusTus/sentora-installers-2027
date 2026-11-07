@@ -8,14 +8,17 @@
 #
 # PHP 7.1 does not build against Ubuntu 26.04's own OpenSSL 3, libxml2 2.14 or ICU, so this bundle
 # carries its own copies of the libraries that changed (OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14,
-# libmcrypt 2.5.8), compiled in. Besides the C library it only needs libraries whose versions are the
-# same on Ubuntu 24.04 and 26.04 (zlib, libpng16, libjpeg-turbo, freetype, libwebp, gmp), so it can be
-# built on either. No intl extension (it needs an ICU this old PHP can not build against).
+# libmcrypt 2.5.8, OpenLDAP 2.6.10), compiled in. LDAP (sites that log users in against Active
+# Directory, such as Snipe-IT) has its own copy because Ubuntu's libldap uses OpenSSL 3, which can not
+# share a process with the OpenSSL 1.1 compiled in; this one uses GnuTLS for LDAPS. Besides the C
+# library it only needs libraries whose versions are the same on Ubuntu 24.04 and 26.04 (zlib,
+# libpng16, libjpeg-turbo, freetype, libwebp, gmp, GnuTLS 30), so it can be built on either. No intl
+# extension (it needs an ICU this old PHP can not build against).
 #
 # Usage (as root, on Ubuntu 24.04 or 26.04 amd64; a spare VM is best, it installs compilers):
 #     bash build-sentora-php71.sh
-# Every source is checked against its published SHA-256 (curl: its author's signature; libmcrypt,
-# from 2007, only has an MD5). Writes the .tar.gz in the current folder.
+# Every source is checked against its published SHA-256 (OpenLDAP publishes SHA3-512; libmcrypt, from
+# 2007, only has an MD5). Writes the .tar.gz in the current folder.
 set -euo pipefail
 
 V=7.1.33
@@ -31,7 +34,7 @@ fi
 
 if [ "${SKIP_APT:-0}" != "1" ]; then
     apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils perl \
-        libpng-dev libjpeg-dev libfreetype-dev libwebp-dev libgmp-dev zlib1g-dev
+        libpng-dev libjpeg-dev libfreetype-dev libwebp-dev libgmp-dev zlib1g-dev libgnutls28-dev
 fi
 
 WORK=$(mktemp -d /tmp/sentora-php71-build.XXXXXX)
@@ -42,12 +45,13 @@ mkdir -p "$DEPS/lib" "$WORK/src"
 ln -s . "$DEPS/lib/x86_64-linux-gnu"
 J=$(nproc)
 
-# name | URL | sha256 (md5: for libmcrypt)
+# name | URL | sha256 (md5: libmcrypt; sha3-512: OpenLDAP)
 fetch() {
-    local file="$1" url="$2" sum="$3" algo="${4:-sha256}"
+    local file="$1" url="$2" sum="$3" algo="${4:-sha256}" got
     echo "Downloading $file"
     wget -nv -O "$WORK/src/$file" "$url"
-    if [ "$("${algo}sum" "$WORK/src/$file" | cut -d' ' -f1)" != "$sum" ]; then
+    if [ "$algo" = sha3-512 ]; then got=$(openssl dgst -sha3-512 -r "$WORK/src/$file" | cut -d' ' -f1); else got=$("${algo}sum" "$WORK/src/$file" | cut -d' ' -f1); fi
+    if [ "$got" != "$sum" ]; then
         echo "$file does not match its published $algo ($sum). Stopping."
         exit 1
     fi
@@ -57,8 +61,9 @@ fetch openssl-1.1.1w.tar.gz https://www.openssl.org/source/openssl-1.1.1w.tar.gz
 fetch curl-7.88.1.tar.xz https://curl.se/download/curl-7.88.1.tar.xz 1dae31b2a7c1fe269de99c0c31bb488346aab3459b5ffca909d6938249ae415f
 fetch libxml2-2.9.14.tar.xz https://download.gnome.org/sources/libxml2/2.9/libxml2-2.9.14.tar.xz 60d74a257d1ccec0475e749cba2f21559e48139efba6ff28224357c7c798dfee
 fetch libmcrypt-2.5.8.tar.gz https://downloads.sourceforge.net/project/mcrypt/Libmcrypt/2.5.8/libmcrypt-2.5.8.tar.gz 0821830d930a86a5c69110837c55b7da md5
+fetch openldap-2.6.10.tgz https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.10.tgz 2f87787885410ba2337da7f4201293bd023ad9d34e1e133a5cc1caac4550abd1c1069ddeb3605aac99f3c7bcc9d9b69d6be87e2b722097d018613e698d76efde sha3-512
 cd "$WORK/src"
-for f in *.tar.*; do tar -xf "$f"; done
+for f in *.tar.* *.tgz; do tar -xf "$f"; done
 
 step() { echo "$1 (log: $WORK/$2.log)"; }
 fail() { echo "FAILED, the end of $WORK/$1.log:"; tail -30 "$WORK/$1.log"; exit 1; }
@@ -81,8 +86,15 @@ step "Building libxml2 2.9.14" libxml2
     && make -j"$J" && make install ) > "$WORK/libxml2.log" 2>&1 || fail libxml2
 
 step "Building libmcrypt 2.5.8" libmcrypt
-( cd libmcrypt-2.5.8 && CFLAGS="-O2 -fPIC" ./configure --prefix="$DEPS" --disable-shared --enable-static \
+# (written for old C compilers: newer GCC stops on its missing declarations unless told the old C)
+( cd libmcrypt-2.5.8 && CFLAGS="-O2 -fPIC -std=gnu89 -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=incompatible-pointer-types" ./configure --prefix="$DEPS" --disable-shared --enable-static \
     && make -j"$J" && make install ) > "$WORK/libmcrypt.log" 2>&1 || fail libmcrypt
+
+step "Building OpenLDAP 2.6.10 (client library, GnuTLS)" openldap
+( cd openldap-2.6.10 && CFLAGS="-O2 -fPIC" ./configure --prefix="$DEPS" --disable-shared --enable-static --with-pic \
+    --disable-slapd --with-tls=gnutls --without-cyrus-sasl --without-argon2 \
+    && make -j"$J" depend && make -j"$J" -C include && make -j"$J" -C libraries \
+    && make -C include install && make -C libraries install ) > "$WORK/openldap.log" 2>&1 || fail openldap
 
 # PHP 7.1's gd asks <dir>/bin/freetype-config, which freetype stopped shipping: answer from pkg-config
 mkdir -p "$DEPS/freetype/bin"
@@ -99,9 +111,9 @@ chmod 755 "$DEPS/freetype/bin/freetype-config"
 
 step "Configuring PHP $V" configure
 cd "php-$V"
-export CFLAGS="-O2 -g0 -fPIC -fcommon" CXXFLAGS="-O2 -g0 -fPIC"
+export CFLAGS="-O2 -g0 -fPIC -fcommon -std=gnu17 -fpermissive" CXXFLAGS="-O2 -g0 -fPIC"
 # the static OpenSSL needs these at the end of every link
-export LIBS="-ldl -lpthread" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+export LIBS="-ldl -lpthread -lgnutls" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
 ./configure --prefix="$PREFIX" --sysconfdir="$PREFIX/etc" --localstatedir=/var \
     --with-config-file-path="$PREFIX/etc" --with-config-file-scan-dir="$PREFIX/etc/conf.d" \
     --with-libdir=lib/x86_64-linux-gnu \
@@ -109,7 +121,7 @@ export LIBS="-ldl -lpthread" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
     --without-pear --disable-phpdbg \
     --with-openssl="$DEPS" --with-curl="$DEPS" --with-libxml-dir="$DEPS" --with-mcrypt="$DEPS" \
     --with-zlib --with-zlib-dir=/usr --enable-mbstring --enable-bcmath --enable-calendar --enable-exif --enable-ftp \
-    --enable-sockets --enable-soap --with-gettext --with-gmp --with-iconv \
+    --enable-sockets --enable-soap --with-gettext --with-gmp --with-iconv --with-ldap="$DEPS" \
     --with-gd --with-jpeg-dir=/usr --with-png-dir=/usr --with-freetype-dir="$DEPS/freetype" --with-webp-dir=/usr \
     --enable-zip --enable-mysqlnd --with-mysql-sock=/var/run/mysqld/mysqld.sock \
     --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd --with-pdo-sqlite --with-sqlite3 --enable-opcache \
@@ -127,7 +139,7 @@ find "$P/bin" "$P/sbin" "$P/lib/php/extensions" -type f -exec strip --strip-unne
 cat > "$P/BUILD-INFO" <<EOI
 PHP $V for Sentora (amd64) - ONLY for moving old Sentora 2.0.2 websites. No security fixes since 1 Dec 2019.
 Built $(date -u +%Y-%m-%d) on $PRETTY_NAME with build-sentora-php71.sh from php-$V.
-Compiled in: OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14, libmcrypt 2.5.8.
+Compiled in: OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14, libmcrypt 2.5.8, OpenLDAP 2.6.10 (GnuTLS).
 Configure options: see bin/php-config --configure-options
 EOI
 
@@ -135,12 +147,12 @@ EOI
 "$P/sbin/php-fpm" -v | head -1
 MODULES=$("$P/bin/php" -n -m)
 MISSING=""
-for ext in mysqli pdo_mysql mysqlnd gd curl openssl mbstring xml dom simplexml soap zip mcrypt json sockets gmp bcmath; do
+for ext in mysqli pdo_mysql mysqlnd gd curl openssl mbstring xml dom simplexml soap zip mcrypt json sockets gmp bcmath ldap fileinfo; do
     grep -qix "$ext" <<< "$MODULES" || MISSING="$MISSING $ext"
 done
 [ -z "$MISSING" ] || { echo "Missing extensions:$MISSING"; exit 1; }
 LINKED=$(ldd "$P/sbin/php-fpm" | awk '{print $1}' | sort -u | tr '\n' ' ')
-for lib in libssl libcrypto libcurl libxml2 libicu libmcrypt; do
+for lib in libssl libcrypto libcurl libxml2 libicu libmcrypt libldap liblber; do
     case " $LINKED" in *" $lib"*) echo "php-fpm links the system's $lib: it would not run on Ubuntu 26.04. Stopping."; exit 1 ;; esac
 done
 echo "Links: $LINKED"

@@ -33,7 +33,7 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
     apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils python3 \
         libxml2-dev libcurl4-openssl-dev libonig-dev libzip-dev libicu-dev libsodium-dev \
         libargon2-dev libxslt1-dev libpng-dev libjpeg-dev libwebp-dev libfreetype-dev \
-        libssl-dev libsqlite3-dev zlib1g-dev libgmp-dev
+        libssl-dev libsqlite3-dev zlib1g-dev libgmp-dev libldap-dev
 fi
 
 WORK=$(mktemp -d /tmp/sentora-php-build.XXXXXX)
@@ -74,7 +74,8 @@ export CFLAGS="-O2 -g0" CXXFLAGS="-O2 -g0 -std=gnu++17"
     --enable-gd --with-jpeg --with-webp --with-freetype \
     --with-zip --with-sodium --with-password-argon2 --with-xsl \
     --enable-mysqlnd --with-mysql-sock=/var/run/mysqld/mysqld.sock --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd \
-    --with-pdo-sqlite --with-sqlite3 --enable-opcache > "$WORK/configure.log" 2>&1 \
+    --with-pdo-sqlite --with-sqlite3 --enable-opcache \
+    --with-ldap > "$WORK/configure.log" 2>&1 \
     || { tail -25 "$WORK/configure.log"; exit 1; }
 
 echo "Compiling (this takes a while; log: $WORK/make.log)"
@@ -97,7 +98,8 @@ EOI
 # (list read once: "php -m | grep -q" can die of SIGPIPE, which pipefail counts as failure)
 MODULES=$("$P/bin/php" -n -m)
 MISSING=""
-for ext in mysqli pdo_mysql gd curl mbstring intl xml zip sodium; do
+# (ldap: sites that log users in against Active Directory, such as Snipe-IT)
+for ext in mysqli pdo_mysql gd curl mbstring intl xml zip sodium ldap; do
     grep -qx "$ext" <<< "$MODULES" || MISSING="$MISSING $ext"
 done
 [ -z "$MISSING" ] || { echo "Missing extensions:$MISSING"; exit 1; }

@@ -1532,7 +1532,8 @@ a2enmod ssl
 #--- PHP (Ubuntu's own version: the panel's, and the default for hosted sites)
 ##
 ui_step "Installing PHP"
-install_available libapache2-mod-php php-common php-bcmath php-cli php-mysql php-gd php-curl php-pear php-imagick php-xmlrpc php-xml php-intl php-mbstring php-dev php-zip
+# (php-ldap: sites that log users in against Active Directory, such as Snipe-IT)
+install_available libapache2-mod-php php-common php-bcmath php-cli php-mysql php-gd php-curl php-pear php-imagick php-xmlrpc php-xml php-intl php-mbstring php-dev php-zip php-ldap
 PHPVER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
 echo "Detected PHP: $PHPVER"
 if [[ "$PHPVER" != 8.* ]]; then
@@ -1687,7 +1688,7 @@ PHP_MIGRATION_VERSIONS="7.1"
 ui_step "Installing extra PHP versions: $PHP_EXTRA_VERSIONS (and $PHP_MIGRATION_VERSIONS, switched off)"
 # Libraries the builds link against (all part of Ubuntu 26.04)
 install_available libxml2-16 libcurl4t64 libonig5 libzip5 libicu78 libsodium23 libargon2-1 \
-    libxslt1.1 libwebp7 libjpeg-turbo8 libfreetype6 libpng16-16t64 libgmp10 libsqlite3-0 libssl3t64
+    libxslt1.1 libwebp7 libjpeg-turbo8 libfreetype6 libpng16-16t64 libgmp10 libsqlite3-0 libssl3t64 libldap2 libgnutls30t64
 a2enmod proxy_fcgi setenvif > /dev/null
 PHP_STAGE=$(mktemp -d /tmp/sentora-php.XXXXXX)
 PHP_INSTALLED=""
