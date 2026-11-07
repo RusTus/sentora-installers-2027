@@ -218,6 +218,7 @@ ui_exit() {
     local rc=$?
     exec 2> /dev/null   # the installer is ending: bash's own job notices must not reach the log or the screen
     ui_ticker_stop
+    [ -n "${MYSQL_ROOT_CNF:-}" ] && rm -f "$MYSQL_ROOT_CNF"
     if [ -n "${UI_INSTALLING:-}" ] && [ $rc -ne 0 ]; then
         [ $UI_TTY -eq 1 ] && printf '\r\e[K' >&3
         printf '\n' >&3
@@ -239,36 +240,75 @@ ui_banner "Installer $SENTORA_INSTALLER_VERSION, downloading from $SENTORA_SOURC
 
 ui_note "Checking that minimal requirements are ok"
 
-# Ensure the OS is compatible with the launcher
-if [ -f /etc/lsb-release ]; then
-    OS=$(grep DISTRIB_ID /etc/lsb-release | sed 's/^.*=//')
-    VER=$(grep DISTRIB_RELEASE /etc/lsb-release | sed 's/^.*=//')
-elif [ -f /etc/os-release ]; then
-    OS=$(grep -w ID /etc/os-release | sed 's/^.*=//')
-    VER=$(grep VERSION_ID /etc/os-release | sed 's/^.*"\(.*\)"/\1/')
- else
-    OS=$(uname -s)
-    VER=$(uname -r)
-fi
+# Ubuntu 26.04 only: its Dovecot 2.4, PHP 8.5, MySQL 8.4 and BIND 9.20 settings do not work on
+# older releases (the extra PHP versions are built for x86_64)
+OS=$(. /etc/os-release 2> /dev/null && echo "${NAME%% *}")
+VER=$(. /etc/os-release 2> /dev/null && echo "$VERSION_ID")
 ARCH=$(uname -m)
-
-echo "Detected : $OS  $VER  $ARCH"
-
-# This build is made and tested for Ubuntu 26.04 only: its Dovecot 2.4, PHP 8.5,
-# MySQL 8.4 and BIND 9.20 configs do not work on older releases.
-if [[ "$OS" = "Ubuntu" && "$VER" = "26.04" ]] ; then
-    echo "Ok."
-else
-    echo "Sorry, this installer only supports Ubuntu 26.04 (detected: $OS $VER)."
+if [[ "$OS" != "Ubuntu" || "$VER" != "26.04" ]]; then
+    ui_err "This installer is for Ubuntu 26.04 only (this is ${OS:-an unknown system} ${VER})."
     exit 1
 fi
-
-
-# Check if the user is 'root' before allowing installation to commence
-if [ $UID -ne 0 ]; then
-    echo "Install failed: you must be logged in as 'root' to install."
-    echo "Use command 'sudo -i', then enter root password and then try again."
+if [ "$ARCH" != "x86_64" ]; then
+    ui_warn "The extra PHP versions are built for x86_64 only: this $ARCH server gets Ubuntu's PHP alone."
+fi
+if [ "$(id -u)" -ne 0 ]; then
+    ui_err "Run the installer as root: sudo -i, then run it again."
     exit 1
+fi
+ui_ok "Ubuntu $VER $ARCH, as root"
+
+# Valid dotted IPv4 address?
+is_ipv4() {
+    [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+    local o
+    for o in "${BASH_REMATCH[@]:1}"; do (( o <= 255 )) || return 1; done
+}
+
+# Options, read before anything is installed (a wrong one stops here, not after apt)
+#   -d <panel-domain>
+#   -i <server-ip> (or -i local or -i public, see below)
+#   -t <timezone-string>
+# like :
+#   sentora_install.sh -t Europe/Paris -d panel.domain.tld -i xxx.xxx.xxx.xxx
+# notes:
+#   -d and -i must be both present or both absent
+#   -i local  force use of local detected ip
+#   -i public  force use of public detected ip
+#   if -t is used without -d/-i, timezone is set from value given and not asked to user
+#   if -t absent and -d/-i are present, timezone is not set at all
+
+while getopts d:i:t: opt; do
+  case $opt in
+  d)
+      PANEL_FQDN=$OPTARG
+      INSTALL="auto"
+      ;;
+  i)
+      PUBLIC_IP=$OPTARG   # "local" and "public" are resolved once the addresses are known
+      ;;
+  t)
+      tz="$OPTARG"
+      if [ ! -f "/usr/share/zoneinfo/$tz" ]; then
+          echo "-t $tz: not a time zone (for example Europe/Paris, America/New_York or UTC)."
+          exit 2
+      fi
+      ;;
+  *)
+      echo "Usage: $0 [-t <timezone>] [-d <panel domain> -i <ip, local or public>]"
+      echo "  e.g. $0 -t Europe/Paris -d panel.domain.tld -i public"
+      exit 2
+      ;;
+  esac
+done
+if [[ ("$PANEL_FQDN" != "" && "$PUBLIC_IP" == "") || 
+      ("$PANEL_FQDN" == "" && "$PUBLIC_IP" != "") ]] ; then
+    echo "-d and -i must be both present or both absent."
+    exit 2
+fi
+if [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "local" && "$PUBLIC_IP" != "public" ]] && ! is_ipv4 "$PUBLIC_IP"; then
+    echo "-i must be an IPv4 address, 'local' or 'public' (got: '$PUBLIC_IP')."
+    exit 2
 fi
 
 # Check for some common control panels that we know will affect the installation/operating of Sentora.
@@ -338,7 +378,7 @@ install_available() {
         if [ ${#notinstalled[@]} -gt 0 ]; then
             for pkg in "${notinstalled[@]}"; do
                 if ! dpkg-query -W -f='${Status}' "$pkg" 2> /dev/null | grep -q "install ok installed"; then
-                    echo -e "\e[1;31mERROR: package $pkg did not install. Run 'apt-get install $pkg' to see why, then run the installer again.\e[0m"
+                    echo -e "ERROR: package $pkg did not install. Run 'apt-get install $pkg' to see why, then run the installer again."
                 fi
             done
         fi
@@ -530,13 +570,6 @@ fi
 install_available bind9-dnsutils
 $PACKAGE_INSTALLER wget unzip iproute2
 
-# Valid dotted IPv4 address?
-is_ipv4() {
-    [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
-    local o
-    for o in "${BASH_REMATCH[@]:1}"; do (( o <= 255 )) || return 1; done
-}
-
 # Public IP as seen from the internet. api.sentora.org/ip.txt (used before) no
 # longer answers, which left the IP empty and broke BIND's config. Try several
 # services and fall back to the local address when none answer.
@@ -560,59 +593,15 @@ if [[ -z "$local_ip" ]]; then
 fi
 extern_ip="$(detect_public_ip)"
 [[ -z "$extern_ip" ]] && extern_ip="$local_ip"
-
-# Enable parameters to be entered on commandline, required for vagrant install
-#   -d <panel-domain>
-#   -i <server-ip> (or -i local or -i public, see below)
-#   -t <timezone-string>
-# like :
-#   sentora_install.sh -t Europe/Paris -d panel.domain.tld -i xxx.xxx.xxx.xxx
-# notes:
-#   -d and -i must be both present or both absent
-#   -i local  force use of local detected ip
-#   -i public  force use of public detected ip
-#   if -t is used without -d/-i, timezone is set from value given and not asked to user
-#   if -t absent and -d/-i are present, timezone is not set at all
-
-while getopts d:i:t: opt; do
-  case $opt in
-  d)
-      PANEL_FQDN=$OPTARG
-      INSTALL="auto"
-      ;;
-  i)
-      PUBLIC_IP=$OPTARG
-      if [[ "$PUBLIC_IP" == "local" || "$PUBLIC_IP" == "public" ]] ; then
-          if [[ "$PUBLIC_IP" == "local" ]] ; then PUBLIC_IP=$local_ip; else PUBLIC_IP=$extern_ip; fi
-          if [[ -z "$PUBLIC_IP" ]] ; then
-              echo "-i $OPTARG: this server's IPv4 address could not be found. Give it with -i <address>."
-              exit 2
-          fi
-      fi
-      ;;
-  t)
-      tz="$OPTARG"
-      if command -v timedatectl &> /dev/null; then
-          timedatectl set-timezone "$tz" &> /dev/null
-      fi
-      echo "$tz" > /etc/timezone
-      ;;
-  *)
-      echo "Usage: $0 [-t <timezone>] [-d <panel domain> -i <ip, local or public>]"
-      echo "  e.g. $0 -t Europe/Paris -d panel.domain.tld -i public"
-      exit 2
-      ;;
-  esac
-done
-if [[ ("$PANEL_FQDN" != "" && "$PUBLIC_IP" == "") || 
-      ("$PANEL_FQDN" == "" && "$PUBLIC_IP" != "") ]] ; then
-    echo "-d and -i must be both present or both absent."
-    exit 2
+if [[ "$PUBLIC_IP" == "local" || "$PUBLIC_IP" == "public" ]]; then
+    PUBLIC_IP_ASKED="$PUBLIC_IP"
+    if [[ "$PUBLIC_IP" == "local" ]]; then PUBLIC_IP=$local_ip; else PUBLIC_IP=$extern_ip; fi
+    if [[ -z "$PUBLIC_IP" ]]; then
+        echo "-i $PUBLIC_IP_ASKED: this server's IPv4 address could not be found. Give it with -i <address>."
+        exit 2
+    fi
 fi
-if [[ -n "$PUBLIC_IP" ]] && ! is_ipv4 "$PUBLIC_IP"; then
-    echo "-i must be an IPv4 address, 'local' or 'public' (got: '$PUBLIC_IP')."
-    exit 2
-fi
+
 
 #--- Download and unpack Sentora before asking anything
 # GitHub's release API: the release's tag (for "latest") and each file's SHA-256, so
@@ -743,6 +732,9 @@ if ! download_file "$SENTORA_INSTALLERS_ZIP" "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP
 fi
 PRECONF_DIR="$STAGED_DIR"
 
+if [ -n "$tz" ]; then
+    timedatectl set-timezone "$tz" > /dev/null 2>&1 || { ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime && echo "$tz" > /etc/timezone; }
+fi
 if [[ "$tz" == "" && "$PANEL_FQDN" == "" ]] ; then
     # The time zone could not be found out: chosen here from numbered lists (the region,
     # then the city), in the installer's own screen
@@ -830,214 +822,140 @@ if [[ "$tz" == "" && "$PANEL_FQDN" == "" ]] ; then
     ui_ok "Time zone set to $tz ($(date '+%H:%M %Z'))"
     sleep 1
 fi
-# clear timezone information to focus user on important notice
-ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+# A time zone given with -t, or none: the system's own
+[ -n "$tz" ] || tz=$(get_timezone)
+[ -n "$tz" ] || tz=UTC
 
-# Installer parameters
-if [[ "$PANEL_FQDN" == "" ]] ; then
-    ui_heading "Information required to build your server"
-    echo 'The installer requires 2 pieces of information:'
-    echo ' 1) the sub-domain that you want to use to access Sentora panel,'
-    echo '   - do not use your main domain (like domain.com)'
-    echo '   - use a sub-domain, e.g panel.domain.com'
-    echo '   - or use the server hostname, e.g server1.domain.com'
-    echo '   - DNS must already be configured and pointing to the server IP'
-    echo '       for this sub-domain'
-    echo ' 2) The public IP of the server.'
-    echo ''
+# A host name: letters, digits, dots and hyphens (it goes into every service's settings)
+is_hostname() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ && "$1" != *..* && "$1" != *.-* && "$1" != *-.* ]]; }
+is_email() { [[ "$1" =~ ^[^@[:space:]\'\"]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$ ]]; }
 
-    # Default the panel sub-domain to "sentora" under this server's own domain
-    # (for example sentora.example.com), falling back to just "sentora" when the
-    # server has no domain part set.
-    host_domain="$(/bin/hostname -d 2> /dev/null)"
-    if [[ -n "$host_domain" ]]; then
-        PANEL_FQDN="sentora.$host_domain"
-    else
-        PANEL_FQDN="sentora"
-    fi
-    PUBLIC_IP=$extern_ip
+# The panel's address and IP, checked against DNS; warnings are confirmed or changed
+ask_server() {
+    local confirm dns_panel_ip
     while true; do
-        echo ""
-        ui_ask "The sub-domain for the Sentora panel (example: subdomain.yourdomain.org):" "$PANEL_FQDN" PANEL_FQDN
-
-        if [[ "$PUBLIC_IP" != "$local_ip" ]]; then
-          echo -e "\nThe public IP of the server is $PUBLIC_IP. Its local IP is $local_ip"
-          echo "  For a production server, the PUBLIC IP must be used."
-        fi  
-        ui_ask "The public IP address of this server (enter to confirm):" "$PUBLIC_IP" PUBLIC_IP
-        echo ""
-        # An empty or malformed IP breaks BIND, Postfix and the certificate: ask again
+        ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+        ui_heading "The panel's address"
+        echo "  The panel gets a name of its own, for example panel.example.com: a sub-domain"
+        echo "  (not your main domain) or this server's host name. Its DNS A record should"
+        echo "  already point to this server's public IP address: the panel's address and its"
+        echo "  Let's Encrypt certificate need it."
+        ui_ask "The panel's sub-domain (for example panel.example.com):" "$PANEL_FQDN" PANEL_FQDN
+        PANEL_FQDN=$(printf '%s' "$PANEL_FQDN" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        if ! is_hostname "$PANEL_FQDN"; then
+            ui_err "'$PANEL_FQDN' is not a valid name: letters, digits, dots and hyphens only."
+            PANEL_FQDN="sentora${host_domain:+.$host_domain}"
+            sleep 2; continue
+        fi
+        echo
+        if [[ "$extern_ip" != "$local_ip" ]]; then
+            printf '  %sThis server: public IP %s, local IP %s. A server on the internet uses the public one.%s\n' "$C_DIM" "${extern_ip:-unknown}" "${local_ip:-unknown}" "$C_RESET"
+        fi
+        ui_ask "This server's public IP address:" "$PUBLIC_IP" PUBLIC_IP
+        PUBLIC_IP=$(printf '%s' "$PUBLIC_IP" | tr -d '[:space:]')
         if ! is_ipv4 "$PUBLIC_IP"; then
-            echo -e "\e[1;31m'$PUBLIC_IP' is not a valid IPv4 address, please enter it again.\e[0m"
+            ui_err "'$PUBLIC_IP' is not a valid IPv4 address."
             PUBLIC_IP=${extern_ip:-$local_ip}
-            continue
+            sleep 2; continue
         fi
+        echo
 
-        # Checks if the panel domain is a subdomain
-        sub=$(echo "$PANEL_FQDN" | sed -n 's|\(.*\)\..*\..*|\1|p')
-        if [[ "$sub" == "" ]]; then
-            echo -e "\e[1;31mWARNING: $PANEL_FQDN is not a subdomain!\e[0m"
-            confirm="true"
+        # Checks (dig asks DNS itself, it skips /etc/hosts where the installer's own entries go)
+        confirm=""
+        if [[ "$PANEL_FQDN" != *.*.* ]]; then
+            ui_warn "$PANEL_FQDN is not a sub-domain (like panel.example.com)."
+            confirm=1
         fi
-
-        # Checks if the panel domain is already assigned in DNS
-		
-        # Ask DNS directly (dig skips /etc/hosts, where the installer's own entries live).
-        # This used api.sentora.org/hostname.txt, which no longer answers.
-        if command -v dig &> /dev/null; then
+        if command -v dig > /dev/null 2>&1; then
             dns_panel_ip=$(dig +short A "$PANEL_FQDN" 2> /dev/null | grep -E '^[0-9.]+$' | tail -1)
         else
             dns_panel_ip=$(getent ahostsv4 "$PANEL_FQDN" | awk 'NR == 1 {print $1}')
         fi
-		
-        if [[ "$dns_panel_ip" == "" ]]; then
-            echo -e "\e[1;31mWARNING: $PANEL_FQDN is not defined in your DNS!\e[0m"
-            echo "  You must add records in your DNS manager (and then wait until propagation is done)."
-            echo "  Add an A record for $PANEL_FQDN pointing to this server's public address"
-            echo "  (needed for the panel's own address and for Let's Encrypt via Sencrypt)."
-            echo "  If this is a production installation, set the DNS up as soon as possible."
-            confirm="true"
+        if [[ -z "$dns_panel_ip" ]]; then
+            ui_warn "$PANEL_FQDN is not in DNS yet."
+            echo "         Add an A record for it pointing to $PUBLIC_IP (and wait for it to spread)."
+            echo "         The panel can be installed now; set the DNS up as soon as you can."
+            confirm=1
+        elif [[ "$dns_panel_ip" != "$PUBLIC_IP" ]]; then
+            ui_warn "$PANEL_FQDN points to $dns_panel_ip in DNS, not to $PUBLIC_IP."
+            echo "         The panel will not be reachable at https://$PANEL_FQDN until it does."
+            confirm=1
         else
-            echo -e "\e[1;32mOK\e[0m: DNS successfully resolves $PANEL_FQDN to $dns_panel_ip"
-
-            # Check if panel domain matches public IP
-            if [[ "$dns_panel_ip" != "$PUBLIC_IP" ]]; then
-                echo -e -n "\e[1;31mWARNING: $PANEL_FQDN DNS record does not point to $PUBLIC_IP!\e[0m"
-                echo "  Sentora will not be reachable from https://$PANEL_FQDN"
-            fi
+            ui_ok "DNS: $PANEL_FQDN points to $PUBLIC_IP"
         fi
-
-                confirm="true"
         if [[ "$PUBLIC_IP" != "$extern_ip" && "$PUBLIC_IP" != "$local_ip" ]]; then
-            echo -e -n "\e[1;31mWARNING: $PUBLIC_IP does not match detected IP !\e[0m"
-            echo "  Sentora will not work with this IP..."
-                confirm="true"
+            ui_warn "$PUBLIC_IP is not one of this server's addresses (${extern_ip:-?} or ${local_ip:-?})."
+            confirm=1
         fi
-      
-        echo ""
-        # if any warning, ask confirmation to continue or propose to change
-        if [[ "$confirm" != "" ]] ; then
-            echo "There are some warnings..."
-            echo "Are you really sure that you want to setup Sentora with these parameters?"
-            printf '\n  %s%s%s\n' "$C_BOLD$C_YELLOW" "There are warnings above. Install with these settings anyway?" "$C_RESET"
-            read -r -e -p "  (y) install, (n) change the name or IP, (q) quit > " yn || ui_no_input "Install with these settings anyway?"
-            case $yn in
-                [Yy]* ) break;;
-                [Nn]* ) continue;;
-                [Qq]* ) exit;;
-            esac
+        [ -z "$confirm" ] && { sleep 1; return; }
+        printf '\n  %s%s%s\n' "$C_BOLD$C_YELLOW" "There are warnings above. Use these settings anyway?" "$C_RESET"
+        read -r -e -p "  (y) yes, (n) change them, (q) quit > " yn || ui_no_input "Use these settings anyway?"
+        case $yn in
+            [Yy]*) return ;;
+            [Qq]*) echo; exit 0 ;;
+        esac
+    done
+}
+
+# A question that needs an answer: ask_required "Question" VAR [check message]
+ask_required() {
+    while true; do
+        ui_ask "$1" "${!2}" "$2"
+        printf -v "$2" '%s' "$(printf '%s' "${!2}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        if [ -z "${!2}" ]; then
+            [ -t 0 ] || ui_no_input "$1"
+            ui_warn "This one is needed."
+        elif [ -n "${3:-}" ] && ! "$3" "${!2}"; then
+            [ -t 0 ] || ui_no_input "$1"
+            ui_warn "$4"
         else
-            ui_yesno "Everything is ready. Install Sentora now?"
-            case $yn in
-                [Yy]* ) break;;
-                [Nn]* ) exit;;
-            esac
+            return
         fi
     done
+}
+ask_admin() {
+    ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+    ui_heading "About you (the server's administrator)"
+    echo "  Saved in zadmin's profile. Server alerts and root's mail go to the email address."
+    ask_required "Your full name:" ADMIN_NAME
+    ask_required "Your email address (for server alerts):" ADMIN_EMAIL is_email "That is not an email address (like you@example.com)."
+    ask_required "Your phone number:" ADMIN_PHONE
+    ask_required "Your street address:" ADMIN_ADDRESS
+    ask_required "Your city, state or province:" ADMIN_PROVINCE
+    ask_required "Your postal code:" ADMIN_POSTALCODE
+    ask_required "Your country:" ADMIN_COUNTRY
+}
+
+if [[ -z "$PANEL_FQDN" ]]; then
+    # The panel's name defaults to "sentora" under this server's own domain
+    host_domain="$(hostname -d 2> /dev/null)"
+    PANEL_FQDN="sentora${host_domain:+.$host_domain}"
+    PUBLIC_IP=${extern_ip:-$local_ip}
+    while true; do
+        ask_server
+        ask_admin
+        # Everything on one screen before anything is installed
+        ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+        ui_heading "Ready to install"
+        printf '  %-18s %s%s%s\n' "Panel" "$C_BOLD" "https://$PANEL_FQDN" "$C_RESET"
+        printf '  %-18s %s\n' "Server IP" "$PUBLIC_IP"
+        printf '  %-18s %s\n' "Time zone" "$tz"
+        printf '  %-18s %s\n' "Administrator" "$ADMIN_NAME <$ADMIN_EMAIL>"
+        printf '  %-18s %s\n' "Phone" "$ADMIN_PHONE"
+        printf '  %-18s %s\n' "Address" "$ADMIN_ADDRESS, $ADMIN_PROVINCE $ADMIN_POSTALCODE, $ADMIN_COUNTRY"
+        echo
+        printf '  %sThe installation sets up the web, mail, DNS, FTP and database servers and takes a while.%s\n' "$C_DIM" "$C_RESET"
+        printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "Install Sentora now?" "$C_RESET"
+        read -r -e -p "  (y) install, (n) change something, (q) quit > " yn || ui_no_input "Install Sentora now?"
+        case $yn in
+            [Yy]*) break ;;
+            [Qq]*) echo; exit 0 ;;
+        esac
+    done
+else
+    # -d and -i given: only the administrator's details are asked (or taken from ADMIN_*)
+    ask_admin
 fi
-
-# ***************************************
-# Installation really starts here
-
-echo -e "\n# -------------------------------------------------------------------------------"
-
-#--- Setup Sentora Admin contact info
-
-echo -e "\n--- Please Enter vaild contact info for the Sentora system admin or owner below:\n"
-
-# Get Admin contact info 
-# ---- Name
-while true
-do
-    ui_ask "Your full name:" "$ADMIN_NAME" ADMIN_NAME
-    echo
-    if [ -n "$ADMIN_NAME" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-# --- Email
-while true
-do
-    ui_ask "Your email address (for server alerts):" "$ADMIN_EMAIL" ADMIN_EMAIL
-    echo
-    if [[ "$ADMIN_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$ ]]
-    then
-        break
-    else
-        echo "Email address $ADMIN_EMAIL is invalid."
-    fi
-done
-
-# ---- Phone Number
-while true
-do
-    ui_ask "Your phone number:" "$ADMIN_PHONE" ADMIN_PHONE
-    echo
-    if [ -n "$ADMIN_PHONE" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-# ---- Address
-while true
-do
-    ui_ask "Your street address:" "$ADMIN_ADDRESS" ADMIN_ADDRESS
-    echo
-    if [ -n "$ADMIN_ADDRESS" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-# ---- Address - City, State or Province
-while true
-do
-    ui_ask "Your city, state or province:" "$ADMIN_PROVINCE" ADMIN_PROVINCE
-    echo
-    if [ -n "$ADMIN_PROVINCE" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-# ---- Address - Postal code
-while true
-do
-    ui_ask "Your postal code:" "$ADMIN_POSTALCODE" ADMIN_POSTALCODE
-    echo
-    if [ -n "$ADMIN_POSTALCODE" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-# ---- Address - Country
-while true
-do
-    ui_ask "Your country:" "$ADMIN_COUNTRY" ADMIN_COUNTRY
-    echo
-    if [ -n "$ADMIN_COUNTRY" ]
-    then
-        break
-    else
-        echo "Entry is Blank. Try again."
-    fi
-done
-
-echo -e "\n# -------------------------------------------------------------------------------\n"
 
 #--- Set custom logging methods so we create a log file in the current working directory.
 # From here the screen shows the steps and a progress bar (file descriptor 3); every
@@ -1159,7 +1077,7 @@ systemctl enable --now apt-daily.timer apt-daily-upgrade.timer > /dev/null 2>&1
 # the panel can not reload Apache, so stop with a clear message
 for tool in cc make unzip zip at; do
     if ! command -v "$tool" > /dev/null 2>&1; then
-        echo -e "\n\e[1;31mERROR: '$tool' did not install, so the installation can not continue.\e[0m"
+        echo -e "\nERROR: '$tool' did not install, so the installation can not continue."
         echo "Check that 'apt-get install build-essential zip unzip at' works on this server"
         echo "(package lock held? clock wrong? repositories reachable?), then run the installer again."
         exit 1
@@ -1278,7 +1196,7 @@ if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c; then
     chmod 4750 $PANEL_PATH/panel/bin/zsudo
     sha256sum $PANEL_PATH/panel/bin/zsudo.c | cut -d' ' -f1 > /etc/sentora/zsudo.sha256
 else
-    echo -e "\n\e[1;31mERROR: zsudo did not compile. Sentora will not be able to reload Apache.\e[0m"
+    echo -e "\nERROR: zsudo did not compile. Sentora will not be able to reload Apache."
     echo "Check $PANEL_PATH/panel/bin/zsudo.c and build-essential, then run:"
     echo "  cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c && chown root:$PANEL_USER $PANEL_PATH/panel/bin/zsudo && chmod 4750 $PANEL_PATH/panel/bin/zsudo"
 fi
@@ -1335,37 +1253,41 @@ export DEBIAN_FRONTEND=noninteractive
 #--- MySQL
 ##
 ui_step "Installing MySQL"
-$PACKAGE_INSTALLER "$DB_PCKG" ######## This isnt right
+$PACKAGE_INSTALLER "$DB_PCKG"
 # /etc/mysql/my.cnf has no [mysqld] section on Ubuntu, the server settings live here
 MY_CNF_PATH="/etc/mysql/mysql.conf.d/mysqld.cnf"
 DB_SERVICE="mysql"
 
 systemctl start "$DB_SERVICE"
 
-# setup mysql root password only if mysqlpassword is empty
-if [ -z "$mysqlpassword" ]; then
-    mysqlpassword=$(passwordgen);
-	# MySQL 8.4+ disables mysql_native_password by default (MySQL 9 removes it).
-	# Use the default caching_sha2_password plugin, PHP mysqlnd supports it.
-	mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '$mysqlpassword';";
-fi
+# MySQL's root password (caching_sha2_password: MySQL 8.4 switches mysql_native_password off,
+# PHP's mysqlnd supports it). Until now root logs in through the socket, as Ubuntu sets it up.
+mysqlpassword=$(passwordgen)
+mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY '$mysqlpassword'"
+# From here root's commands read the password from a file only root can read, not from the
+# command line (where every process list shows it); the file goes when the installer ends
+MYSQL_ROOT_CNF=$(mktemp /root/.sentora-install-mysql.XXXXXX)
+printf '[client]\nuser=root\npassword="%s"\n' "$mysqlpassword" > "$MYSQL_ROOT_CNF"
+sqlroot() { mysql --defaults-extra-file="$MYSQL_ROOT_CNF" "$@"; }
+# a text for an SQL string between single quotes
+sql_str() { printf '%s' "$1" | sed -e "s/\\\\/\\\\\\\\/g" -e "s/'/''/g"; }
 
 # small cleaning of mysql access
-mysql -u root -p"$mysqlpassword" -e "DELETE FROM mysql.user WHERE User='root' AND Host != 'localhost'";
-mysql -u root -p"$mysqlpassword" -e "DELETE FROM mysql.user WHERE User=''";
-mysql -u root -p"$mysqlpassword" -e "FLUSH PRIVILEGES";
+sqlroot -e "DELETE FROM mysql.user WHERE User='root' AND Host != 'localhost'";
+sqlroot -e "DELETE FROM mysql.user WHERE User=''";
+sqlroot -e "FLUSH PRIVILEGES";
 
 # remove test table that is no longer used
-mysql -u root -p"$mysqlpassword" -e "DROP DATABASE IF EXISTS test";
+sqlroot -e "DROP DATABASE IF EXISTS test";
 
 # secure SELECT "hacker-code" INTO OUTFILE 
 sed -i "s|\[mysqld\]|&\nsecure-file-priv = /var/tmp|" $MY_CNF_PATH
 
 # setup sentora access and core database
 sed -i "s|YOUR_ROOT_MYSQL_PASSWORD|$mysqlpassword|" $PANEL_PATH/panel/cnf/db.php
-mysql -u root -p"$mysqlpassword" < $PANEL_CONF/sentora-install/sql/sentora_core.sql
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_core.sql
 # Snuffleupagus/Suhosin is not used, remove its settings from the panel
-mysql -u root -p"$mysqlpassword" -e "DELETE FROM sentora_core.x_settings WHERE so_name_vc IN ('use_suhosin','suhosin_value')"
+sqlroot -e "DELETE FROM sentora_core.x_settings WHERE so_name_vc IN ('use_suhosin','suhosin_value')"
 # Register mysql/mariadb service for autostart
 
 # MySQL listens on this server only, for both its protocols (3306 and the X protocol
@@ -1407,8 +1329,8 @@ chmod 600 "$SSL_DIR/sentora.key"
 chmod 644 "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
 
 # Serve the panel (and webmail) over HTTPS; the daemon adds an http:// redirect
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='443' WHERE so_name_vc='sentora_port'"
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='SSLEngine On\nSSLCertificateFile $SSL_DIR/sentora.crt\nSSLCertificateKeyFile $SSL_DIR/sentora.key' WHERE so_name_vc='panel_ssl_tx'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='443' WHERE so_name_vc='sentora_port'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='SSLEngine On\nSSLCertificateFile $SSL_DIR/sentora.crt\nSSLCertificateKeyFile $SSL_DIR/sentora.key' WHERE so_name_vc='panel_ssl_tx'"
 
 ##
 #--- Postfix
@@ -1422,11 +1344,11 @@ $PACKAGE_INSTALLER postfix postfix-mysql
 USR_LIB_PATH="/usr/lib"
 
 postfixpassword=$(passwordgen);
-mysql -u root -p"$mysqlpassword" < $PANEL_CONF/sentora-install/sql/sentora_postfix.sql
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_postfix.sql
 
 # Add User for Postfix DB (MySQL 8.4 default plugin caching_sha2_password)
-mysql -u root -p"$mysqlpassword" -e "CREATE USER postfix@localhost IDENTIFIED BY '$postfixpassword';";
-mysql -u root -p"$mysqlpassword" -e "GRANT ALL PRIVILEGES ON sentora_postfix .* TO 'postfix'@'localhost';";
+sqlroot -e "CREATE USER postfix@localhost IDENTIFIED BY '$postfixpassword';";
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_postfix .* TO 'postfix'@'localhost';";
 
 mkdir -p $PANEL_DATA/vmail
 useradd -r -g mail -d $PANEL_DATA/vmail -s /sbin/nologin -c "Virtual maildir" vmail
@@ -1458,8 +1380,7 @@ sed -i '/smtpd_bind_address/d' $PANEL_CONF/postfix/master.cf
 sed -i "s|daemon_directory = /usr/lib/postfix$|daemon_directory = /usr/lib/postfix/sbin|" $PANEL_CONF/postfix/main.cf
 sed -i "s|daemon_directory = /usr/lib/postfix |daemon_directory = /usr/lib/postfix/sbin |" $PANEL_CONF/postfix/main.cf
 
-# System mail for root (cron, logwatch...) goes to the admin email entered above
-grep -q "^root:" /etc/aliases 2> /dev/null || echo "root: $ADMIN_EMAIL" >> /etc/aliases
+# (root's mail - cron, logwatch... - goes to the admin email: the alias was added above)
 newaliases
 systemctl enable postfix
 
@@ -1493,7 +1414,7 @@ if doveconf -n > /dev/null; then
     systemctl enable dovecot
     systemctl restart dovecot
 else
-    echo -e "\n\e[1;31mWARNING: the Dovecot configuration did not pass doveconf, Dovecot was not started.\e[0m"
+    echo -e "\nWARNING: the Dovecot configuration did not pass doveconf, Dovecot was not started."
 fi
 systemctl restart postfix
 
@@ -1556,8 +1477,8 @@ mkdir -p $PANEL_DATA/hostdata/zadmin/public_html
 chown -R $HTTP_USER:$HTTP_GROUP $PANEL_DATA/hostdata/
 chmod -R 770 $PANEL_DATA/hostdata/
 
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='httpd_exe'"
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='apache_sn'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='httpd_exe'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='apache_sn'"
 
 #Set keepalive on (default is off)
 sed -i "s|KeepAlive Off|KeepAlive On|" "$HTTP_CONF_PATH"
@@ -1605,89 +1526,43 @@ $PACKAGE_INSTALLER openssl
 a2enmod ssl 
 
 
-#############################
 ##
-#--- PHP Install Starts Here
+#--- PHP (Ubuntu's own version: the panel's, and the default for hosted sites)
 ##
-echo -e "\n-Installing OS Default PHP version..."
-
-# Install OS Default PHP version
-
-
+ui_step "Installing PHP"
 install_available libapache2-mod-php php-common php-bcmath php-cli php-mysql php-gd php-curl php-pear php-imagick php-xmlrpc php-xml php-intl php-mbstring php-dev php-zip
-
-# Prepare PHP-mcrypt files
-$PACKAGE_INSTALLER -y build-essential
-
-# Download needed files
-install_available libmcrypt-dev
-
-##
-ui_step "Configuring PHP"
-##
-
-# PHP version check (PHP 8.X )
-
-###
-# Check supported OS default PHP 8.X installed before continuing
-###
-
-
-##### Check PHP 8.x was installed or quit installer.
-PHPVER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;') # return 8.x
-
-echo -e "\nDetected PHP: $PHPVER "
-
-if  [[ "$PHPVER" == 8.* ]]; then
-	echo -e "\nPHP $PHPVER installed. Procced installing ..."
-else
-	echo -e "\nPHP 8.x not installed. $PHPVER installed. Exiting installer. Please contact your script admin!!"
-	exit 1
+PHPVER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+echo "Detected PHP: $PHPVER"
+if [[ "$PHPVER" != 8.* ]]; then
+    echo "ERROR: PHP 8 did not install (found: '${PHPVER:-none}'), so the installation can not continue."
+    exit 1
 fi
-	
-# Set PHP.ini path**
 PHP_INI_PATH="/etc/php/$PHPVER/apache2/php.ini"
 
-# PHP 8.* Extra packages needed by different OS's
-
-
-# PHP-mcrypt install code all OS - Check this!!!!!!
-		
-# Update Pecl Channels
-echo -e "\n--- Updating PECL Channels..."
-# Only pecl.php.net is needed for mcrypt. "pecl update-channels" also tried
-# doc.php.net, whose channel file no longer parses, and printed PHP warnings.
+# mcrypt (old sites still call it) from PECL, when Ubuntu still has libmcrypt.
+# Only pecl.php.net's channel is updated ("pecl update-channels" also tries doc.php.net,
+# whose channel file no longer parses); the cache folder stops a PEAR warning.
+install_available libmcrypt-dev
 pecl channel-update pecl.php.net
-
-# Make pear cache folder to stop error "Trying to access array offset on value of type bool in PEAR/REST.php on line 187"
 mkdir -p /tmp/pear/cache
-
-# Install PHP-Mcrypt
-# libmcrypt is gone from newer releases, only try to build mcrypt when it is there
 if inst libmcrypt-dev; then
-	echo -e "\n--- Installing PHP-mcrypt..."
-	echo -ne '\n' | pecl install mcrypt
+    echo "Building PHP-mcrypt"
+    echo | pecl install mcrypt
 else
-	echo -e "\n--- libmcrypt-dev not available, skipping PHP-mcrypt"
+    echo "libmcrypt-dev is not available: no PHP-mcrypt"
 fi
 
-
-# Setup PHP mcrypt config files, only if the extension was actually built
+# Switched on only when it was built
 PHP_EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
 if [ -f "$PHP_EXT_DIR/mcrypt.so" ]; then
-
-	# Create php-mcrypt modules file
-	echo 'extension=mcrypt.so' > /etc/php/$PHPVER/mods-available/mcrypt.ini
-
-	# Create links to activate PHP-mcrypt
-	ln -sf /etc/php/$PHPVER/mods-available/mcrypt.ini /etc/php/$PHPVER/apache2/conf.d/20-mcrypt.ini
-	ln -sf /etc/php/$PHPVER/mods-available/mcrypt.ini /etc/php/$PHPVER/cli/conf.d/20-mcrypt.ini
+    echo 'extension=mcrypt.so' > /etc/php/$PHPVER/mods-available/mcrypt.ini
+    ln -sf /etc/php/$PHPVER/mods-available/mcrypt.ini /etc/php/$PHPVER/apache2/conf.d/20-mcrypt.ini
+    ln -sf /etc/php/$PHPVER/mods-available/mcrypt.ini /etc/php/$PHPVER/cli/conf.d/20-mcrypt.ini
 else
-	echo -e "\nPHP-mcrypt was not built for PHP $PHPVER, it will not be enabled."
+    echo "PHP-mcrypt was not built for PHP $PHPVER, it is not switched on."
 fi
 
-# Set PHP Memory limit
-ui_step "Setting PHP memory limit to 256MB"
+ui_step "Configuring PHP"
 sed -i "s|memory_limit = .*|memory_limit = 256M|g" $PHP_INI_PATH
 
 # Setup php upload dir
@@ -1789,7 +1664,7 @@ EOF_UNIT
 a2enmod proxy_fcgi setenvif > /dev/null
 systemctl daemon-reload
 systemctl enable php"$PHPVER"-fpm
-systemctl restart php"$PHPVER"-fpm || echo -e "\e[1;31mWARNING: php$PHPVER-fpm (the panel's PHP) did not start.\e[0m"
+systemctl restart php"$PHPVER"-fpm || echo -e "WARNING: php$PHPVER-fpm (the panel's PHP) did not start."
 
 # Register apache(+php) services for autostart and start it
         #chkconfig "$HTTP_SERVICE" on
@@ -1800,7 +1675,7 @@ systemctl restart php"$PHPVER"-fpm || echo -e "\e[1;31mWARNING: php$PHPVER-fpm (
 #--- Extra PHP versions for hosted domains (PHP-FPM)
 ##
 # The panel and every domain without a choice keep using the system PHP 8.5
-# (Apache mod_php). These versions are built for Ubuntu 26.04 and hosted next
+# (PHP-FPM). These versions are built for Ubuntu 26.04 and hosted next
 # to the other installer files; each runs as its own PHP-FPM service and is
 # enabled or disabled in the panel's PHP Versions module.
 PHP_EXTRA_VERSIONS="8.2 8.3 8.4"
@@ -1818,7 +1693,7 @@ PHP_MIGRATION_INSTALLED=""
 for PV in $PHP_EXTRA_VERSIONS $PHP_MIGRATION_VERSIONS; do
     PHP_TAR="sentora-php-$PV-ubuntu26.04-amd64.tar.gz"
     if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR" "$SENTORA_INSTALLERS_REPO"; then
-        echo -e "\e[1;33mPHP $PV skipped: $PHP_TAR could not be downloaded\e[0m"
+        echo "WARNING: PHP $PV skipped: $PHP_TAR could not be downloaded"
         continue
     fi
     # The archive holds opt/sentora-php/<version>/
@@ -1826,7 +1701,7 @@ for PV in $PHP_EXTRA_VERSIONS $PHP_MIGRATION_VERSIONS; do
     tar -xzmf "$PHP_STAGE/$PHP_TAR" -C /
     PP="/opt/sentora-php/$PV"
     if ! "$PP/sbin/php-fpm" -v > /dev/null 2>&1; then
-        echo -e "\e[1;31mWARNING: PHP $PV does not run on this server, skipped.\e[0m"
+        echo -e "WARNING: PHP $PV does not run on this server, skipped."
         "$PP/sbin/php-fpm" -v 2>&1 | head -3
         continue
     fi
@@ -1895,13 +1770,13 @@ rm -rf "$PHP_STAGE" "$REL_DIR"
 systemctl daemon-reload
 PHP_INSTALLED="${PHP_INSTALLED#,}"
 for PV in ${PHP_INSTALLED//,/ }; do
-    systemctl enable --now "sentora-php$PV-fpm" > /dev/null 2>&1 || echo -e "\e[1;31mWARNING: sentora-php$PV-fpm did not start.\e[0m"
+    systemctl enable --now "sentora-php$PV-fpm" > /dev/null 2>&1 || echo -e "WARNING: sentora-php$PV-fpm did not start."
 done
 # All installed versions start enabled; the PHP Versions module can switch them off
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$PHP_INSTALLED' WHERE so_name_vc='php_versions_enabled'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$PHP_INSTALLED' WHERE so_name_vc='php_versions_enabled'"
 # The web service API key: this server's own random one (the one in the database template
 # is public, and with it alone the API resets passwords and creates clients)
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$(openssl rand -hex 16)' WHERE so_name_vc='apikey'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$(openssl rand -hex 16)' WHERE so_name_vc='apikey'"
 echo "Extra PHP versions installed: ${PHP_INSTALLED:-none}${PHP_MIGRATION_INSTALLED:+ (and, switched off, for moving old sites:$PHP_MIGRATION_INSTALLED)}"
 
 ##
@@ -1913,22 +1788,22 @@ $PACKAGE_INSTALLER proftpd-mod-mysql proftpd-mod-crypto
 FTP_CONF_PATH='/etc/proftpd/proftpd.conf'
 
 # Create and init proftpd database
-mysql -u root -p"$mysqlpassword" < $PANEL_CONF/sentora-install/sql/sentora_proftpd.sql
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_proftpd.sql
 
 # Create and configure mysql password for proftpd
 proftpdpassword=$(passwordgen);
 sed -i "s|!SQL_PASSWORD!|$proftpdpassword|" $PANEL_CONF/proftpd/proftpd-mysql.conf
 
 # Add User for Proftpd DB (MySQL 8.4 default plugin caching_sha2_password)
-mysql -u root -p"$mysqlpassword" -e "CREATE USER proftpd@localhost IDENTIFIED BY '$proftpdpassword';";
+sqlroot -e "CREATE USER proftpd@localhost IDENTIFIED BY '$proftpdpassword';";
 # Grant ALL PRIVILEGES to Proftpd User
-mysql -u root -p"$mysqlpassword" -e "GRANT ALL PRIVILEGES ON sentora_proftpd .* TO 'proftpd'@'localhost';";
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_proftpd .* TO 'proftpd'@'localhost';";
 
 # Assign httpd user and group to all users that will be created
 HTTP_UID=$(id -u "$HTTP_USER")
 HTTP_GID=$(sed -nr "s/^$HTTP_GROUP:x:([0-9]+):.*/\1/p" /etc/group)
-mysql -u root -p"$mysqlpassword" -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN uid SET DEFAULT $HTTP_UID"
-mysql -u root -p"$mysqlpassword" -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN gid SET DEFAULT $HTTP_GID"
+sqlroot -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN uid SET DEFAULT $HTTP_UID"
+sqlroot -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN gid SET DEFAULT $HTTP_GID"
 sed -i "s|!SQL_MIN_ID!|$HTTP_UID|" $PANEL_CONF/proftpd/proftpd-mysql.conf
 
 # Setup proftpd base file to call sentora config
@@ -1950,16 +1825,16 @@ ui_step "Installing and configuring BIND"
 install_available bind9 bind9-utils
 BIND_SERVICE="named"
 if ! command -v named-checkconf > /dev/null 2>&1; then
-    echo -e "\n\e[1;31mERROR: BIND (bind9, bind9-utils) did not install, so DNS will not work.\e[0m"
+    echo -e "\nERROR: BIND (bind9, bind9-utils) did not install, so DNS will not work."
     echo "Run 'apt-get install bind9 bind9-utils' to see why, then run the installer again."
 fi
 BIND_PATH="/etc/bind/"
 BIND_FILES="/etc/bind"
 BIND_USER="bind"
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='/var/sentora/logs/bind/bind.log' WHERE so_name_vc='bind_log'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='/var/sentora/logs/bind/bind.log' WHERE so_name_vc='bind_log'"
 
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_PATH' WHERE so_name_vc='bind_dir'"
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_SERVICE' WHERE so_name_vc='bind_service'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_PATH' WHERE so_name_vc='bind_dir'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_SERVICE' WHERE so_name_vc='bind_service'"
 
 # Setup logging directory
 mkdir -p $PANEL_DATA/logs/bind
@@ -2005,7 +1880,7 @@ if named-checkconf $BIND_FILES/named.conf; then
     systemctl enable "$BIND_SERVICE"
     systemctl restart "$BIND_SERVICE"
 else
-    echo -e "\n\e[1;31mWARNING: $BIND_FILES/named.conf did not pass named-checkconf, BIND was not started.\e[0m"
+    echo -e "\nWARNING: $BIND_FILES/named.conf did not pass named-checkconf, BIND was not started."
 fi
 
 ##
@@ -2052,12 +1927,12 @@ ui_step "Configuring Roundcube"
 RC_PATH="$PANEL_PATH/panel/etc/apps/webmail"
 
 # Create the database from the schema shipped with this Roundcube version
-mysql -u root -p"$mysqlpassword" -e "CREATE DATABASE IF NOT EXISTS sentora_roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-mysql -u root -p"$mysqlpassword" sentora_roundcube < "$RC_PATH/SQL/mysql.initial.sql"
+sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+sqlroot sentora_roundcube < "$RC_PATH/SQL/mysql.initial.sql"
 
 roundcubepassword=$(passwordgen);
-mysql -u root -p"$mysqlpassword" -e "CREATE USER roundcube@localhost IDENTIFIED BY '$roundcubepassword';";
-mysql -u root -p"$mysqlpassword" -e "GRANT ALL PRIVILEGES ON sentora_roundcube .* TO 'roundcube'@'localhost';";
+sqlroot -e "CREATE USER roundcube@localhost IDENTIFIED BY '$roundcubepassword';";
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_roundcube .* TO 'roundcube'@'localhost';";
 sed -i "s|!ROUNDCUBE_PASSWORD!|$roundcubepassword|" $PANEL_CONF/roundcube/roundcube_config.inc.php
 
 roundcube_des_key=$(passwordgen 24);
@@ -2090,16 +1965,16 @@ ui_step "Installing SOGo groupware with ActiveSync"
 install_available sogo sogo-activesync memcached
 if command -v sogod > /dev/null 2>&1; then
     sogopassword=$(passwordgen);
-    mysql -u root -p"$mysqlpassword" -e "CREATE DATABASE IF NOT EXISTS sentora_sogo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_sogo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     for SOGO_HOST in localhost 127.0.0.1; do
-        mysql -u root -p"$mysqlpassword" -e "CREATE USER IF NOT EXISTS 'sogo'@'$SOGO_HOST' IDENTIFIED BY '$sogopassword'; GRANT ALL PRIVILEGES ON sentora_sogo.* TO 'sogo'@'$SOGO_HOST'"
+        sqlroot -e "CREATE USER IF NOT EXISTS 'sogo'@'$SOGO_HOST' IDENTIFIED BY '$sogopassword'; GRANT ALL PRIVILEGES ON sentora_sogo.* TO 'sogo'@'$SOGO_HOST'"
     done
     # SOGo logs in with the panel's mailboxes: a read-only view of them. Passwords:
     # {SHA512-CRYPT} hashes keep their prefix (SOGo reads the scheme from it); old
     # {PLAIN-MD5} ones lose it and are checked with userPasswordAlgorithm = md5
-    mysql -u root -p"$mysqlpassword" -e "CREATE OR REPLACE SQL SECURITY DEFINER VIEW sentora_postfix.sogo_users AS SELECT username AS c_uid, username AS c_name, CASE WHEN password LIKE '{PLAIN-MD5}%' THEN SUBSTRING(password, 12) ELSE password END AS c_password, COALESCE(NULLIF(name, ''), username) AS c_cn, username AS mail, domain AS c_domain FROM sentora_postfix.mailbox WHERE active = '1'"
+    sqlroot -e "CREATE OR REPLACE SQL SECURITY DEFINER VIEW sentora_postfix.sogo_users AS SELECT username AS c_uid, username AS c_name, CASE WHEN password LIKE '{PLAIN-MD5}%' THEN SUBSTRING(password, 12) ELSE password END AS c_password, COALESCE(NULLIF(name, ''), username) AS c_cn, username AS mail, domain AS c_domain FROM sentora_postfix.mailbox WHERE active = '1'"
     for SOGO_HOST in localhost 127.0.0.1; do
-        mysql -u root -p"$mysqlpassword" -e "GRANT SELECT ON sentora_postfix.sogo_users TO 'sogo'@'$SOGO_HOST'"
+        sqlroot -e "GRANT SELECT ON sentora_postfix.sogo_users TO 'sogo'@'$SOGO_HOST'"
     done
     sed -e "s|!SOGO_PASSWORD!|$sogopassword|g" -e "s|!MYSQL_PORT!|3306|g" -e "s|!PANEL_FQDN!|$PANEL_FQDN|" -e "s|!TIMEZONE!|${tz:-UTC}|" \
         $PANEL_CONF/sogo/sogo.conf > /etc/sogo/sogo.conf
@@ -2114,9 +1989,9 @@ if command -v sogod > /dev/null 2>&1; then
     a2enmod proxy proxy_http headers rewrite expires > /dev/null
     a2enconf sogo > /dev/null
     systemctl enable memcached sogo
-    systemctl restart memcached sogo || echo -e "\e[1;31mWARNING: SOGo did not start.\e[0m"
+    systemctl restart memcached sogo || echo -e "WARNING: SOGo did not start."
 else
-    echo -e "\e[1;31mWARNING: SOGo is not available in the repositories, groupware and ActiveSync were skipped.\e[0m"
+    echo -e "WARNING: SOGo is not available in the repositories, groupware and ActiveSync were skipped."
 fi
 
 #--- Webalizer Stats and Visitor Stats are add-on modules now (Repo Browser, the
@@ -2128,7 +2003,7 @@ chmod 755 $PANEL_DATA/stats
 #--- GoAccess (Server Admin > GoAccess), built from the bundled source
 install_available libncurses-dev
 if ! bash $PANEL_CONF/goaccess/build-goaccess.sh $PANEL_CONF/goaccess; then
-	echo -e "\n\e[1;31mWARNING: GoAccess did not build, the GoAccess module will stay empty.\e[0m"
+	echo -e "\nWARNING: GoAccess did not build, the GoAccess module will stay empty."
 fi
 # GoAccess runs as its own user, which can read nothing else (the hourly job hands it
 # the new log lines); the panel may read the reports
@@ -2161,18 +2036,8 @@ php -q $PANEL_PATH/panel/bin/daemon.php > "$PANEL_DATA/logs/daemon-last-run.log"
 cat "$PANEL_DATA/logs/daemon-last-run.log"
 
 ##
-#--- Firewall ? SHOULD WE???
-##
-
-##
-#--- Fail2ban - This should be standard with install. We need a module to help user with settings. Maybe soon!
-##
-
-##
 #--- Logrotate
 ##
-
-#  Download and install logrotate
 ui_step "Installing Logrotate"
 $PACKAGE_INSTALLER logrotate
 
@@ -2215,7 +2080,7 @@ if fail2ban-client -t > /dev/null 2>&1; then
     systemctl enable fail2ban
     systemctl restart fail2ban
 else
-    echo -e "\e[1;31mWARNING: the fail2ban configuration did not pass its test, fail2ban was not started.\e[0m"
+    echo -e "WARNING: the fail2ban configuration did not pass its test, fail2ban was not started."
     fail2ban-client -t 2>&1 | tail -5
 fi
 
@@ -2286,19 +2151,13 @@ find $PANEL_PATH $PANEL_DATA -xdev \( -path "$PANEL_DATA/hostdata" -o -path "$PA
     -o -perm -o+w ! -type l -print0 2> /dev/null | xargs -0 -r chmod o-w
 [ -f "$PANEL_DATA/logs/sentora.log" ] && { chown root:"$PANEL_USER" "$PANEL_DATA/logs/sentora.log"; chmod 660 "$PANEL_DATA/logs/sentora.log"; }
 
-## Leaving this just incase. ***
-#--- Restart all services to capture output messages, if any
-
-# Clean up files needed for install/update
-# N/A
-
-echo -e "# -------------------------------------------------------------------------------"
-
 # Set admin contact info to zadmin profile
 
 echo -e "\n--- Updating Admin contact Info..."
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_accounts SET ac_email_vc='$ADMIN_EMAIL' WHERE sentora_core.x_accounts.ac_id_pk = 1"
-mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_profiles SET ud_fullname_vc='$ADMIN_NAME', ud_phone_vc='$ADMIN_PHONE', ud_address_tx='$ADMIN_ADDRESS\r\n$ADMIN_PROVINCE $ADMIN_POSTALCODE\r\n$ADMIN_COUNTRY', ud_postcode_vc='$ADMIN_POSTALCODE' WHERE sentora_core.x_profiles.ud_id_pk = 1"
+# (quoted: a name like O'Brien would otherwise end the SQL text and nothing would be saved)
+sqlroot -e "UPDATE sentora_core.x_accounts SET ac_email_vc='$(sql_str "$ADMIN_EMAIL")' WHERE ac_id_pk = 1"
+sqlroot -e "UPDATE sentora_core.x_profiles SET ud_fullname_vc='$(sql_str "$ADMIN_NAME")', ud_phone_vc='$(sql_str "$ADMIN_PHONE")', ud_address_tx=CONCAT('$(sql_str "$ADMIN_ADDRESS")', '\r\n', '$(sql_str "$ADMIN_PROVINCE $ADMIN_POSTALCODE")', '\r\n', '$(sql_str "$ADMIN_COUNTRY")'), ud_postcode_vc='$(sql_str "$ADMIN_POSTALCODE")' WHERE ud_id_pk = 1" \
+    || echo "WARNING: the administrator's contact details were not saved in zadmin's profile (fill them in under My Account)."
 
 echo -e "\n--- Done Updating admin contact info.\n"
 
@@ -2346,9 +2205,9 @@ if [ -f "$MATOMO/index.php" ]; then
     install_available python3
     matomopassword=$(passwordgen)
     matomoadminpassword=$(passwordgen)
-    mysql -u root -p"$mysqlpassword" -e "CREATE DATABASE IF NOT EXISTS sentora_matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
     for MH in localhost 127.0.0.1; do
-        mysql -u root -p"$mysqlpassword" -e "CREATE USER IF NOT EXISTS 'matomo'@'$MH' IDENTIFIED BY '$matomopassword'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$MH'"
+        sqlroot -e "CREATE USER IF NOT EXISTS 'matomo'@'$MH' IDENTIFIED BY '$matomopassword'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$MH'"
     done
     chown -R "$PANEL_USER:$HTTP_GROUP" "$MATOMO/tmp" "$MATOMO/config"
     hosts_has "$PANEL_FQDN" || echo "127.0.0.1 $PANEL_FQDN" >> /etc/hosts
@@ -2379,7 +2238,7 @@ if [ -f "$MATOMO/index.php" ]; then
         chmod 660 "$MATOMO/config/config.ini.php"
         echo "Matomo is set up (super user sentora_admin)."
     else
-        echo -e "\e[1;31mWARNING: Matomo setup did not finish; open https://$PANEL_FQDN/etc/apps/matomo/ to finish it by hand.\e[0m"
+        echo -e "WARNING: Matomo setup did not finish; open https://$PANEL_FQDN/etc/apps/matomo/ to finish it by hand."
     fi
 fi
 
