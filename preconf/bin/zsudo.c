@@ -34,6 +34,9 @@
  * Accepted:
  *   zsudo service <apache2|httpd> <reload|restart|graceful>
  *   zsudo service <named|bind9> <start|stop|reload|restart>
+ *   zsudo ftp-kick     (no arguments: ends the open FTP sessions of the FTP
+ *                       logins switched off with their client, through the
+ *                       root-owned /etc/sentora/panel/bin/sentora-ftp-kick)
  *
  * The panel runs as its own user ("sentora"); zsudo is installed root:sentora
  * 4750, so the hosted sites (their own web<id> users) can not run it at all.
@@ -80,6 +83,9 @@ int main(int argc, char *argv[])
             || (one_of(argv[2], bind) && one_of(argv[3], bind_act)))) {
         /* Every word is one of the constants above */
         snprintf(cmd, sizeof cmd, "/usr/sbin/service %s %s", argv[2], argv[3]);
+    } else if (argc == 2 && strcmp(argv[1], "ftp-kick") == 0) {
+        /* A fixed line: the script is root's (the panel folder is root:root) and takes no input from here */
+        snprintf(cmd, sizeof cmd, "/usr/bin/php -q /etc/sentora/panel/bin/sentora-ftp-kick");
     } else {
         fprintf(stderr, "zsudo: command not allowed\n");
         return 2;
