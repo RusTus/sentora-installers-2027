@@ -435,6 +435,7 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (28,0,'Apache Config',200,'apache_admin','modadmin','This module enables you to configure Apache Vhost settings for your hosting accounts.',NULL,'true',NULL,''),
 (68,2,'Server Monitor',200,'server_monitor','user','Live server dashboard: CPU per core, load, memory and swap, network and disk traffic, disk space, the busiest processes and whether Sentora services are running.',NULL,'true',NULL,''),
 (72,1,'Dashboard',200,'dashboard','user','Your dashboard: what to do next and how your account is doing, at a glance. Add, remove and arrange its widgets.',NULL,'true',NULL,''),
+(76,2,'Panel Update',200,'panel_update','user','Update the panel to the newest published release, or go back to the version before an update, from the panel. The same as sentora-update on the server\'s console.',NULL,'true',NULL,''),
 (73,2,'Widget Admin',200,'widget_admin','user','Choose which dashboard widgets each group may use and which are on by default, and upload new widgets.',NULL,'true',NULL,''),
 (74,2,'SpamAV Admin',200,'spamav_admin','user','Virus scanning (ClamAV) and spam filtering (SpamAssassin) for all mail on this server: settings, status and updates.',NULL,'true',NULL,''),
 (75,6,'SpamAV',200,'spamav','user','Spam and virus protection for your mailboxes: what was caught, and how spam is handled for each mailbox.',NULL,'true',NULL,''),
@@ -577,7 +578,7 @@ CREATE TABLE `x_permissions` (
 
 insert  into `x_permissions` (`pe_id_pk`,`pe_group_fk`,`pe_module_fk`) values
  (118,1,68), (117,1,67), (119,2,67), (120,3,67),
-(121,1,72),
+(129,1,76), (121,1,72),
 (122,2,72),
 (123,3,72),
 (124,1,73),

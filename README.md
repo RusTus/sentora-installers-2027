@@ -71,7 +71,7 @@ Every generated password is shown at the end and saved in `/root/passwords.txt`.
 - The panel (with phpMyAdmin and webmail) runs as its own user, `sentora`, in the PHP-FPM pool `/etc/php/8.5/fpm/pool.d/sentora.conf`.
 - Every hosting account runs its PHP as its own Linux user (`web<account id>`) in its own PHP-FPM pool. Its folder belongs to that user; access lists give the panel read-write and Apache read-only, and nobody else anything. FTP logins and cron jobs run as the account's user too.
 - `/etc/sentora/panel` and `/etc/sentora/configs` belong to root. The panel writes only `etc/tmp` and `/var/lib/sentora`; the root daemon applies queued changes within 5 minutes.
-- `zsudo` runs a fixed list of reloads only, for root and the panel user.
+- `zsudo` runs a fixed list of actions only, for root and the panel user. Its source is in the core (`bin/zsudo.c`): the installer builds it, and `sentora-update` builds it again when an update changes it.
 - Logins lock for 15 minutes after 5 wrong passwords for an account, or 20 from one address. Two-factor login is turned on in **Sentora Config**.
 
 To unblock an address in fail2ban:
@@ -88,7 +88,6 @@ fail2ban-client set <jail> unbanip <address>
 | `preconf/apache/`, `postfix/`, `dovecot2/`, `bind/`, `proftpd/`, `sogo/` ... | Configuration templates for each service |
 | `preconf/fail2ban/` | fail2ban jails and filters |
 | `preconf/goaccess/` | GoAccess source, built at install |
-| `preconf/bin/zsudo.c` | `zsudo` source, built at install |
 | `preconf/php-build/` | Scripts to build and update the extra PHP versions |
 | `sentora-repo/` | The add-on module repository (PHP-Adminer, Webalizer Stats, Visitor Stats), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
 

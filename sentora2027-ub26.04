@@ -1248,15 +1248,18 @@ chmod 644 /etc/sentora/update.conf
 chmod 700 /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
 
 #--- Prepare zsudo (the panel and daemon use it to reload Apache and run root tasks)
-# zsudo only runs a fixed list of reload commands (see zsudo.c); only root and
-# the panel's user may execute it - not the hosted sites
-if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_CONF/bin/zsudo.c; then
+# zsudo only runs a fixed list of actions (see bin/zsudo.c in the core); only root and
+# the panel's user may execute it - not the hosted sites. Its source is part of the core,
+# so sentora-update builds it again when an update changes it (it remembers the source's
+# SHA-256 in /etc/sentora/zsudo.sha256)
+if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c; then
     chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo
     chmod 4750 $PANEL_PATH/panel/bin/zsudo
+    sha256sum $PANEL_PATH/panel/bin/zsudo.c | cut -d' ' -f1 > /etc/sentora/zsudo.sha256
 else
     echo -e "\n\e[1;31mERROR: zsudo did not compile. Sentora will not be able to reload Apache.\e[0m"
-    echo "Check $PANEL_CONF/bin/zsudo.c and build-essential, then run:"
-    echo "  cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_CONF/bin/zsudo.c && chmod +s $PANEL_PATH/panel/bin/zsudo"
+    echo "Check $PANEL_PATH/panel/bin/zsudo.c and build-essential, then run:"
+    echo "  cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c && chown root:$PANEL_USER $PANEL_PATH/panel/bin/zsudo && chmod 4750 $PANEL_PATH/panel/bin/zsudo"
 fi
 
 #--- Resolv.conf protect
