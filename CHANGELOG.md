@@ -474,3 +474,4 @@ Ubuntu's updates cover PHP 8.5, Apache, MySQL, Postfix, Dovecot, BIND, ProFTPD, 
 - When replacing Matomo, reapply the changes in `etc/apps/matomo/SENTORA-PATCHES.txt` (the SentoraSync plugin and the PHP-warning patch), then run `console core:update --yes` as the panel user.
 - Rebuild an extra PHP version with `build-sentora-php.sh` on a spare 26.04 machine, then `update-sentora-php.sh` on each server.
 - Move sites off PHP 8.1 now, and off 8.2 before the end of 2026.
+- Release files are built and uploaded by a GitHub Actions workflow (`.github/workflows/release.yml`, run by hand from Actions > Release > Run workflow) in each repository: it builds the zip (and, in sentora-installers-2027, the installer `sentora2027-ub26.04`) from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. The PHP bundles are still uploaded by hand.

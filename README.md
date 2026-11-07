@@ -30,6 +30,8 @@ To build this repository's zip from a clone:
 git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
 ```
 
+To publish a new version, push to `master2027` and run **Actions > Release > Run workflow**. It builds `sentora-installers-2027.zip` and `sentora2027-ub26.04` from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. The PHP bundles are still replaced by hand on the release. The core zip has the same workflow in [sentora-core-2027](https://github.com/RusTus/sentora-core-2027).
+
 ## Installing
 
 On a clean Ubuntu 26.04 server, as root:
