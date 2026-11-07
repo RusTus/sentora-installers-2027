@@ -900,6 +900,7 @@ CREATE TABLE `x_vhosts` (
   `vh_ssl_port_in` int(6) DEFAULT NULL,
   `vh_custom_sp_tx` text DEFAULT NULL,
   `vh_php_version_vc` varchar(10) DEFAULT NULL,
+  `vh_symlinks_in` tinyint(1) NOT NULL DEFAULT 0,
   `vh_custom_tx` text DEFAULT NULL,
   `vh_custom_port_in` int(6) DEFAULT NULL,
   `vh_custom_ip_vc` varchar(45) DEFAULT NULL,
