@@ -1,11 +1,21 @@
-# Builds sentora-installers-2027.zip and the installer sentora2027-ub26.04
-# from master2027 and replaces the files of the same names on the release
-# tagged "current" (no new release or tag). The PHP bundles are not touched.
+# Builds sentora-installers-2027.zip and the installer
+# sentora2027-ub26.04 from master2027 and replaces the
+# file(s) of the same name on the release tagged "current" (no new release or tag). The PHP bundles are not touched.
 # Run it from Actions > Release > Run workflow.
+#
+# A file is uploaded only when its content differs from the one on the release. git archive stamps
+# every file in a zip with the commit's date, so a zip from a newer commit has a new SHA-256 even
+# when no file in it changed, and servers would see an update that is none. Zips are compared by
+# their files (name, CRC-32, size, mode), other files byte for byte. "force" uploads anyway.
 name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Upload even when nothing changed
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -29,10 +39,47 @@ jobs:
           git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
           git show master2027:sentora2027-ub26.04 > sentora2027-ub26.04
 
-      - name: SHA-256
-        run: sha256sum sentora-installers-2027.zip sentora2027-ub26.04
-
-      - name: Replace the files on the current release
+      - name: Compare with the files on the current release
+        id: compare
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload current sentora-installers-2027.zip sentora2027-ub26.04 --clobber --repo "$GITHUB_REPOSITORY"
+          FORCE: ${{ inputs.force }}
+        run: |
+          cat > /tmp/same.py <<'EOF'
+          import sys, zipfile
+          def files(p):
+              with zipfile.ZipFile(p) as z:
+                  return sorted((i.filename, i.CRC, i.file_size, i.external_attr) for i in z.infolist())
+          a, b = sys.argv[1], sys.argv[2]
+          if a.endswith('.zip'):
+              same = files(a) == files(b)
+          else:
+              same = open(a, 'rb').read() == open(b, 'rb').read()
+          sys.exit(0 if same else 1)
+          EOF
+          mkdir -p old
+          upload=""
+          for f in sentora-installers-2027.zip sentora2027-ub26.04; do
+            sha256sum "$f"
+            if [ "$FORCE" = "true" ]; then
+              echo "$f: upload (forced)"; upload="$upload $f"; continue
+            fi
+            if ! gh release download current --repo "$GITHUB_REPOSITORY" -p "$f" -D old --clobber 2> /dev/null; then
+              echo "$f: not on the release yet, upload"; upload="$upload $f"; continue
+            fi
+            if python3 /tmp/same.py "old/$f" "$f" 2> /dev/null; then
+              echo "$f: no change, the release keeps its file (and SHA-256)"
+            else
+              echo "$f: changed, upload"; upload="$upload $f"
+            fi
+          done
+          echo "upload=${upload# }" >> "$GITHUB_OUTPUT"
+          if [ -z "$upload" ]; then
+            echo "::notice::Nothing changed since the files on the current release: nothing uploaded, servers see no update."
+          fi
+
+      - name: Replace the changed files on the current release
+        if: steps.compare.outputs.upload != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload current ${{ steps.compare.outputs.upload }} --clobber --repo "$GITHUB_REPOSITORY"

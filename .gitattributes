@@ -3,5 +3,5 @@
 
 # Not part of the release zips (git archive): GitHub-only files, so changing the release
 # workflow does not change the zip and its SHA-256
-.github export-ignore
-.gitattributes export-ignore
+/.github export-ignore
+/.gitattributes export-ignore
