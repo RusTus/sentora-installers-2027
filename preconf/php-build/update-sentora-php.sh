@@ -16,14 +16,14 @@ MM="${1:-}"
 FILE="${2:-}"
 REPO="RusTus/sentora-installers-2027"
 TAG="${TAG:-current}"
-if [[ ! "$MM" =~ ^8\.[0-9]+$ ]]; then
-    echo "Usage: $0 <major.minor, e.g. 8.3> [bundle file]"
+if [[ ! "$MM" =~ ^[78]\.[0-9]+$ ]]; then
+    echo "Usage: $0 <major.minor, e.g. 8.3 or 7.1> [bundle file]"
     exit 2
 fi
 NAME="sentora-php-$MM-ubuntu26.04-amd64.tar.gz"
 P="/opt/sentora-php/$MM"
 SERVICE="sentora-php$MM-fpm"
-[ -d "$P/etc" ] || { echo "PHP $MM is not installed in $P."; exit 1; }
+[ -d "$P/etc" ] || { echo "PHP $MM is not installed in $P (to add it: sentora-php-install $MM)."; exit 1; }
 
 WORK=$(mktemp -d /tmp/sentora-php-update.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
@@ -82,7 +82,9 @@ for d in bin sbin lib include php; do
 done
 cp "$P/BUILD-INFO" "$WORK/BUILD-INFO.old" 2> /dev/null || true
 cp "$NEW/BUILD-INFO" "$P/BUILD-INFO" 2> /dev/null || true
-if systemctl start "$SERVICE"; then
+# a version that is switched off (PHP 7.1 until a move needs it) stays stopped
+WAS_ON=1; systemctl is-enabled --quiet "$SERVICE" 2> /dev/null || WAS_ON=0
+if [ "$WAS_ON" = 0 ] || systemctl start "$SERVICE"; then
     for d in bin sbin lib include php; do rm -rf "${P:?}/${d:?}.old"; done
     echo "Updated: $OLD  ->  $("$P/sbin/php-fpm" -v | head -1)"
 else

@@ -1199,10 +1199,11 @@ ln -s $PANEL_PATH/panel/bin/setso /usr/bin/setso
 chmod +x $PANEL_PATH/panel/bin/setzadmin
 # Checks run by hand: the bundled apps against their latest releases, and the
 # whole installation (services, jails, ports, permissions, stored passwords, TLS)
-chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick
+chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install
 ln -sf $PANEL_PATH/panel/bin/sentora-web-probe /usr/local/sbin/sentora-web-probe
 # Notices to the panel's accounts from the shell or a script (see ctrl_notices)
 ln -sf $PANEL_PATH/panel/bin/sentora-notice /usr/local/sbin/sentora-notice
+ln -sf $PANEL_PATH/panel/bin/sentora-php-install /usr/local/sbin/sentora-php-install
 ln -sf $PANEL_PATH/panel/bin/sentora-offsite-backup /usr/local/sbin/sentora-offsite-backup
 ln -sf $PANEL_PATH/panel/bin/sentora-panel-restore /usr/local/sbin/sentora-panel-restore
 # (its nightly job is written by the daemon from Admin > Backup Config > Off-server backup)
@@ -1783,14 +1784,18 @@ systemctl restart php"$PHPVER"-fpm || echo -e "\e[1;31mWARNING: php$PHPVER-fpm (
 # to the other installer files; each runs as its own PHP-FPM service and is
 # enabled or disabled in the panel's PHP Versions module.
 PHP_EXTRA_VERSIONS="8.2 8.3 8.4"
-ui_step "Installing extra PHP versions: $PHP_EXTRA_VERSIONS"
+# Only for moving websites from an old Sentora 2.0.2 server: installed switched OFF (no security
+# fixes since 2019), switched on in PHP Versions for a move. Its bundle carries its own OpenSSL 1.1.
+PHP_MIGRATION_VERSIONS="7.1"
+ui_step "Installing extra PHP versions: $PHP_EXTRA_VERSIONS (and $PHP_MIGRATION_VERSIONS, switched off)"
 # Libraries the builds link against (all part of Ubuntu 26.04)
 install_available libxml2-16 libcurl4t64 libonig5 libzip5 libicu78 libsodium23 libargon2-1 \
     libxslt1.1 libwebp7 libjpeg-turbo8 libfreetype6 libpng16-16t64 libgmp10 libsqlite3-0 libssl3t64
 a2enmod proxy_fcgi setenvif > /dev/null
 PHP_STAGE=$(mktemp -d /tmp/sentora-php.XXXXXX)
 PHP_INSTALLED=""
-for PV in $PHP_EXTRA_VERSIONS; do
+PHP_MIGRATION_INSTALLED=""
+for PV in $PHP_EXTRA_VERSIONS $PHP_MIGRATION_VERSIONS; do
     PHP_TAR="sentora-php-$PV-ubuntu26.04-amd64.tar.gz"
     if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR" "$SENTORA_INSTALLERS_REPO"; then
         echo -e "\e[1;33mPHP $PV skipped: $PHP_TAR could not be downloaded\e[0m"
@@ -1861,7 +1866,10 @@ UMask=0002
 WantedBy=multi-user.target
 EOF_UNIT
     touch "$PANEL_DATA/logs/php$PV-fpm.log"
-    PHP_INSTALLED="$PHP_INSTALLED,$PV"
+    case " $PHP_MIGRATION_VERSIONS " in
+        *" $PV "*) PHP_MIGRATION_INSTALLED="$PHP_MIGRATION_INSTALLED $PV" ;;   # stays off and stopped
+        *) PHP_INSTALLED="$PHP_INSTALLED,$PV" ;;
+    esac
 done
 rm -rf "$PHP_STAGE" "$REL_DIR"
 systemctl daemon-reload
@@ -1874,7 +1882,7 @@ mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value
 # The web service API key: this server's own random one (the one in the database template
 # is public, and with it alone the API resets passwords and creates clients)
 mysql -u root -p"$mysqlpassword" -e "UPDATE sentora_core.x_settings SET so_value_tx='$(openssl rand -hex 16)' WHERE so_name_vc='apikey'"
-echo "Extra PHP versions installed: ${PHP_INSTALLED:-none}"
+echo "Extra PHP versions installed: ${PHP_INSTALLED:-none}${PHP_MIGRATION_INSTALLED:+ (and, switched off, for moving old sites:$PHP_MIGRATION_INSTALLED)}"
 
 ##
 #--- ProFTPd
@@ -2213,7 +2221,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
