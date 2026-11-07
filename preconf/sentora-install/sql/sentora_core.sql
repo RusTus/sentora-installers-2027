@@ -514,6 +514,35 @@ CREATE TABLE `x_mysql_users` (
 
 /*Data for the table `x_mysql_users` */
 
+/*Table structure for table `x_notices` */
+
+DROP TABLE IF EXISTS `x_notices`;
+
+CREATE TABLE `x_notices` (
+  `nt_id_pk` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `nt_acc_fk` int(11) NOT NULL DEFAULT '0',
+  `nt_scope_vc` varchar(10) NOT NULL DEFAULT 'clients',
+  `nt_targets_vc` varchar(2000) NOT NULL DEFAULT '',
+  `nt_type_vc` varchar(12) NOT NULL DEFAULT 'info',
+  `nt_title_vc` varchar(120) NOT NULL DEFAULT '',
+  `nt_body_tx` text NOT NULL,
+  `nt_closable_in` tinyint(1) NOT NULL DEFAULT '1',
+  `nt_start_ts` int(11) DEFAULT NULL,
+  `nt_end_ts` int(11) DEFAULT NULL,
+  `nt_key_vc` varchar(100) DEFAULT NULL,
+  `nt_source_vc` varchar(50) NOT NULL DEFAULT '',
+  `nt_created_ts` int(11) DEFAULT NULL,
+  `nt_updated_ts` int(11) DEFAULT NULL,
+  `nt_deleted_ts` int(11) DEFAULT NULL,
+  PRIMARY KEY (`nt_id_pk`),
+  KEY `nt_acc_fk` (`nt_acc_fk`),
+  KEY `nt_key_vc` (`nt_key_vc`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+/*Data for the table `x_notices` */
+
+insert  into `x_notices`(`nt_acc_fk`,`nt_scope_vc`,`nt_type_vc`,`nt_body_tx`,`nt_source_vc`,`nt_created_ts`,`nt_updated_ts`) values (1,'clients','info','Welcome to your new Sentora installation! You can remove this message in the Client Notice Manager module, where you can also tell your clients about planned maintenance, outages and new features, or send one client a personal notice.','client_notices',UNIX_TIMESTAMP(),UNIX_TIMESTAMP());
+
 /*Table structure for table `x_packages` */
 
 DROP TABLE IF EXISTS `x_packages`;

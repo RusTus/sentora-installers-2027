@@ -1199,8 +1199,10 @@ ln -s $PANEL_PATH/panel/bin/setso /usr/bin/setso
 chmod +x $PANEL_PATH/panel/bin/setzadmin
 # Checks run by hand: the bundled apps against their latest releases, and the
 # whole installation (services, jails, ports, permissions, stored passwords, TLS)
-chmod 755 $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe
+chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe
 ln -sf $PANEL_PATH/panel/bin/sentora-web-probe /usr/local/sbin/sentora-web-probe
+# Notices to the panel's accounts from the shell or a script (see ctrl_notices)
+ln -sf $PANEL_PATH/panel/bin/sentora-notice /usr/local/sbin/sentora-notice
 ln -sf $PANEL_PATH/panel/bin/sentora-offsite-backup /usr/local/sbin/sentora-offsite-backup
 ln -sf $PANEL_PATH/panel/bin/sentora-panel-restore /usr/local/sbin/sentora-panel-restore
 # (its nightly job is written by the daemon from Admin > Backup Config > Off-server backup)
