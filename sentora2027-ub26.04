@@ -2097,7 +2097,10 @@ chmod 711 "$PANEL_DATA/hostdata"
 chown root:root "$PANEL_DATA" "$PANEL_DATA/logs"
 chmod 755 "$PANEL_DATA" "$PANEL_DATA/logs"
 chmod 1777 "$PANEL_DATA/temp"
-[ -d "$PANEL_DATA/sessions" ] && chmod 1733 "$PANEL_DATA/sessions"
+[ -d "$PANEL_DATA/sessions" ] && { chown root:root "$PANEL_DATA/sessions"; chmod 1733 "$PANEL_DATA/sessions"; }
+# backups (whole accounts, databases included): root only
+chown root:root "$PANEL_DATA/backups"; chmod 700 "$PANEL_DATA/backups"
+# (the same modes the daemon keeps, sys_accountphp::LockSharedFolders)
 mkdir -p "$PANEL_DATA/logs/domains"
 chown root:"$PANEL_USER" "$PANEL_DATA/logs/domains"
 chmod 750 "$PANEL_DATA/logs/domains"
@@ -2106,7 +2109,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
@@ -2135,6 +2138,8 @@ chmod 640 $PANEL_CONF/postfix/mysql-*.cf
 chmod 644 $PANEL_CONF/postfix/main.cf $PANEL_CONF/postfix/master.cf
 chown root:root $PANEL_CONF/bind/rndc.conf 2> /dev/null; chmod 600 $PANEL_CONF/bind/rndc.conf 2> /dev/null
 chmod 640 /etc/bind/rndc.conf 2> /dev/null
+# BIND's main file holds the rndc key (whoever has it can stop or reconfigure BIND): root and BIND only
+chown root:"$BIND_USER" $BIND_FILES/named.conf; chmod 640 $BIND_FILES/named.conf
 # The File Manager's own program files must not be writable by the web server
 # (it edits users' files, never itself)
 chown -R root:root $PANEL_PATH/panel/modules/file_manager
