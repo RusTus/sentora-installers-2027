@@ -93,3 +93,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload current ${{ steps.compare.outputs.upload }} --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Update the release page (title and text from the repository)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The title is Sentora-<VERSION> (the core's VERSION file); the text is what's new in this
+          # version (its "- Release <version>:" line in CHANGELOG.md), then README.md, with
+          # links to files in the repository made full GitHub links (relative ones do not work on a
+          # release page). Written on every run, so an edited README shows after the next run.
+          VERSION=$(wget -q -O - https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/VERSION || true)
+          VERSION=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._-')
+          python3 - "$VERSION" "$GITHUB_REPOSITORY" README.md > release-notes.md <<'EOF'
+          import re, sys
+          version, repo, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+          base = 'https://github.com/' + repo + '/blob/master2027/'
+          def links(text, folder):
+              def fix(m):
+                  bang, label, url = m.group(1), m.group(2), m.group(3)
+                  if re.match(r'^([a-z][a-z0-9+.-]*:|#|/)', url, re.I):
+                      return m.group(0)
+                  path = url[2:] if url.startswith('./') else url
+                  full = base + folder + path
+                  return bang + '[' + label + '](' + full + ('?raw=1' if bang else '') + ')'
+              return re.sub(r'(!?)\[([^\]]*)\]\(([^)\s]+)\)', fix, text)
+          new = ''
+          for line in open('CHANGELOG.md', encoding='utf-8'):
+              m = re.match(r'^- Release ' + re.escape(version) + r'(?: \([^)]*\))?:\s*(.*)', line)
+              if m:
+                  new = m.group(1).strip()
+                  break
+          out = ['## Sentora-' + version if version else '## Sentora-2027', '']
+          if new:
+              out += [links(new, ''), '']
+          out += ['Every change, with the commands to apply service changes: [CHANGELOG.md](' + base + 'CHANGELOG.md)', '', '---', '']
+          for i, f in enumerate(files):
+              if i:
+                  out += ['', '---', '']
+              folder = f.rsplit('/', 1)[0] + '/' if '/' in f else ''
+              out.append(links(open(f, encoding='utf-8').read().replace('\r\n', '\n').rstrip(), folder))
+          text = '\n'.join(out) + '\n'
+          if len(text) > 120000:
+              sys.exit('The release text is %d characters; GitHub allows 125000.' % len(text))
+          sys.stdout.write(text)
+          EOF
+          echo "Title: Sentora-$VERSION ($(wc -c < release-notes.md) characters of text)"
+          gh release edit current --repo "$GITHUB_REPOSITORY" --title "Sentora-${VERSION:-2027}" --notes-file release-notes.md
