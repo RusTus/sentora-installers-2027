@@ -35,7 +35,7 @@ git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip mas
 On a clean Ubuntu 26.04 server, as root:
 
 ```bash
-wget https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-ub26.04
+wget -O sentora2027-ub26.04 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-ub26.04
 bash sentora2027-ub26.04
 ```
 

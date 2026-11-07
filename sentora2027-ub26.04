@@ -431,8 +431,9 @@ clock_from() {
 # certificates and two-factor codes depend on it). It is compared with a web server's time
 # (Ubuntu's archive first: its time decides whether apt accepts the package lists; then the
 # download server), always, also when the system says it is synchronised (a virtual machine
-# started from an older snapshot can keep that flag with a clock days behind). The
-# installer does not set the clock itself: if it is off, or can not be checked, it stops.
+# started from an older snapshot can keep that flag with a clock days behind). When it is
+# off the installer sets it to that time and checks again; it stops only when the clock can
+# not be checked, or setting it did not work.
 CLOCK_REF=""
 CLOCK_SRC=""
 for CLOCK_SRC in "http://archive.ubuntu.com/ubuntu/" "${SENTORA_DOWNLOAD_URL:-https://github.com}/"; do
@@ -461,29 +462,48 @@ if [ -z "$CLOCK_REF" ]; then
     exit 1
 fi
 CLOCK_DIFF=$(( $(date -d "$CLOCK_REF" +%s) - $(date +%s) ))
-if [ "${CLOCK_DIFF#-}" -gt 120 ]; then
-    CLOCK_RIGHT=$(date -d "$CLOCK_REF" '+%Y-%m-%d %H:%M:%S')
-    if [ "$CLOCK_DIFF" -gt 0 ]; then CLOCK_WAY="behind"; else CLOCK_WAY="ahead"; fi
-    CLOCK_ABS=${CLOCK_DIFF#-}
-    if [ "$CLOCK_ABS" -ge 86400 ]; then CLOCK_BY="$(( CLOCK_ABS / 86400 )) day(s) $(( CLOCK_ABS % 86400 / 3600 )) hour(s)"
-    elif [ "$CLOCK_ABS" -ge 3600 ]; then CLOCK_BY="$(( CLOCK_ABS / 3600 )) hour(s) $(( CLOCK_ABS % 3600 / 60 )) minute(s)"
-    else CLOCK_BY="$(( CLOCK_ABS / 60 )) minute(s)"; fi
-    echo
-    ui_bar "$BG_WARN" "  Stopped: this server's clock is $CLOCK_BY $CLOCK_WAY"
-    echo
-    printf '  %-16s %s\n' "This server:" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
-    CLOCK_HOST=${CLOCK_SRC#*://}; CLOCK_HOST=${CLOCK_HOST%%/*}
-    printf '  %-16s %s  (from %s)\n' "The right time:" "$(date -d "$CLOCK_REF" '+%Y-%m-%d %H:%M:%S %Z')" "$CLOCK_HOST"
-    echo
-    echo "  Nothing was installed. Set the time, then run the installer again:"
-    echo "     timedatectl set-ntp false"
-    echo "     timedatectl set-time '$CLOCK_RIGHT'"
-    echo "     timedatectl set-ntp true"
-    echo "$CLOCK_KEEP"
-    echo
-    exit 1
-fi
+clock_by() {
+    local abs=${1#-}
+    if [ "$abs" -ge 86400 ]; then echo "$(( abs / 86400 )) day(s) $(( abs % 86400 / 3600 )) hour(s)"
+    elif [ "$abs" -ge 3600 ]; then echo "$(( abs / 3600 )) hour(s) $(( abs % 3600 / 60 )) minute(s)"
+    else echo "$(( abs / 60 )) minute(s)"; fi
+}
 CLOCK_HOST=${CLOCK_SRC#*://}; CLOCK_HOST=${CLOCK_HOST%%/*}
+if [ "${CLOCK_DIFF#-}" -gt 120 ]; then
+    if [ "$CLOCK_DIFF" -gt 0 ]; then CLOCK_WAY="behind"; else CLOCK_WAY="ahead"; fi
+    CLOCK_WAS="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    ui_warn "This server's clock is $(clock_by "$CLOCK_DIFF") $CLOCK_WAY: setting it to $CLOCK_HOST's time"
+    # the same commands it would otherwise ask for (set-time is local time; the offset still holds)
+    CLOCK_SET=$(date -d "@$(( $(date +%s) + CLOCK_DIFF ))" '+%Y-%m-%d %H:%M:%S')
+    timedatectl set-ntp false > /dev/null 2>&1
+    timedatectl set-time "$CLOCK_SET" > /dev/null 2>&1 || date -s "$CLOCK_SET" > /dev/null 2>&1
+    timedatectl set-ntp true > /dev/null 2>&1
+    # checked again against the web server, not assumed
+    CLOCK_REF=$(clock_from "$CLOCK_SRC")
+    if [ -n "$CLOCK_REF" ] && date -d "$CLOCK_REF" > /dev/null 2>&1; then
+        CLOCK_DIFF=$(( $(date -d "$CLOCK_REF" +%s) - $(date +%s) ))
+    fi
+    if [ "${CLOCK_DIFF#-}" -le 120 ]; then
+        echo "   was $CLOCK_WAS, now $(date '+%Y-%m-%d %H:%M:%S %Z'): done."
+    else
+        CLOCK_RIGHT=$(date -d "@$(( $(date +%s) + CLOCK_DIFF ))" '+%Y-%m-%d %H:%M:%S')
+        echo
+        ui_bar "$BG_WARN" "  Stopped: this server's clock is $(clock_by "$CLOCK_DIFF") $CLOCK_WAY, and setting it did not work"
+        echo
+        printf '  %-16s %s\n' "This server:" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+        printf '  %-16s %s  (from %s)\n' "The right time:" "$CLOCK_RIGHT $(date +%Z)" "$CLOCK_HOST"
+        echo
+        echo "  Nothing was installed. Set the time, then run the installer again:"
+        echo "     timedatectl set-ntp false"
+        echo "     timedatectl set-time '$CLOCK_RIGHT'"
+        echo "     timedatectl set-ntp true"
+        echo "  (on a virtual machine the host may be setting the clock back: check the"
+        echo "  VM's time settings)"
+        echo "$CLOCK_KEEP"
+        echo
+        exit 1
+    fi
+fi
 ui_ok "Clock checked against $CLOCK_HOST: $(date '+%Y-%m-%d %H:%M %Z')"
 if [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ]; then
     ui_warn "It is not synchronised with a time server, so it may drift. Set"
