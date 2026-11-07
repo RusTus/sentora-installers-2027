@@ -79,7 +79,7 @@ UI_UTF8=0
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) UI_UTF8=1 ;; esac
 # (status marks in plain letters: every terminal font has them, PuTTY's included)
 UI_TICK='[ OK ]'; UI_WARNSIGN='[ !! ]'; UI_CROSS='[FAIL]'
-UI_SPIN=('|' '/' '-' '\\')
+UI_SPIN=('|' '/' '-' '\')
 if [ $UI_UTF8 -eq 1 ]; then
     UI_FULL=$'\xe2\x96\x88'; UI_EMPTY=$'\xe2\x96\x91'
 else
