@@ -248,9 +248,11 @@ done
 echo "Links: $LINKED"
 # the compiled-in libraries must stay private (--exclude-libs), or an add-on's Ubuntu library could
 # call into them
-LEAK=$(nm -D --defined-only "$P/sbin/php-fpm" | awk '{print $3}' | grep -E '^(SSL_|EVP_|OPENSSL_|CRYPTO_|xml[A-Z]|xslt|exslt|curl_(easy|multi|global|share|slist|version)|ldap_|ber_|mcrypt_|u[a-z]*_.*_64$)' | head -5)
+# (the list goes to a file first: with pipefail, a search that finds nothing, the good case, stops the script)
+nm -D --defined-only "$P/sbin/php-fpm" | awk '{print $3}' > "$WORK/exported.txt"
+LEAK=$(grep -E '^(SSL_|EVP_|OPENSSL_|CRYPTO_|xml[A-Z]|xslt|exslt|curl_(easy|multi|global|share|slist|version)|ldap_|ber_|mcrypt_|u[a-z]*_.*_64$)' "$WORK/exported.txt" | head -5 || true)
 [ -z "$LEAK" ] || { echo "php-fpm still offers compiled-in library functions to others ($LEAK). Stopping."; exit 1; }
-nm -D --defined-only "$P/sbin/php-fpm" | grep -q ' zend_parse_parameters$' || { echo "php-fpm offers no PHP functions to extensions. Stopping."; exit 1; }
+grep -qx 'zend_parse_parameters' "$WORK/exported.txt" || { echo "php-fpm offers no PHP functions to extensions. Stopping."; exit 1; }
 EXT_DIR=$("$TOOLS/php-config" --extension-dir)
 for e in apcu redis memcached imagick imap; do
     "$P/bin/php" -n -d extension_dir="$EXT_DIR" -d extension="$e.so" -r "exit(extension_loaded('$e') ? 0 : 1);" \
