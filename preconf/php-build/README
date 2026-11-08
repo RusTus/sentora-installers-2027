@@ -55,11 +55,27 @@ Build (as root, on Ubuntu 24.04 or 26.04 amd64):
        bash build-sentora-php71.sh
 
 It builds PHP 7.1.33 (the last 7.1 release) with its own OpenSSL 1.1.1w, curl 7.88.1,
-libxml2 2.9.14 and libmcrypt 2.5.8 compiled in (PHP 7.1 does not build against Ubuntu
-26.04's OpenSSL 3 or libxml2), checks every source against its published checksum, and
-writes sentora-php-7.1-ubuntu26.04-amd64.tar.gz. Attach it to the "current" release like
-the other bundles. Besides the C library it links only zlib, libpng16, libjpeg-turbo,
-freetype, libwebp and gmp, which are the same on Ubuntu 24.04 and 26.04. No intl.
+libxml2 2.9.14, libmcrypt 2.5.8, OpenLDAP 2.6.10 (GnuTLS), ICU 64.2 (intl) and libxslt
+1.1.34 (xsl) compiled in (PHP 7.1 does not build against Ubuntu 26.04's OpenSSL 3, libxml2
+or ICU), checks every source against its published checksum or signature, and writes
+sentora-php-7.1-ubuntu26.04-amd64.tar.gz. Besides the C and C++ libraries it links only
+zlib, libpng16, libjpeg-turbo, freetype, libwebp, gmp and GnuTLS, which are the same on
+Ubuntu 24.04 and 26.04.
+
+Add-ons, each its own file in lib/php/extensions: apcu 5.1.21, redis 5.3.7, memcached
+3.2.0, imagick 3.7.0 and imap. They use Ubuntu's own libmemcached, ImageMagick and c-client
+(which bring Ubuntu's OpenSSL 3 and libxml2), so PHP is linked with --exclude-libs,ALL: its
+compiled-in libraries stay private to it and never meet Ubuntu's copies in one process. The
+build stops if php-fpm still offers one of their functions, or if an add-on does not load.
+bin/sentora-php-addons in the bundle installs the Ubuntu libraries and switches on only the
+add-ons that load; the installer and sentora-php-install run it.
+
+KEEP_WORK=1 keeps the build's work folder (/tmp/sentora-php71-build.*), to look at a step
+that failed or run it again by hand.
+
+Attach the bundle to the "current" release like the other bundles: open
+https://github.com/RusTus/sentora-installers-2027/releases/tag/current > Edit (the newest
+version release has the same title), replace the file, Update release.
 
 Add it to a server installed before it (as root):
 
