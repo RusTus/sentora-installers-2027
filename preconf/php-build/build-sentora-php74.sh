@@ -217,9 +217,11 @@ for ext in mysqli pdo_mysql mysqlnd gd curl openssl mbstring xml dom simplexml s
     grep -qix "$ext" <<< "$MODULES" || MISSING="$MISSING $ext"
 done
 [ -z "$MISSING" ] || { echo "Missing extensions:$MISSING"; exit 1; }
-LINKED=$(ldd "$P/sbin/php-fpm" | awk '{print $1}' | sort -u | tr '\n' ' ')
+# What php-fpm itself links (not what Ubuntu's libraries bring along: libzip brings Ubuntu's OpenSSL 3,
+# which is fine, PHP's own OpenSSL 1.1 being private to it; see the check after this one)
+LINKED=$(readelf -d "$P/sbin/php-fpm" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | tr '\n' ' ')
 for lib in libssl libcrypto libcurl libxml2 libicu libxslt libexslt libldap liblber; do
-    case " $LINKED" in *" $lib"*) echo "php-fpm links the system's $lib: it would not run on Ubuntu 26.04. Stopping."; exit 1 ;; esac
+    case " $LINKED" in *" $lib"*) echo "php-fpm links the system's $lib instead of its own. Stopping."; exit 1 ;; esac
 done
 echo "Links: $LINKED"
 # the compiled-in libraries must stay private (--exclude-libs), or an add-on's Ubuntu library could
