@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>202</latestversion>
+    <latestversion>203</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/visitor_stats.zpp</downloadurl>
     <name>Visitor Stats</name>
     <desc>See who has been visiting your websites: visitors per day and month, pages, referrers, search terms, browsers and the busiest hours, made every hour with Visitors 0.7.</desc>
@@ -9,5 +9,5 @@
     <authorname>Sentora for Ubuntu 26.04 (Visitors 0.7)</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
-    <updatedesc>Fixes reports that were made but never shown: the reports folder was closed to the panel. The panel-style page and the report in Light or Dark from 201 are included.</updatedesc>
+    <updatedesc>Fixes reports that were made but never shown (the reports folder was closed to the panel): the update repairs it at once. Includes the panel-style page and the report in Light or Dark.</updatedesc>
 </updateserver>
