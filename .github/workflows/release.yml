@@ -92,7 +92,15 @@ jobs:
         if: steps.compare.outputs.upload != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload current ${{ steps.compare.outputs.upload }} --clobber --repo "$GITHUB_REPOSITORY"
+        # (--clobber deletes the old file first: when GitHub then fails, as with an HTTP 502, the file
+        # is missing from current until the upload works, so it is tried a few times)
+        run: |
+          for try in 1 2 3 4 5; do
+            gh release upload current ${{ steps.compare.outputs.upload }} --clobber --repo "$GITHUB_REPOSITORY" && exit 0
+            echo "Upload failed (try $try), trying again in $(( try * 15 ))s"; sleep $(( try * 15 ))
+          done
+          echo "::error::The upload to current failed 5 times: run the workflow again (files it removed are missing from current until then)"
+          exit 1
 
       - name: Release pages (current, and one release per version)
         env:
