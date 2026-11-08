@@ -1720,6 +1720,8 @@ for PV in $PHP_EXTRA_VERSIONS $PHP_MIGRATION_VERSIONS; do
     sed -i "s|^mysqli.default_socket =.*|mysqli.default_socket = /var/run/mysqld/mysqld.sock|" "$PP/etc/php.ini"
     sed -i "s|^pdo_mysql.default_socket *=.*|pdo_mysql.default_socket = /var/run/mysqld/mysqld.sock|" "$PP/etc/php.ini"
     echo "zend_extension=opcache.so" > "$PP/etc/conf.d/10-opcache.ini"
+    # add-on extensions the bundle brings (PHP 7.1: apcu, redis, memcached, imagick, imap): only those that load
+    [ -x "$PP/bin/sentora-php-addons" ] && "$PP/bin/sentora-php-addons"
 
     cat > "$PP/etc/php-fpm.conf" <<EOF_FPM
 [global]
