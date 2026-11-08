@@ -22,7 +22,8 @@ Then refresh the list and install modules from it. Every download is checked aga
 
 1. Put `<name>.zpp` (a zip of the module folder) in this folder. The file name, without `.zpp`, becomes the module's folder name: letters, numbers, `_` and `-` only.
 2. Add `<name>` on its own line in `packages.txt` (new modules only).
-3. Update the checksums, then commit to `master2027`:
+3. For an update, raise the version to the same number in two places: `<version>` in the module's own `module.xml` (inside the `.zpp`) and `<latestversion>` in `<name>.xml` here. Servers with the module installed see the higher number within an hour: the administrators get a notice, and Repo Browser lists it under **Updates**.
+4. Update the checksums, then commit to `master2027`:
 
    ```bash
    sha256sum *.zpp > SHA256SUMS
