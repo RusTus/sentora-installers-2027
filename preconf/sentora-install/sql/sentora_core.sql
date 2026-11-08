@@ -707,6 +707,7 @@ insert  into `x_settings`(`so_id_pk`,`so_name_vc`,`so_cleanname_vc`,`so_value_tx
 (17,'temp_dir','Temp Directory','/var/sentora/temp/',NULL,'Global temp directory.','Sentora Config','false'),
 (21,'server_ip','Server IP Address','',NULL,'If set this will use this manually entered server IP address which is the prefered method for use behind a firewall.','Sentora Config','true'),
 (155,'panel_ip_access','Serve panel on server IP','true','true|false','Serve the control panel when it is reached by the server''s own IP address (https://<ip>), not only by its name. Any other unknown name still gets "not found". Leave this on for development and internal servers; turn it OFF on a production or internet-facing server so the panel login is not shown to anything that scans the IP.','Sentora Config','true'),
+(156,'panel_fallback','Site not found falls back to panel login','true','true|false','A name this server has no site for opens the panel login. Off: such names get a plain 404.','Sentora Config','true'),
 (22,'zip_exe','ZIP Exe','zip',NULL,'Path to the ZIP Executable','Sentora Config','false'),
 (24,'disable_hostsen','Disable auto HOSTS file entry','false','true|false','Disable Host Entries','Sentora Config','false'),
 (25,'latestzpversion','Cached version of latest sentora version','1.0.0',NULL,'This is used for caching the latest version of Sentora.','Sentora Config','false'),
