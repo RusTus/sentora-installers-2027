@@ -80,3 +80,37 @@ version release has the same title), replace the file, Update release.
 Add it to a server installed before it (as root):
 
        sentora-php-install 7.1
+
+PHP 7.4 and 8.1 - steps for old apps on their way to a supported PHP
+====================================================================
+
+Old apps are upgraded through their own versions one at a time, and those need the PHP in
+between (osTicket 1.14-1.15, Snipe-IT 5 and Magento 2.3 run on PHP 7.4; Snipe-IT 6 and
+Magento 2.4.4 on PHP 8.1). Neither gets security fixes any more (7.4 since 28 Nov 2022, 8.1
+since 31 Dec 2025): the installer does not install them, sentora-php-install adds them switched
+OFF, and the PHP Versions page marks them and asks before switching them on.
+
+PHP 7.4 (as root, on Ubuntu 26.04 amd64):
+
+       bash build-sentora-php74.sh
+
+The PHP 7.1 recipe for PHP 7.4.33 (the last 7.4 release): its own OpenSSL 1.1.1w, curl
+7.88.1, libxml2 2.9.14, OpenLDAP 2.6.10, ICU 64.2 and libxslt 1.1.34 compiled in and kept
+private (--exclude-libs,ALL); Ubuntu's own oniguruma, libzip, libsodium, libargon2 and sqlite
+(libzip brings Ubuntu's OpenSSL 3 along, which the private copy never meets); PHP 7.4 finds
+the compiled-in libraries with "pkg-config --static", the add-ons with plain pkg-config. No
+mcrypt (PHP 7.2 dropped it). The same five add-ons and checks as PHP 7.1; the library check
+looks at what php-fpm links itself (readelf), not at what Ubuntu's libraries bring along.
+
+PHP 8.1 (as root, on Ubuntu 26.04 amd64):
+
+       bash build-sentora-php.sh 8.1.34
+
+The PHP 8.x recipe: PHP 8.1 builds on Ubuntu 26.04's own OpenSSL 3, libxml2 and ICU. For 8.1
+it also builds the add-ons (apcu, redis, memcached, imagick, imap) and bin/sentora-php-addons;
+ADDONS=1 builds them for another version too (imap is part of PHP up to 8.3 only).
+
+Attach both bundles to the "current" release as for the others, then on a server:
+
+       sentora-php-install 7.4
+       sentora-php-install 8.1
