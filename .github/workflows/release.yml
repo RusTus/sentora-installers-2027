@@ -149,7 +149,9 @@ jobs:
               sys.exit('The release text is %d characters; GitHub allows 125000.' % len(text))
           sys.stdout.write(text)
           EOF
-          gh release edit current --repo "$GITHUB_REPOSITORY" --title "Sentora-$VERSION" --notes-file release-notes.md
+          # (marked Latest and titled "(current)": the newest version release, also Sentora-<VERSION>, was
+          # the Latest one at the top of the Releases page, so files meant for current were added to it)
+          gh release edit current --repo "$GITHUB_REPOSITORY" --title "Sentora-$VERSION (current)" --notes-file release-notes.md --latest
           echo "current: Sentora-$VERSION ($(wc -c < release-notes.md) characters)"
 
           # the version's own release: made once; later runs of the same version add the files they changed
@@ -166,6 +168,6 @@ jobs:
               gh release download current --repo "$GITHUB_REPOSITORY" -D version-files
               cp CHANGELOG.md version-files/CHANGELOG.md
               gh release create "$TAG" version-files/* --repo "$GITHUB_REPOSITORY" --target master2027 \
-                  --title "Sentora-$VERSION" --notes-file version-notes.md
+                  --title "Sentora-$VERSION" --notes-file version-notes.md --latest=false
               echo "$TAG: made, with $(ls version-files | wc -l) files"
           fi

@@ -73,9 +73,10 @@ add-ons that load; the installer and sentora-php-install run it.
 KEEP_WORK=1 keeps the build's work folder (/tmp/sentora-php71-build.*), to look at a step
 that failed or run it again by hand.
 
-Attach the bundle to the "current" release like the other bundles: open
-https://github.com/RusTus/sentora-installers-2027/releases/tag/current > Edit (the newest
-version release has the same title), replace the file, Update release.
+Attach the bundle to the "current" release like the other bundles: the one titled
+"Sentora-<version> (current)" and marked Latest (or open
+https://github.com/RusTus/sentora-installers-2027/releases/tag/current), Edit, replace the
+file, Update release.
 
 Add it to a server installed before it (as root):
 
