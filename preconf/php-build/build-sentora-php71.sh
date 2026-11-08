@@ -10,15 +10,17 @@
 # carries its own copies of the libraries that changed (OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14,
 # libmcrypt 2.5.8, OpenLDAP 2.6.10), compiled in. LDAP (sites that log users in against Active
 # Directory, such as Snipe-IT) has its own copy because Ubuntu's libldap uses OpenSSL 3, which can not
-# share a process with the OpenSSL 1.1 compiled in; this one uses GnuTLS for LDAPS. Besides the C
-# library it only needs libraries whose versions are the same on Ubuntu 24.04 and 26.04 (zlib,
-# libpng16, libjpeg-turbo, freetype, libwebp, gmp, GnuTLS 30), so it can be built on either. No intl
-# extension (it needs an ICU this old PHP can not build against).
+# share a process with the OpenSSL 1.1 compiled in; this one uses GnuTLS for LDAPS. intl and xsl
+# (Magento 2 needs both) come with their own ICU 64.2 and libxslt 1.1.34: Ubuntu's ICU is too new for
+# this PHP, and its libxslt is built on the libxml2 this PHP can not use. Besides the C and C++
+# libraries it only needs libraries whose versions are the same on Ubuntu 24.04 and 26.04 (zlib,
+# libpng16, libjpeg-turbo, freetype, libwebp, gmp, GnuTLS 30), so it can be built on either.
 #
 # Usage (as root, on Ubuntu 24.04 or 26.04 amd64; a spare VM is best, it installs compilers):
 #     bash build-sentora-php71.sh
 # Every source is checked against its published SHA-256 (OpenLDAP publishes SHA3-512; libmcrypt, from
-# 2007, only has an MD5). Writes the .tar.gz in the current folder.
+# 2007, only has an MD5; ICU publishes a PGP signature, checked against the ICU developers' KEYS when
+# this was written, and the SHA-256 here is of that file). Writes the .tar.gz in the current folder.
 set -euo pipefail
 
 V=7.1.33
@@ -61,6 +63,8 @@ fetch openssl-1.1.1w.tar.gz https://www.openssl.org/source/openssl-1.1.1w.tar.gz
 fetch curl-7.88.1.tar.xz https://curl.se/download/curl-7.88.1.tar.xz 1dae31b2a7c1fe269de99c0c31bb488346aab3459b5ffca909d6938249ae415f
 fetch libxml2-2.9.14.tar.xz https://download.gnome.org/sources/libxml2/2.9/libxml2-2.9.14.tar.xz 60d74a257d1ccec0475e749cba2f21559e48139efba6ff28224357c7c798dfee
 fetch libmcrypt-2.5.8.tar.gz https://downloads.sourceforge.net/project/mcrypt/Libmcrypt/2.5.8/libmcrypt-2.5.8.tar.gz 0821830d930a86a5c69110837c55b7da md5
+fetch icu4c-64_2-src.tgz https://github.com/unicode-org/icu/releases/download/release-64-2/icu4c-64_2-src.tgz 627d5d8478e6d96fc8c90fed4851239079a561a6a8b9e48b0892f24e82d31d6c
+fetch libxslt-1.1.34.tar.xz https://download.gnome.org/sources/libxslt/1.1/libxslt-1.1.34.tar.xz 28c47db33ab4daefa6232f31ccb3c65260c825151ec86ec461355247f3f56824
 fetch openldap-2.6.10.tgz https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.10.tgz 2f87787885410ba2337da7f4201293bd023ad9d34e1e133a5cc1caac4550abd1c1069ddeb3605aac99f3c7bcc9d9b69d6be87e2b722097d018613e698d76efde sha3-512
 cd "$WORK/src"
 for f in *.tar.* *.tgz; do tar -xf "$f"; done
@@ -96,6 +100,17 @@ step "Building OpenLDAP 2.6.10 (client library, GnuTLS)" openldap
     && make -j"$J" depend && make -j"$J" -C include && make -j"$J" -C libraries \
     && make -C include install && make -C libraries install ) > "$WORK/openldap.log" 2>&1 || fail openldap
 
+step "Building ICU 64.2 (for intl)" icu
+( cd icu/source && CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC -std=c++11" ./configure --prefix="$DEPS" \
+    --disable-shared --enable-static --with-data-packaging=static --enable-icu-config \
+    --disable-tests --disable-samples --disable-extras \
+    && make -j"$J" && make install ) > "$WORK/icu.log" 2>&1 || fail icu
+
+step "Building libxslt 1.1.34 (for xsl)" libxslt
+( cd libxslt-1.1.34 && ./configure --prefix="$DEPS" --disable-shared --enable-static --with-pic \
+    --with-libxml-prefix="$DEPS" --without-python --without-crypto --without-debugger \
+    && make -j"$J" && make install ) > "$WORK/libxslt.log" 2>&1 || fail libxslt
+
 # PHP 7.1's gd asks <dir>/bin/freetype-config, which freetype stopped shipping: answer from pkg-config
 mkdir -p "$DEPS/freetype/bin"
 cat > "$DEPS/freetype/bin/freetype-config" <<'EOF_FT'
@@ -111,9 +126,11 @@ chmod 755 "$DEPS/freetype/bin/freetype-config"
 
 step "Configuring PHP $V" configure
 cd "php-$V"
-export CFLAGS="-O2 -g0 -fPIC -fcommon -std=gnu17 -fpermissive" CXXFLAGS="-O2 -g0 -fPIC"
-# the static OpenSSL needs these at the end of every link
-export LIBS="-ldl -lpthread -lgnutls" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
+export CFLAGS="-O2 -g0 -fPIC -fcommon -std=gnu17 -fpermissive"
+# (ICU 61 and later keep their names in the icu namespace unless told otherwise; PHP 7.1's intl expects them outside)
+export CXXFLAGS="-O2 -g0 -fPIC -std=c++11 -DU_USING_ICU_NAMESPACE=1"
+# the static OpenSSL and ICU need these at the end of every link
+export LIBS="-ldl -lpthread -lgnutls -lstdc++ -lm" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig" PATH="$DEPS/bin:$PATH"
 ./configure --prefix="$PREFIX" --sysconfdir="$PREFIX/etc" --localstatedir=/var \
     --with-config-file-path="$PREFIX/etc" --with-config-file-scan-dir="$PREFIX/etc/conf.d" \
     --with-libdir=lib/x86_64-linux-gnu \
@@ -125,6 +142,7 @@ export LIBS="-ldl -lpthread -lgnutls" PKG_CONFIG_PATH="$DEPS/lib/pkgconfig"
     --with-gd --with-jpeg-dir=/usr --with-png-dir=/usr --with-freetype-dir="$DEPS/freetype" --with-webp-dir=/usr \
     --enable-zip --enable-mysqlnd --with-mysql-sock=/var/run/mysqld/mysqld.sock \
     --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd --with-pdo-sqlite --with-sqlite3 --enable-opcache \
+    --enable-intl --with-icu-dir="$DEPS" --with-xsl="$DEPS" \
     > "$WORK/configure.log" 2>&1 || fail configure
 
 step "Compiling PHP $V (this takes a while)" make
@@ -139,7 +157,7 @@ find "$P/bin" "$P/sbin" "$P/lib/php/extensions" -type f -exec strip --strip-unne
 cat > "$P/BUILD-INFO" <<EOI
 PHP $V for Sentora (amd64) - ONLY for moving old Sentora 2.0.2 websites. No security fixes since 1 Dec 2019.
 Built $(date -u +%Y-%m-%d) on $PRETTY_NAME with build-sentora-php71.sh from php-$V.
-Compiled in: OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14, libmcrypt 2.5.8, OpenLDAP 2.6.10 (GnuTLS).
+Compiled in: OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14, libmcrypt 2.5.8, OpenLDAP 2.6.10 (GnuTLS), ICU 64.2, libxslt 1.1.34.
 Configure options: see bin/php-config --configure-options
 EOI
 
@@ -147,12 +165,12 @@ EOI
 "$P/sbin/php-fpm" -v | head -1
 MODULES=$("$P/bin/php" -n -m)
 MISSING=""
-for ext in mysqli pdo_mysql mysqlnd gd curl openssl mbstring xml dom simplexml soap zip mcrypt json sockets gmp bcmath ldap fileinfo; do
+for ext in mysqli pdo_mysql mysqlnd gd curl openssl mbstring xml dom simplexml soap zip mcrypt json sockets gmp bcmath ldap fileinfo intl xsl; do
     grep -qix "$ext" <<< "$MODULES" || MISSING="$MISSING $ext"
 done
 [ -z "$MISSING" ] || { echo "Missing extensions:$MISSING"; exit 1; }
 LINKED=$(ldd "$P/sbin/php-fpm" | awk '{print $1}' | sort -u | tr '\n' ' ')
-for lib in libssl libcrypto libcurl libxml2 libicu libmcrypt libldap liblber; do
+for lib in libssl libcrypto libcurl libxml2 libicu libxslt libexslt libmcrypt libldap liblber; do
     case " $LINKED" in *" $lib"*) echo "php-fpm links the system's $lib: it would not run on Ubuntu 26.04. Stopping."; exit 1 ;; esac
 done
 echo "Links: $LINKED"
