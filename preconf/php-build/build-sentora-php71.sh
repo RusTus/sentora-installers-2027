@@ -143,6 +143,10 @@ chmod 755 "$DEPS/freetype/bin/freetype-config"
 
 step "Configuring PHP $V" configure
 cd "php-$V"
+# intl defines MessageFormatAdapter::getArgTypeList, which a static ICU (64.2) already has, word for word
+# (both return m.getArgTypeList(count)): with ICU compiled in, the linker finds it twice. Use ICU's.
+perl -0pi -e 's/const Formattable::Type\*\s*\nMessageFormatAdapter::getArgTypeList\(const MessageFormat& m,\s*int32_t& count\) \{\s*return m\.getArgTypeList\(count\);\s*\}\n//' ext/intl/msgformat/msgformat_helpers.cpp
+grep -q 'return m.getArgTypeList(count);' ext/intl/msgformat/msgformat_helpers.cpp && { echo "intl: the getArgTypeList patch did not apply. Stopping."; exit 1; }
 export CFLAGS="-O2 -g0 -fPIC -fcommon -std=gnu17 -fpermissive"
 # (ICU 61 and later keep their names in the icu namespace unless told otherwise; PHP 7.1's intl expects them outside)
 export CXXFLAGS="-O2 -g0 -fPIC -std=c++11 -DU_USING_ICU_NAMESPACE=1"
