@@ -195,7 +195,8 @@ addon apcu apcu-5.1.21 --enable-apcu
 addon redis redis-5.3.7 --enable-redis
 addon memcached memcached-3.2.0 --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
 addon imagick imagick-3.7.0 --with-imagick=/usr
-addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl=/usr --with-libdir=lib/x86_64-linux-gnu
+# (c-client is in /usr/lib; OpenSSL, found through pkg-config, in /usr/lib/x86_64-linux-gnu)
+addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
 cd "$WORK/src/php-$V"
 
 # switches on the add-ons that load on the server (run by the installer and sentora-php-install)
@@ -247,7 +248,7 @@ done
 echo "Links: $LINKED"
 # the compiled-in libraries must stay private (--exclude-libs), or an add-on's Ubuntu library could
 # call into them
-LEAK=$(nm -D --defined-only "$P/sbin/php-fpm" | awk '{print $3}' | grep -E '^(SSL_|EVP_|OPENSSL_|CRYPTO_|xml[A-Z]|xslt|exslt|curl_|ldap_|ber_|mcrypt_|u[a-z]*_.*_64$)' | head -5)
+LEAK=$(nm -D --defined-only "$P/sbin/php-fpm" | awk '{print $3}' | grep -E '^(SSL_|EVP_|OPENSSL_|CRYPTO_|xml[A-Z]|xslt|exslt|curl_(easy|multi|global|share|slist|version)|ldap_|ber_|mcrypt_|u[a-z]*_.*_64$)' | head -5)
 [ -z "$LEAK" ] || { echo "php-fpm still offers compiled-in library functions to others ($LEAK). Stopping."; exit 1; }
 nm -D --defined-only "$P/sbin/php-fpm" | grep -q ' zend_parse_parameters$' || { echo "php-fpm offers no PHP functions to extensions. Stopping."; exit 1; }
 EXT_DIR=$("$TOOLS/php-config" --extension-dir)
