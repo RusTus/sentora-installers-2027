@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>200</latestversion>
+    <latestversion>201</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/webalizer_stats.zpp</downloadurl>
     <name>Webalizer Stats</name>
-    <desc>You can view many statistics such as visitor information, bandwidth used, referral information and most viewed pages etc. Web stats are based on Domains and sub-domains so to view web stats for a particular domain or subdomain use the drop-down menu to select the domain or sub-domain you want to view web stats for.</desc>
+    <desc>See how your websites are used: hits, visits, pages, traffic, top pages, referrers and search terms, by month, day and hour, made every hour with Webalizer 2.23.</desc>
     <ostype>lin</ostype>
     <authorname>Sentora for Ubuntu 26.04 (Webalizer 2.23)</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
+    <updatedesc>The page in the panel's style (domain picker, when the report was made, Reload and New window), the report itself in the panel's Light or Dark, and its own sidebar icon.</updatedesc>
 </updateserver>
