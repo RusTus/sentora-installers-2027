@@ -2075,6 +2075,14 @@ chown root:root "$PANEL_DATA/logs/proftpd"; chmod 755 "$PANEL_DATA/logs/proftpd"
 touch /var/lib/sentora/phpmyadmin-auth.log
 chown "$PANEL_USER":"$PANEL_USER" /var/lib/sentora/phpmyadmin-auth.log
 chmod 640 /var/lib/sentora/phpmyadmin-auth.log
+# The panel's other logs there, made now: the folder itself is root's (below), so the panel can write
+# these but can not make, rename or link anything at its top level, where root jobs write their state
+# (a link planted there would have root write through it; the daemon keeps this so: sys_statedir)
+for f in twofactor.log password-reveal.log shadowing.log panel-update.log; do
+    touch "/var/lib/sentora/$f"; chown "$PANEL_USER":"$PANEL_USER" "/var/lib/sentora/$f"; chmod 640 "/var/lib/sentora/$f"
+done
+chown root:root /var/lib/sentora
+chmod 755 /var/lib/sentora
 cp $PANEL_CONF/fail2ban/filter.d/*.conf /etc/fail2ban/filter.d/
 sed "s|!SERVER_IP!|$PUBLIC_IP|" $PANEL_CONF/fail2ban/sentora.conf > /etc/fail2ban/jail.d/sentora.conf
 if [ -f /var/log/sogo/sogo.log ]; then
