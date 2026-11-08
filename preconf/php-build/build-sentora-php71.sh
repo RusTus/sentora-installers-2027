@@ -48,7 +48,8 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
 fi
 
 WORK=$(mktemp -d /tmp/sentora-php71-build.XXXXXX)
-trap 'rm -rf "$WORK"' EXIT
+# (KEEP_WORK=1 keeps the work folder, to look at or retry a step)
+trap '[ "${KEEP_WORK:-0}" = 1 ] || rm -rf "$WORK"' EXIT
 DEPS="$WORK/deps"
 mkdir -p "$DEPS/lib" "$WORK/src"
 # PHP 7.1's configure looks for libraries in <dir>/lib/x86_64-linux-gnu (--with-libdir below)
@@ -194,7 +195,7 @@ addon apcu apcu-5.1.21 --enable-apcu
 addon redis redis-5.3.7 --enable-redis
 addon memcached memcached-3.2.0 --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
 addon imagick imagick-3.7.0 --with-imagick=/usr
-addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl=/usr
+addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl=/usr --with-libdir=lib/x86_64-linux-gnu
 cd "$WORK/src/php-$V"
 
 # switches on the add-ons that load on the server (run by the installer and sentora-php-install)
