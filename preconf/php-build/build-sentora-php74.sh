@@ -160,7 +160,8 @@ for t in phpize php-config; do sed "s|$PREFIX|$P|g" "$P/bin/$t" > "$TOOLS/$t"; c
 addon() {   # name, source folder, configure options...
     local name="$1" dir="$2"; shift 2
     step "Building the $name add-on" "addon-$name"
-    ( cd "$dir" && env -u PKG_CONFIG_PATH -u LIBS -u LDFLAGS PATH="/usr/sbin:/usr/bin:/sbin:/bin" \
+    # (plain pkg-config: --static, for the compiled-in libraries, asks Ubuntu's OpenSSL for static parts it lacks)
+    ( cd "$dir" && env -u PKG_CONFIG_PATH -u PKG_CONFIG -u LIBS -u LDFLAGS PATH="/usr/sbin:/usr/bin:/sbin:/bin" \
         CFLAGS="-O2 -g0 -fPIC -fcommon -std=gnu17" CXXFLAGS="-O2 -g0 -fPIC" bash -c '
         "$0/phpize" && ./configure --with-php-config="$0/php-config" "$@" && make -j"'"$J"'" && make install' "$TOOLS" "$@" \
     ) > "$WORK/addon-$name.log" 2>&1 || fail "addon-$name"
