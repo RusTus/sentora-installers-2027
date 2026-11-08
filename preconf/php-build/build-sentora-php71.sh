@@ -101,7 +101,9 @@ step "Building OpenLDAP 2.6.10 (client library, GnuTLS)" openldap
     && make -C include install && make -C libraries install ) > "$WORK/openldap.log" 2>&1 || fail openldap
 
 step "Building ICU 64.2 (for intl)" icu
-( cd icu/source && CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC -std=c++11" ./configure --prefix="$DEPS" \
+# (no Python: the source carries its data ready-made, and ICU 64's Python helper needs distutils,
+# which Python 3.12 and later no longer have)
+( cd icu/source && ac_cv_prog_PYTHON= CFLAGS="-O2 -fPIC" CXXFLAGS="-O2 -fPIC -std=c++11" ./configure --prefix="$DEPS" \
     --disable-shared --enable-static --with-data-packaging=static --enable-icu-config \
     --disable-tests --disable-samples --disable-extras \
     && make -j"$J" && make install ) > "$WORK/icu.log" 2>&1 || fail icu
