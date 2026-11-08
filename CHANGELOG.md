@@ -367,6 +367,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Webalizer Stats 201 (add-on repository): the page in the panel's style (domain picker that opens the report at once, when it was made and will be next, Reload and New window, the report sized to fit), the report itself restyled to match the panel's Light or Dark, its own line-chart icon, and a shorter description; its old copy of jQuery is removed on upgrade.
 - Repo Browser: while a module's update is queued, its "Version … is available" box says so instead of showing the Update button again (a second click was refused, but the button was still offered).
 - Webalizer Stats 202 (add-on repository): a modern palette for the graphs and the bars under the table headings (webalizer.conf); the graphs keep their layout.
+- Visitor Stats 201 (add-on repository): the page in the panel's style (domain picker that opens the report at once, when it was made and will be next, Reload and New window, the report sized to fit), the report itself restyled to match the panel's Light or Dark (heat maps keep their colours, days without traffic faint instead of black), its own icon, and a shorter description.
 - Release 2027.37: Repo Browser shows "Upgrade queued" instead of a second Update button while a module's update waits for the daemon.
 - Release 2027.36: add-on modules can bring their own sidebar and dashboard icon (Webalizer Stats 201 does).
 - Release 2027.35: hourly module update check with a notice for administrators; zppy upgrade records the module's new version.
