@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>632</latestversion>
+    <latestversion>633</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/PHP-Adminer.zpp</downloadurl>
     <name>PHP-Adminer</name>
     <desc>Manage your MySQL databases in the browser with Adminer: tables, data, SQL queries, import and export. Log in with one of your own MySQL users.</desc>
@@ -9,5 +9,5 @@
     <authorname>Sentora for Ubuntu 26.04 (Adminer 6.3.0 by Jakub Vrana, adminer.org)</authorname>
     <authoremail></authoremail>
     <authorurl>https://www.adminer.org/</authorurl>
-    <updatedesc>No scroll bars around Adminer: its frame grows with each page and the panel page scrolls; a table wider than the space scrolls sideways in its own box. Includes the panel style in Light or Dark from 631.</updatedesc>
+    <updatedesc>Security: a panel account that is switched off or deleted is turned away from Adminer at once (it could go on using an open session). Includes the panel style and the no-scroll-bar layout.</updatedesc>
 </updateserver>
