@@ -473,13 +473,13 @@ fi
 # http:// address itself.
 clock_from() {
     if command -v curl > /dev/null 2>&1; then
-        curl -sSI --max-time 10 "$1" 2> /dev/null | sed -n 's/^[Dd]ate: *//p' | tr -d '\r' | head -1
+        curl -sSI --max-time 10 "$1" 2> /dev/null | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     elif command -v wget > /dev/null 2>&1; then
-        wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *Date: *//p' | head -1
+        wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     elif [[ "$1" == http://* ]]; then
         local host=${1#http://}; host=${host%%/*}
         timeout 10 bash -c 'exec 5<> "/dev/tcp/$0/80" && printf "HEAD / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" "$0" >&5 && cat <&5' "$host" 2> /dev/null \
-            | sed -n 's/^[Dd]ate: *//p' | tr -d '\r' | head -1
+            | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     fi
 }
 # The clock must be verifiably right before anything is installed (package lists,

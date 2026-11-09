@@ -465,9 +465,9 @@ fi
 # curl first: wget is only installed further down.
 clock_from() {
     if command -v curl > /dev/null 2>&1; then
-        curl -sSI --max-time 10 "$1" 2> /dev/null | sed -n 's/^[Dd]ate: *//p' | tr -d '\r' | head -1
+        curl -sSI --max-time 10 "$1" 2> /dev/null | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     elif command -v wget > /dev/null 2>&1; then
-        wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *Date: *//p' | head -1
+        wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     fi
 }
 # The clock must be verifiably right before anything is installed (package lists,
