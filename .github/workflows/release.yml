@@ -1,7 +1,7 @@
 # Builds the files of the installers release and replaces those of the same names on the release
 # tagged "current" (no new release or tag):
-#   from this repository's master2027: sentora-installers-2027.zip, sentora2027-ub26.04 (the
-#     installer), sentora-tls-check.sh
+#   from this repository's master2027: sentora-installers-2027.zip, sentora2027-ub26.04 and
+#     sentora2027-deb13 (the installers for Ubuntu 26.04 and Debian 13), sentora-tls-check.sh
 #   from sentora-core-2027's master2027 (bin/, their only copy): sentora-migrate-export (the old
 #     server wgets it from here), sentora-smoke-test, sentora-web-probe
 # Not touched: the PHP bundles and testssl_sh-3_2_5.zip (uploaded by hand; sentora-tls-check.sh
@@ -43,6 +43,7 @@ jobs:
         run: |
           git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
           git show master2027:sentora2027-ub26.04 > sentora2027-ub26.04
+          git show master2027:sentora2027-deb13 > sentora2027-deb13
           git show master2027:sentora-tls-check.sh > sentora-tls-check.sh
           for f in sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             wget -nv -O "$f" "https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/bin/$f"
@@ -69,7 +70,7 @@ jobs:
           EOF
           mkdir -p old
           upload=""
-          for f in sentora-installers-2027.zip sentora2027-ub26.04 sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
+          for f in sentora-installers-2027.zip sentora2027-ub26.04 sentora2027-deb13 sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             sha256sum "$f"
             if [ "$FORCE" = "true" ]; then
               echo "$f: upload (forced)"; upload="$upload $f"; continue

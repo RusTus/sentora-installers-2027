@@ -1,10 +1,12 @@
 #!/bin/bash
 #
-# Build an extra PHP version for Sentora on Ubuntu 26.04 (amd64) and package it
-# the way sentora2027-ub26.04 expects:
-#     sentora-php-<major.minor>-ubuntu26.04-amd64.tar.gz
+# Build an extra PHP version for Sentora on Ubuntu 26.04 or Debian 13 (amd64) and package it
+# the way sentora2027-ub26.04 and sentora2027-deb13 expect:
+#     sentora-php-<major.minor>-ubuntu26.04-amd64.tar.gz    (built on Ubuntu 26.04)
+#     sentora-php-<major.minor>-debian13-amd64.tar.gz       (built on Debian 13)
+# A bundle runs only on the system it was built on (their libraries differ).
 #
-# Usage (as root, on an Ubuntu 26.04 machine; a spare VM is best):
+# Usage (as root, on an Ubuntu 26.04 or Debian 13 machine; a spare VM or a container is best):
 #     bash build-sentora-php.sh 8.3.37                      # downloads from php.net
 #     bash build-sentora-php.sh 8.3.37 php-8.3.37.tar.xz    # uses a file you downloaded
 #
@@ -25,13 +27,20 @@ if [[ ! "$V" =~ ^8\.[0-9]+\.[0-9]+$ ]]; then
 fi
 MM="${V%.*}"
 PREFIX="/opt/sentora-php/$MM"
-OUT="$(pwd)/sentora-php-$MM-ubuntu26.04-amd64.tar.gz"
 
 . /etc/os-release
-if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "26.04" || "$(uname -m)" != "x86_64" ]]; then
-    echo "This builds for Ubuntu 26.04 amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
+if [[ "${ID:-} ${VERSION_ID:-}" == "ubuntu 26.04" ]]; then
+    OS_TAG="ubuntu26.04"; OS_NAME="Ubuntu 26.04"
+elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
+    OS_TAG="debian13"; OS_NAME="Debian 13"
+else
+    OS_TAG=""
+fi
+if [ -z "$OS_TAG" ] || [ "$(uname -m)" != "x86_64" ]; then
+    echo "This builds for Ubuntu 26.04 or Debian 13 amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
     exit 1
 fi
+OUT="$(pwd)/sentora-php-$MM-$OS_TAG-amd64.tar.gz"
 
 # Build tools and the -dev packages of the libraries PHP links against
 if [ "${SKIP_APT:-0}" != "1" ]; then
@@ -39,7 +48,9 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
         libxml2-dev libcurl4-openssl-dev libonig-dev libzip-dev libicu-dev libsodium-dev \
         libargon2-dev libxslt1-dev libpng-dev libjpeg-dev libwebp-dev libfreetype-dev \
         libssl-dev libsqlite3-dev zlib1g-dev libgmp-dev libldap-dev \
-        libmemcached-dev libsasl2-dev libmagickwand-dev libc-client2007e-dev libkrb5-dev
+        libmemcached-dev libsasl2-dev libmagickwand-dev libkrb5-dev
+    # c-client (the imap add-on) is in Ubuntu only: Debian 13 dropped it
+    [ "$OS_TAG" = debian13 ] || apt-get -yqq install libc-client2007e-dev
 fi
 
 WORK=$(mktemp -d /tmp/sentora-php-build.XXXXXX)
@@ -93,7 +104,7 @@ P="$STAGE$PREFIX"
 cp php.ini-production "$P/lib/php.ini-production"
 rm -rf "$P/php/man"
 
-# --- add-ons (PHP 8.1, or ADDONS=1): PECL extensions and imap on Ubuntu's own libraries ------------
+# --- add-ons (PHP 8.1, or ADDONS=1): PECL extensions and imap on the system's own libraries --------
 ADDONS="${ADDONS:-$([ "$MM" = 8.1 ] && echo 1 || echo 0)}"
 ADDON_LIST=""
 if [ "$ADDONS" = 1 ]; then
@@ -122,15 +133,17 @@ EOF_PECL
     addon memcached "$WORK/pecl/memcached-3.2.0" --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
     addon imagick "$WORK/pecl/imagick-3.7.0" --with-imagick=/usr
     # (imap left PHP in 8.4; c-client is in /usr/lib, OpenSSL found through pkg-config)
-    [ -d "$SRC/ext/imap" ] && addon imap "$SRC/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
+    [ -d "$SRC/ext/imap" ] && [ -e /usr/include/c-client/c-client.h ] && addon imap "$SRC/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
     cat > "$P/bin/sentora-php-addons" <<'EOF_ADDONS'
 #!/bin/bash
 # Switch on this PHP's add-on extensions (apcu, redis, memcached, imagick, imap) that load on this
-# server, after installing the Ubuntu libraries they use; one that does not load stays off, so PHP
+# server, after installing the system libraries they use; one that does not load stays off, so PHP
 # itself always starts. Run as root by the installer and sentora-php-install; safe to run again.
 P=$(cd "$(dirname "$0")/.." && pwd)
 apt-get -qq -y install libmemcached11t64 libmemcachedutil2t64 libhashkit2t64 libsasl2-2 \
-    libmagickwand-7.q16-10 libc-client2007e > /dev/null 2>&1 || true
+    libmagickwand-7.q16-10 > /dev/null 2>&1 || true
+# (c-client, for imap: Ubuntu only)
+apt-get -qq -y install libc-client2007e > /dev/null 2>&1 || true
 EXT=$("$P/bin/php-config" --extension-dir)
 mkdir -p "$P/etc/conf.d"
 for e in apcu redis memcached imagick imap; do
@@ -151,7 +164,7 @@ EOF_ADDONS
 fi
 find "$P/bin" "$P/sbin" "$P/lib/php/extensions" -type f -exec strip --strip-unneeded {} + 2> /dev/null || true
 cat > "$P/BUILD-INFO" <<EOI
-PHP $V for Sentora on Ubuntu 26.04 (amd64)
+PHP $V for Sentora on $OS_NAME (amd64)
 Built $(date -u +%Y-%m-%d) with build-sentora-php.sh from php-$V.${ADDON_LIST:+
 Add-ons (bin/sentora-php-addons switches them on):$ADDON_LIST}
 Configure options: see bin/php-config --configure-options

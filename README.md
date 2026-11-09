@@ -1,15 +1,16 @@
 # Sentora-2027 installer files
 
-Service configuration, database setup and build sources used by the Sentora-2027 installer for **Ubuntu 26.04**.
+Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04** and **Debian 13**.
 
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white)
+![Debian](https://img.shields.io/badge/Debian-13-A81D33?logo=debian&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?logo=php&logoColor=white)
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
 
-This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04`) downloads it with the panel and copies these files into place. It isn't run on its own.
+This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04` for Ubuntu 26.04, `sentora2027-deb13` for Debian 13) downloads it with the panel and copies these files into place. It isn't run on its own.
 
 > [!NOTE]
-> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9). It downloads from these GitHub releases only, not from sentora.org.
+> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9) and Debian 13 (Debian's own packages: PHP 8.4, MariaDB 11.8, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.8). It downloads from these GitHub releases only, not from sentora.org.
 
 ## Release files
 
@@ -17,9 +18,11 @@ The installer downloads from the GitHub releases of both repositories with the t
 
 | Release | File | What it is |
 | --- | --- | --- |
-| [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer |
+| [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer for Ubuntu 26.04 |
+| | `sentora2027-deb13` | The installer for Debian 13 |
 | | `sentora-installers-2027.zip` | This repository |
-| | `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions (a missing file means that version is not installed) |
+| | `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions for Ubuntu 26.04 (a missing file means that version is not installed) |
+| | `sentora-php-8.2-debian13-amd64.tar.gz`, `8.3`, `8.5`, `7.1` | The same for Debian 13 (built by **Actions > PHP bundles**) |
 | [sentora-core-2027](https://github.com/RusTus/sentora-core-2027/releases) | `sentora-core-2027.zip` | The panel, with phpMyAdmin 5.2 and Roundcube 1.7 |
 
 Every download is checked against the SHA-256 GitHub lists for it. To download from your own web server instead, put all the files in one folder and set `SENTORA_DOWNLOAD_URL` at the top of the installer.
@@ -30,7 +33,7 @@ To build this repository's zip from a clone:
 git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
 ```
 
-To publish a new version, push to `master2027` and run **Actions > Release > Run workflow**. It builds `sentora-installers-2027.zip` and `sentora2027-ub26.04` from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. It also takes `sentora-migrate-export`, `sentora-smoke-test` and `sentora-web-probe` from the core and `sentora-tls-check.sh` from here, uploads only the files that changed, rewrites the release page (title `Sentora-<VERSION>`, What's new since the previous version and this README), and makes one release per version (tag `v<VERSION>`) with What's new, the whole change log and a copy of every file. The PHP bundles and `testssl_sh-3_2_5.zip` are still replaced by hand on the release. The core zip has the same workflow in [sentora-core-2027](https://github.com/RusTus/sentora-core-2027).
+To publish a new version, push to `master2027` and run **Actions > Release > Run workflow**. It builds `sentora-installers-2027.zip`, `sentora2027-ub26.04` and `sentora2027-deb13` from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. It also takes `sentora-migrate-export`, `sentora-smoke-test` and `sentora-web-probe` from the core and `sentora-tls-check.sh` from here, uploads only the files that changed, rewrites the release page (title `Sentora-<VERSION>`, What's new since the previous version and this README), and makes one release per version (tag `v<VERSION>`) with What's new, the whole change log and a copy of every file. The Debian 13 PHP bundles are built and put on the release by **Actions > PHP bundles > Run workflow** (in a Debian 13 container); the Ubuntu 26.04 bundles and `testssl_sh-3_2_5.zip` are still replaced by hand. The core zip has the same workflow in [sentora-core-2027](https://github.com/RusTus/sentora-core-2027).
 
 ## Installing
 
@@ -40,6 +43,19 @@ On a clean Ubuntu 26.04 server, as root:
 wget -O sentora2027-ub26.04 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-ub26.04
 bash sentora2027-ub26.04
 ```
+
+On a clean Debian 13 server (a minimal install with only the SSH server is fine), as root. A minimal Debian has no wget yet:
+
+```bash
+apt-get update && apt-get install -y wget
+```
+
+```bash
+wget -O sentora2027-deb13 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-deb13
+bash sentora2027-deb13
+```
+
+On Debian everything comes from Debian's own packages (PHP 8.4, MariaDB, Apache, Postfix, Dovecot, BIND, SOGo), so `apt-get upgrade` and Debian's daily security updates keep them current. The panel calls MariaDB "MySQL", as it is compatible with it.
 
 Or without questions:
 

@@ -1,6 +1,13 @@
 Extra PHP versions (8.2 - 8.4) for Sentora on Ubuntu 26.04
 ==========================================================
 
+(Debian 13: the same scripts build sentora-php-<version>-debian13-amd64.tar.gz when run on Debian 13,
+for 8.2, 8.3 and 8.5 (Debian's own PHP is 8.4) and 7.1 (without the imap add-on: Debian 13 has no
+c-client). The "PHP bundles" workflow of this repository (Actions > PHP bundles > Run workflow) builds
+them in a Debian 13 container and puts them on the "current" release; give it the PHP versions to
+build, such as "8.5.12 8.3.36 8.2.35 7.1". sentora-php-install on a Debian server downloads the
+debian13 bundle. The rest of this file applies to both, with "debian13" for "ubuntu26.04".)
+
 The installer downloads sentora-php-<version>-ubuntu26.04-amd64.tar.gz from the
 GitHub release of RusTus/sentora-installers-2027 and installs each in /opt/sentora-php/<version>/ as the service
 sentora-php<version>-fpm. These builds are not updated by apt: when PHP

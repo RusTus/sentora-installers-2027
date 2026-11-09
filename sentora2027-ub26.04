@@ -229,6 +229,9 @@ ui_exit() {
     fi
 }
 trap 'ui_exit' EXIT
+# Files this installer makes get the usual permissions, whatever the shell that started it had
+# (with umask 0, MariaDB ignores its settings file as world-writable, and more)
+umask 022
 
 #--- Display the 'welcome' splash/user warning info..
 if [ -n "$SENTORA_DOWNLOAD_URL" ]; then

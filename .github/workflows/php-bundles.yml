@@ -1,0 +1,97 @@
+# Builds the extra PHP versions for Debian 13 (sentora-php-<version>-debian13-amd64.tar.gz) in a
+# Debian 13 container, with the build scripts in preconf/php-build, and puts them on the release
+# tagged "current" (replacing files of the same names). sentora2027-deb13 and sentora-php-install
+# download them from there. Run it from Actions > PHP bundles > Run workflow, again whenever PHP
+# publishes a release for one of the versions (sentora-update-check says so on a server).
+#
+# Each version is checked against the SHA-256 php.net publishes for it (7.1 and its libraries against
+# theirs: see build-sentora-php71.sh). A bundle runs only on the system it was built on; the Ubuntu
+# 26.04 bundles are built by hand (see preconf/php-build/README).
+name: PHP bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: PHP versions to build (full numbers; 7.1 builds 7.1.33)
+        type: string
+        default: "8.5.12 8.3.36 8.2.35 7.1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: php-bundles
+  cancel-in-progress: false
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.v.outputs.versions }}
+    steps:
+      - id: v
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        run: |
+          json=$(printf '%s\n' $VERSIONS | grep -E '^(7\.1|8\.[0-9]+\.[0-9]+)$' | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          [ "$json" != "[]" ] || { echo "No valid version in: $VERSIONS"; exit 1; }
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: list
+    runs-on: ubuntu-latest
+    container: debian:13
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.list.outputs.versions) }}
+    steps:
+      - name: Tools
+        run: |
+          apt-get -qq update
+          DEBIAN_FRONTEND=noninteractive apt-get -yqq install git ca-certificates wget > /dev/null
+      - name: Check out master2027
+        uses: actions/checkout@v5
+        with:
+          ref: master2027
+      - name: Build PHP ${{ matrix.version }}
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          V: ${{ matrix.version }}
+        run: |
+          mkdir -p out && cd out
+          if [ "$V" = "7.1" ]; then
+              bash ../preconf/php-build/build-sentora-php71.sh
+          else
+              bash ../preconf/php-build/build-sentora-php.sh "$V"
+          fi
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: php-${{ matrix.version }}
+          path: out/sentora-php-*-debian13-amd64.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          merge-multiple: true
+      - name: Replace them on the current release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la bundles
+          set -- bundles/sentora-php-*-debian13-amd64.tar.gz
+          [ -e "$1" ] || { echo "Nothing was built."; exit 1; }
+          sha256sum "$@"
+          for try in 1 2 3 4 5; do
+            gh release upload current "$@" --clobber --repo "$GITHUB_REPOSITORY" && exit 0
+            echo "Upload failed (try $try), trying again in $(( try * 15 ))s"; sleep $(( try * 15 ))
+          done
+          exit 1
