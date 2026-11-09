@@ -5,3 +5,4 @@
 # workflow does not change the zip and its SHA-256
 /.github export-ignore
 /.gitattributes export-ignore
+/CLAUDE.md export-ignore
