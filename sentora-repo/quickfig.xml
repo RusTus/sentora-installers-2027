@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>206</latestversion>
+    <latestversion>207</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/quickfig.zpp</downloadurl>
     <name>QuickFig</name>
-    <desc>Your WordPress settings without editing wp-config.php: the site address, debugging, security, memory, updates and scheduled tasks, with rescue tools for a site that broke, the cache, maintenance mode and own tools of a Magento shop, a switch to https, reminders when debug mode is left on or a site is stuck in maintenance, and a crawler blocker for every website (bad bots, scrapers posing as an old Chrome, robots.txt rules for the app it finds: WordPress, WooCommerce, Magento, OpenCart, PrestaShop, Joomla, Drupal and more).</desc>
+    <desc>Your WordPress settings without editing wp-config.php: the site address, debugging, security, memory, updates and scheduled tasks, with rescue tools for a site that broke, the cache, maintenance mode and own tools of a Magento shop, a switch to https, reminders when debug mode is left on or a site is stuck in maintenance, a crawler blocker for every website (who visited in the last 24 hours with a Block button, bad bots, scrapers posing as an old Chrome, robots.txt rules for the app it finds), hardening switches (no PHP in upload folders, xmlrpc.php off, security headers, always https, HSTS, one www address), a permissions check with Fix, and WordPress's updates at a glance.</desc>
     <ostype>lin</ostype>
     <authorname>Sentora for Ubuntu 26.04</authorname>
     <authoremail></authoremail>
