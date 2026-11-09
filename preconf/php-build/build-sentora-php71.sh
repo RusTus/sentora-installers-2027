@@ -42,23 +42,37 @@ if [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" =~ ^(24|26)\.04$ ]]; then
     OS_TAG="ubuntu26.04"; OS_NAME="Ubuntu 26.04"
 elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
     OS_TAG="debian13"; OS_NAME="Debian 13"
+elif [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
+    OS_TAG="alma10"; OS_NAME="AlmaLinux 10"
 else
     OS_TAG=""
 fi
 if [ -z "$OS_TAG" ] || [ "$(uname -m)" != "x86_64" ]; then
-    echo "This builds on Ubuntu 24.04 or 26.04, or Debian 13, amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
+    echo "This builds on Ubuntu 24.04 or 26.04, Debian 13 or AlmaLinux 10, amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
     exit 1
 fi
 OUT="$(pwd)/sentora-php-$MM-$OS_TAG-amd64.tar.gz"
-# imap needs c-client, which Debian 13 no longer has
+# imap needs c-client, which Debian 13 and AlmaLinux 10 do not have
 ADDONS="apcu redis memcached imagick"
-[ "$OS_TAG" = debian13 ] || ADDONS="$ADDONS imap"
+[ "$OS_TAG" = ubuntu26.04 ] && ADDONS="$ADDONS imap"
+# where PHP 7.1's configure looks for libraries (--with-libdir), and the compiled-in OpenSSL's
+# folder of CA certificates
+LIBDIR=lib/x86_64-linux-gnu; SSLDIR=/usr/lib/ssl
+[ "$OS_TAG" = alma10 ] && { LIBDIR=lib64; SSLDIR=/etc/pki/tls; }
 
-if [ "${SKIP_APT:-0}" != "1" ]; then
+if [ "$OS_TAG" = alma10 ]; then
+    if [ "${SKIP_APT:-0}" != "1" ]; then
+        dnf -y -q install epel-release dnf-plugins-core
+        dnf config-manager --set-enabled crb
+        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz perl tar \
+            libpng-devel libjpeg-turbo-devel freetype-devel libwebp-devel gmp-devel zlib-devel gnutls-devel \
+            openssl-devel libmemcached-awesome-devel cyrus-sasl-devel ImageMagick-devel krb5-devel
+    fi
+elif [ "${SKIP_APT:-0}" != "1" ]; then
     apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils perl \
         libpng-dev libjpeg-dev libfreetype-dev libwebp-dev libgmp-dev zlib1g-dev libgnutls28-dev \
         libssl-dev libmemcached-dev libsasl2-dev libmagickwand-dev libkrb5-dev
-    [ "$OS_TAG" = debian13 ] || apt-get -yqq install libc-client2007e-dev
+    [ "$OS_TAG" = ubuntu26.04 ] && apt-get -yqq install libc-client2007e-dev
 fi
 
 WORK=$(mktemp -d /tmp/sentora-php71-build.XXXXXX)
@@ -66,8 +80,9 @@ WORK=$(mktemp -d /tmp/sentora-php71-build.XXXXXX)
 trap '[ "${KEEP_WORK:-0}" = 1 ] || rm -rf "$WORK"' EXIT
 DEPS="$WORK/deps"
 mkdir -p "$DEPS/lib" "$WORK/src"
-# PHP 7.1's configure looks for libraries in <dir>/lib/x86_64-linux-gnu (--with-libdir below)
-ln -s . "$DEPS/lib/x86_64-linux-gnu"
+# PHP 7.1's configure looks for libraries in <dir>/$LIBDIR (--with-libdir below): the compiled-in
+# ones in $DEPS/lib are found there too
+if [ "$LIBDIR" = lib64 ]; then ln -s lib "$DEPS/lib64"; else ln -s . "$DEPS/lib/x86_64-linux-gnu"; fi
 J=$(nproc)
 
 # name | URL | sha256 (md5: libmcrypt; sha3-512: OpenLDAP)
@@ -101,7 +116,7 @@ step() { echo "$1 (log: $WORK/$2.log)"; }
 fail() { echo "FAILED, the end of $WORK/$1.log:"; tail -30 "$WORK/$1.log"; exit 1; }
 
 step "Building OpenSSL 1.1.1w" openssl
-( cd openssl-1.1.1w && ./config --prefix="$DEPS" --openssldir=/usr/lib/ssl no-shared no-tests -fPIC \
+( cd openssl-1.1.1w && ./config --prefix="$DEPS" --openssldir="$SSLDIR" no-shared no-tests -fPIC \
     && make -j"$J" && make install_sw ) > "$WORK/openssl.log" 2>&1 || fail openssl
 
 step "Building curl 7.88.1" curl
@@ -171,7 +186,7 @@ export LIBS="-ldl -lpthread -lgnutls -lstdc++ -lm" PKG_CONFIG_PATH="$DEPS/lib/pk
 export LDFLAGS="-Wl,--exclude-libs,ALL"
 ./configure --prefix="$PREFIX" --sysconfdir="$PREFIX/etc" --localstatedir=/var \
     --with-config-file-path="$PREFIX/etc" --with-config-file-scan-dir="$PREFIX/etc/conf.d" \
-    --with-libdir=lib/x86_64-linux-gnu \
+    --with-libdir="$LIBDIR" \
     --disable-cgi --enable-fpm --with-fpm-user=www-data --with-fpm-group=www-data \
     --without-pear --disable-phpdbg \
     --with-openssl="$DEPS" --with-curl="$DEPS" --with-libxml-dir="$DEPS" --with-mcrypt="$DEPS" \
@@ -210,7 +225,7 @@ addon redis redis-5.3.7 --enable-redis
 addon memcached memcached-3.2.0 --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
 addon imagick imagick-3.7.0 --with-imagick=/usr
 # (c-client is in /usr/lib; OpenSSL, found through pkg-config, in /usr/lib/x86_64-linux-gnu)
-[ "$OS_TAG" = debian13 ] || addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
+[ "$OS_TAG" = ubuntu26.04 ] && addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
 cd "$WORK/src/php-$V"
 
 # switches on the add-ons that load on the server (run by the installer and sentora-php-install)
@@ -220,10 +235,14 @@ cat > "$P/bin/sentora-php-addons" <<'EOF_ADDONS'
 # server, after installing the system libraries they use; one that does not load stays off, so PHP
 # itself always starts. Run as root by the installer and sentora-php-install; safe to run again.
 P=$(cd "$(dirname "$0")/.." && pwd)
-apt-get -qq -y install libmemcached11t64 libmemcachedutil2t64 libhashkit2t64 libsasl2-2 \
-    libmagickwand-7.q16-10 > /dev/null 2>&1 || true
-# (c-client, for imap: Ubuntu only)
-apt-get -qq -y install libc-client2007e > /dev/null 2>&1 || true
+if command -v apt-get > /dev/null 2>&1; then
+    apt-get -qq -y install libmemcached11t64 libmemcachedutil2t64 libhashkit2t64 libsasl2-2 \
+        libmagickwand-7.q16-10 > /dev/null 2>&1 || true
+    # (c-client, for imap: Ubuntu only)
+    apt-get -qq -y install libc-client2007e > /dev/null 2>&1 || true
+else
+    dnf -y -q install libmemcached-awesome cyrus-sasl-lib ImageMagick-libs > /dev/null 2>&1 || true
+fi
 EXT=$("$P/bin/php-config" --extension-dir)
 mkdir -p "$P/etc/conf.d"
 for e in apcu redis memcached imagick imap; do
