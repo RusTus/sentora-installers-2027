@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>102</latestversion>
+    <latestversion>103</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/apps.zpp</downloadurl>
     <name>Apps</name>
     <desc>Install WordPress, an OpenCart shop or Snipe-IT (IT asset management) into one of your websites in a few clicks: the panel makes its database, installs it as your own account and sets the admin you choose. No setup page is ever left open on the internet.</desc>
