@@ -141,6 +141,10 @@ UI_STEP_START=0
 UI_INSTALL_START=0
 UI_TICKER=""
 UI_LOGPOS=0
+# The step whose progress bar may be drawn: a ticker stops by itself as soon as this is not its
+# own step any more, or the installer is gone, so a stray one can never draw over later steps
+UI_TICKFILE=$(mktemp /tmp/sentora-install-step.XXXXXX)
+UI_MAINPID=$$
 ui_repeat() { local i out=''; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
 ui_draw() { # spinner-frame
     local cols width pct filled elapsed total room title times
@@ -160,9 +164,12 @@ ui_draw() { # spinner-frame
 }
 ui_ticker_stop() {
     if [ -n "$UI_TICKER" ]; then
+        echo 0 > "$UI_TICKFILE" 2> /dev/null
         kill "$UI_TICKER" 2> /dev/null
         # (not "wait": in the exit trap bash complains about it)
         local _; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$UI_TICKER" 2> /dev/null || break; sleep 0.05; done
+        # still there (a lost signal): stopped for certain
+        kill -0 "$UI_TICKER" 2> /dev/null && kill -9 "$UI_TICKER" 2> /dev/null
         UI_TICKER=""
     fi
 }
@@ -197,7 +204,8 @@ ui_step() { # title
     UI_STEP_START=$(date +%s)
     echo -e "\n-- $1"   # in the log
     if [ $UI_TTY -eq 1 ]; then
-        ( trap 'exit 0' TERM; i=0; while true; do ui_draw "${UI_SPIN[$(( i % ${#UI_SPIN[@]} ))]}"; i=$(( i + 1 )); sleep 0.25; done ) &
+        echo "$UI_STEP" > "$UI_TICKFILE"
+        ( trap 'exit 0' TERM; i=0; while [ "$(cat "$UI_TICKFILE" 2> /dev/null)" = "$UI_STEP" ] && kill -0 "$UI_MAINPID" 2> /dev/null; do ui_draw "${UI_SPIN[$(( i % ${#UI_SPIN[@]} ))]}"; i=$(( i + 1 )); sleep 0.25; done ) &
         UI_TICKER=$!
     else
         printf '%s-- [%d/%d] %s%s\n' "$C_CYAN" "$UI_STEP" "$UI_TOTAL" "$1" "$C_RESET" >&3
@@ -218,6 +226,7 @@ ui_exit() {
     local rc=$?
     exec 2> /dev/null   # the installer is ending: bash's own job notices must not reach the log or the screen
     ui_ticker_stop
+    rm -f "$UI_TICKFILE"
     [ -n "${MYSQL_ROOT_CNF:-}" ] && rm -f "$MYSQL_ROOT_CNF"
     if [ -n "${UI_INSTALLING:-}" ] && [ $rc -ne 0 ]; then
         [ $UI_TTY -eq 1 ] && printf '\r\e[K' >&3
@@ -2236,15 +2245,16 @@ if [ -f "$MATOMO/index.php" ]; then
     mkdir -p /var/lib/sentora/matomo; chown root:"$PANEL_USER" /var/lib/sentora/matomo; chmod 750 /var/lib/sentora/matomo
     MI="https://127.0.0.1/etc/apps/matomo/index.php"
     MC=$(mktemp)
-    mstep() { curl -sk -o /dev/null -w "%{http_code}" -c "$MC" -b "$MC" -H "Host: $PANEL_FQDN" "$@"; }
-    mstep "$MI" > /dev/null
-    mstep "$MI?action=systemCheck" > /dev/null
-    mstep --data-urlencode "password=$matomopassword" -d "host=127.0.0.1&username=matomo&dbname=sentora_matomo&tables_prefix=matomo_&adapter=PDO\MYSQL&schema=Mysql&submit=Next" "$MI?action=databaseSetup" > /dev/null
-    mstep "$MI?action=tablesCreation&module=Installation" > /dev/null
-    mstep --data-urlencode "password=$matomoadminpassword" --data-urlencode "password_bis=$matomoadminpassword" -d "login=sentora_admin&email=postmaster@$PANEL_FQDN&subscribe_newsletter_piwikorg=0&subscribe_newsletter_professionalservices=0&submit=Next" "$MI?action=setupSuperUser&module=Installation" > /dev/null
-    mstep -d "siteName=$PANEL_FQDN&url=https://$PANEL_FQDN&timezone=${tz:-UTC}&ecommerce=0&submit=Next" "$MI?action=firstWebsiteSetup&module=Installation" > /dev/null
-    mstep "$MI?action=trackingCode&module=Installation&site_idSite=1&site_name=$PANEL_FQDN" > /dev/null
-    mstep -d "do_not_track=1&anonymise_ip=1&submit=Continue" "$MI?action=finished&module=Installation&site_idSite=1&site_name=$PANEL_FQDN" > /dev/null
+    # (each page's answer goes to the log: a setup that does not finish shows where it stopped)
+    mstep() { echo "Matomo setup page: $(curl -sk -o /dev/null -w "%{http_code}" -c "$MC" -b "$MC" -H "Host: $PANEL_FQDN" --max-time 300 "$@") ${*: -1}" | sed 's|https://127.0.0.1/etc/apps/matomo/index.php||'; }
+    mstep "$MI"
+    mstep "$MI?action=systemCheck"
+    mstep --data-urlencode "password=$matomopassword" -d "host=127.0.0.1&username=matomo&dbname=sentora_matomo&tables_prefix=matomo_&adapter=PDO\MYSQL&schema=Mysql&submit=Next" "$MI?action=databaseSetup"
+    mstep "$MI?action=tablesCreation&module=Installation"
+    mstep --data-urlencode "password=$matomoadminpassword" --data-urlencode "password_bis=$matomoadminpassword" -d "login=sentora_admin&email=postmaster@$PANEL_FQDN&subscribe_newsletter_piwikorg=0&subscribe_newsletter_professionalservices=0&submit=Next" "$MI?action=setupSuperUser&module=Installation"
+    mstep -d "siteName=$PANEL_FQDN&url=https://$PANEL_FQDN&timezone=${tz:-UTC}&ecommerce=0&submit=Next" "$MI?action=firstWebsiteSetup&module=Installation"
+    mstep "$MI?action=trackingCode&module=Installation&site_idSite=1&site_name=$PANEL_FQDN"
+    mstep -d "do_not_track=1&anonymise_ip=1&submit=Continue" "$MI?action=finished&module=Installation&site_idSite=1&site_name=$PANEL_FQDN"
     rm -f "$MC"
     if [ -f "$MATOMO/config/config.ini.php" ]; then
         mconsole() { (cd "$MATOMO" && setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --init-groups --reset-env /usr/bin/php"$PHPVER" console "$@" > /dev/null 2>&1); }
@@ -2260,7 +2270,15 @@ if [ -f "$MATOMO/index.php" ]; then
         chmod 660 "$MATOMO/config/config.ini.php"
         echo "Matomo is set up (super user sentora_admin)."
     else
-        echo -e "WARNING: Matomo setup did not finish; open https://$PANEL_FQDN/etc/apps/matomo/ to finish it by hand."
+        # A second try with the panel's own tool, from an empty Matomo database (it writes its own
+        # passwords to /root/passwords.txt and logs each page's answer)
+        echo "Matomo's setup did not finish: trying again with sentora-matomo-setup --reset"
+        sleep 5
+        if bash "$PANEL_PATH/panel/bin/sentora-matomo-setup" --reset && [ -f "$MATOMO/config/config.ini.php" ]; then
+            matomopassword="(in /root/passwords.txt)"; matomoadminpassword="(in /root/passwords.txt)"
+        else
+            echo -e "WARNING: Matomo setup did not finish (the pages' answers are above); after the restart run: sentora-matomo-setup --reset"
+        fi
     fi
 fi
 
