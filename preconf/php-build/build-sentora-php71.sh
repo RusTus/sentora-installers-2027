@@ -64,7 +64,7 @@ if [ "$OS_TAG" = alma10 ]; then
     if [ "${SKIP_APT:-0}" != "1" ]; then
         dnf -y -q install epel-release dnf-plugins-core
         dnf config-manager --set-enabled crb
-        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz perl tar \
+        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz perl tar openssl \
             libpng-devel libjpeg-turbo-devel freetype-devel libwebp-devel gmp-devel zlib-devel gnutls-devel \
             openssl-devel libmemcached-awesome-devel cyrus-sasl-devel ImageMagick-devel krb5-devel
     fi

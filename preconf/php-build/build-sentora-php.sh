@@ -52,7 +52,7 @@ if [ "$OS_TAG" = alma10 ]; then
     if [ "${SKIP_APT:-0}" != "1" ]; then
         dnf -y -q install epel-release dnf-plugins-core
         dnf config-manager --set-enabled crb
-        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar \
+        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar openssl \
             libxml2-devel libcurl-devel oniguruma-devel libzip-devel libicu-devel libsodium-devel \
             libargon2-devel libxslt-devel libpng-devel libjpeg-turbo-devel libwebp-devel freetype-devel \
             openssl-devel sqlite-devel zlib-devel gmp-devel openldap-devel \

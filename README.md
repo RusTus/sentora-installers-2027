@@ -1,13 +1,14 @@
 # Sentora-2027 installer files
 
-Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04** and **Debian 13**.
+Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04**, **Debian 13** and **AlmaLinux 10**.
 
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white)
 ![Debian](https://img.shields.io/badge/Debian-13-A81D33?logo=debian&logoColor=white)
+![AlmaLinux](https://img.shields.io/badge/AlmaLinux-10-0F4266?logo=almalinux&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?logo=php&logoColor=white)
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
 
-This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04` for Ubuntu 26.04, `sentora2027-deb13` for Debian 13) downloads it with the panel and copies these files into place. It isn't run on its own.
+This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04` for Ubuntu 26.04, `sentora2027-deb13` for Debian 13, `sentora2027-alma10` for AlmaLinux 10) downloads it with the panel and copies these files into place. It isn't run on its own.
 
 > [!NOTE]
 > This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9) and Debian 13 (Debian's own packages: PHP 8.4, MariaDB 11.8, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.8). It downloads from these GitHub releases only, not from sentora.org.
@@ -20,9 +21,11 @@ The installer downloads from the GitHub releases of both repositories with the t
 | --- | --- | --- |
 | [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer for Ubuntu 26.04 |
 | | `sentora2027-deb13` | The installer for Debian 13 |
+| | `sentora2027-alma10` | The installer for AlmaLinux 10 (and Rocky Linux 10) |
 | | `sentora-installers-2027.zip` | This repository |
 | | `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions for Ubuntu 26.04 (a missing file means that version is not installed) |
 | | `sentora-php-8.2-debian13-amd64.tar.gz`, `8.3`, `8.5`, `7.1` | The same for Debian 13 (built by **Actions > PHP bundles**) |
+| | `sentora-php-8.2-alma10-amd64.tar.gz`, `8.4`, `8.5`, `7.1` | The same for AlmaLinux 10 (built by **Actions > PHP bundles**, system alma10) |
 | [sentora-core-2027](https://github.com/RusTus/sentora-core-2027/releases) | `sentora-core-2027.zip` | The panel, with phpMyAdmin 5.2 and Roundcube 1.7 |
 
 Every download is checked against the SHA-256 GitHub lists for it. To download from your own web server instead, put all the files in one folder and set `SENTORA_DOWNLOAD_URL` at the top of the installer.
@@ -56,6 +59,19 @@ bash sentora2027-deb13
 ```
 
 On Debian everything comes from Debian's own packages (PHP 8.4, MariaDB, Apache, Postfix, Dovecot, BIND, SOGo), so `apt-get upgrade` and Debian's daily security updates keep them current. The panel calls MariaDB "MySQL", as it is compatible with it.
+
+On a clean AlmaLinux 10 (or Rocky Linux 10) server, as root:
+
+```bash
+dnf install -y wget
+```
+
+```bash
+wget -O sentora2027-alma10 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-alma10
+bash sentora2027-alma10
+```
+
+On AlmaLinux everything comes from AlmaLinux's own packages and EPEL (PHP 8.3, MariaDB 10.11, Apache, Postfix, Dovecot 2.3, BIND 9.18, ProFTPD, SpamAssassin, ClamAV, fail2ban), kept current by `dnf upgrade` and dnf-automatic's daily security updates. SELinux stays on (enforcing): the installer labels Sentora's folders and switches on what the services need; firewalld, when it runs, gets Sentora's ports. SOGo (groupware and ActiveSync) is not available for AlmaLinux: webmail is Roundcube.
 
 Or without questions:
 
