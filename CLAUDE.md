@@ -41,3 +41,7 @@ released together.
 - Changing the panel's own host name stays an SSH-only command (sentora-change-domain).
 - When something is less secure, it is not done that way.
 - Only ask questions when the answer is really needed.
+- The panel stays neutral to the Linux distribution: commands, paths, service names, users and
+  groups the daemon, modules and tools use come from x_settings (hidden ones: so_usereditable_en =
+  'false'), never written into the code. The installer of each distribution sets them. Commands
+  that root runs stay hidden (changed with setso over SSH only).
