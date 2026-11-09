@@ -1,5 +1,5 @@
-# Builds the extra PHP versions for Debian 13 (sentora-php-<version>-debian13-amd64.tar.gz) in a
-# Debian 13 container, with the build scripts in preconf/php-build, and puts them on the release
+# Builds the extra PHP versions for Debian 13 or AlmaLinux 10 (sentora-php-<version>-debian13-amd64.tar.gz,
+# sentora-php-<version>-alma10-amd64.tar.gz) in a container of that system, with the build scripts in preconf/php-build, and puts them on the release
 # tagged "current" (replacing files of the same names). sentora2027-deb13 and sentora-php-install
 # download them from there. Run it from Actions > PHP bundles > Run workflow, again whenever PHP
 # publishes a release for one of the versions (sentora-update-check says so on a server).
@@ -12,8 +12,13 @@ name: PHP bundles
 on:
   workflow_dispatch:
     inputs:
+      system:
+        description: The system to build for
+        type: choice
+        options: [debian13, alma10]
+        default: debian13
       versions:
-        description: PHP versions to build (full numbers; 7.1 builds 7.1.33)
+        description: PHP versions to build (full numbers; 7.1 builds 7.1.33, Ubuntu and Debian only)
         type: string
         default: "8.5.12 8.3.36 8.2.35 7.1"
 
@@ -41,7 +46,7 @@ jobs:
   build:
     needs: list
     runs-on: ubuntu-latest
-    container: debian:13
+    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || 'debian:13' }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,8 +54,12 @@ jobs:
     steps:
       - name: Tools
         run: |
-          apt-get -qq update
-          DEBIAN_FRONTEND=noninteractive apt-get -yqq install git ca-certificates wget > /dev/null
+          if command -v apt-get > /dev/null; then
+            apt-get -qq update
+            DEBIAN_FRONTEND=noninteractive apt-get -yqq install git ca-certificates wget > /dev/null
+          else
+            dnf -y -q install git ca-certificates wget tar gzip > /dev/null
+          fi
       - name: Check out master2027
         uses: actions/checkout@v5
         with:
@@ -70,7 +79,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: php-${{ matrix.version }}
-          path: out/sentora-php-*-debian13-amd64.tar.gz
+          path: out/sentora-php-*-${{ inputs.system }}-amd64.tar.gz
           if-no-files-found: error
 
   publish:
@@ -87,7 +96,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la bundles
-          set -- bundles/sentora-php-*-debian13-amd64.tar.gz
+          set -- bundles/sentora-php-*-${{ inputs.system }}-amd64.tar.gz
           [ -e "$1" ] || { echo "Nothing was built."; exit 1; }
           sha256sum "$@"
           for try in 1 2 3 4 5; do

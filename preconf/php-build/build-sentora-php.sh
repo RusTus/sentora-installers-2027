@@ -33,17 +33,32 @@ if [[ "${ID:-} ${VERSION_ID:-}" == "ubuntu 26.04" ]]; then
     OS_TAG="ubuntu26.04"; OS_NAME="Ubuntu 26.04"
 elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
     OS_TAG="debian13"; OS_NAME="Debian 13"
+elif [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
+    OS_TAG="alma10"; OS_NAME="AlmaLinux 10"
 else
     OS_TAG=""
 fi
 if [ -z "$OS_TAG" ] || [ "$(uname -m)" != "x86_64" ]; then
-    echo "This builds for Ubuntu 26.04 or Debian 13 amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
+    echo "This builds for Ubuntu 26.04, Debian 13 or AlmaLinux 10 amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
     exit 1
 fi
 OUT="$(pwd)/sentora-php-$MM-$OS_TAG-amd64.tar.gz"
 
 # Build tools and the -dev packages of the libraries PHP links against
-if [ "${SKIP_APT:-0}" != "1" ]; then
+LIBDIR=lib
+if [ "$OS_TAG" = alma10 ]; then
+    # AlmaLinux keeps its libraries in lib64; the -devel packages are in AppStream, CRB and EPEL
+    LIBDIR=lib64
+    if [ "${SKIP_APT:-0}" != "1" ]; then
+        dnf -y -q install epel-release dnf-plugins-core
+        dnf config-manager --set-enabled crb
+        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar \
+            libxml2-devel libcurl-devel oniguruma-devel libzip-devel libicu-devel libsodium-devel \
+            libargon2-devel libxslt-devel libpng-devel libjpeg-turbo-devel libwebp-devel freetype-devel \
+            openssl-devel sqlite-devel zlib-devel gmp-devel openldap-devel \
+            libmemcached-awesome-devel cyrus-sasl-devel ImageMagick-devel krb5-devel
+    fi
+elif [ "${SKIP_APT:-0}" != "1" ]; then
     apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils python3 \
         libxml2-dev libcurl4-openssl-dev libonig-dev libzip-dev libicu-dev libsodium-dev \
         libargon2-dev libxslt1-dev libpng-dev libjpeg-dev libwebp-dev libfreetype-dev \
@@ -92,7 +107,7 @@ export CFLAGS="-O2 -g0" CXXFLAGS="-O2 -g0 -std=gnu++17"
     --with-zip --with-sodium --with-password-argon2 --with-xsl \
     --enable-mysqlnd --with-mysql-sock=/var/run/mysqld/mysqld.sock --with-mysqli=mysqlnd --with-pdo-mysql=mysqlnd \
     --with-pdo-sqlite --with-sqlite3 --enable-opcache \
-    --with-ldap > "$WORK/configure.log" 2>&1 \
+    --with-ldap --with-libdir="$LIBDIR" > "$WORK/configure.log" 2>&1 \
     || { tail -25 "$WORK/configure.log"; exit 1; }
 
 echo "Compiling (this takes a while; log: $WORK/make.log)"
@@ -140,10 +155,14 @@ EOF_PECL
 # server, after installing the system libraries they use; one that does not load stays off, so PHP
 # itself always starts. Run as root by the installer and sentora-php-install; safe to run again.
 P=$(cd "$(dirname "$0")/.." && pwd)
-apt-get -qq -y install libmemcached11t64 libmemcachedutil2t64 libhashkit2t64 libsasl2-2 \
-    libmagickwand-7.q16-10 > /dev/null 2>&1 || true
-# (c-client, for imap: Ubuntu only)
-apt-get -qq -y install libc-client2007e > /dev/null 2>&1 || true
+if command -v apt-get > /dev/null 2>&1; then
+    apt-get -qq -y install libmemcached11t64 libmemcachedutil2t64 libhashkit2t64 libsasl2-2 \
+        libmagickwand-7.q16-10 > /dev/null 2>&1 || true
+    # (c-client, for imap: Ubuntu only)
+    apt-get -qq -y install libc-client2007e > /dev/null 2>&1 || true
+else
+    dnf -y -q install libmemcached-awesome cyrus-sasl-lib ImageMagick-libs > /dev/null 2>&1 || true
+fi
 EXT=$("$P/bin/php-config" --extension-dir)
 mkdir -p "$P/etc/conf.d"
 for e in apcu redis memcached imagick imap; do

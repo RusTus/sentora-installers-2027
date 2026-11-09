@@ -2072,6 +2072,11 @@ a2enmod status > /dev/null
 
 #--- Set some Sentora database entries using. setso and setzadmin (require PHP)
 ui_step "Configuring Sentora"
+# Debian's values for the settings that differ from the defaults (dryden/sys/platform.class.php)
+$PANEL_PATH/panel/bin/setso --set db_service "$DB_SERVICE" > /dev/null
+$PANEL_PATH/panel/bin/setso --set db_conf_file "$MY_CNF_PATH" > /dev/null
+$PANEL_PATH/panel/bin/setso --set php_bundle_tag debian13 > /dev/null
+$PANEL_PATH/panel/bin/setso --set php_bundle_libs "libpng16-16t64 libjpeg62-turbo libfreetype6 libwebp7 libgmp10 zlib1g libldap2 libgnutls30t64 libonig5 libzip5 libsodium23 libargon2-1 libsqlite3-0 libxml2 libcurl4t64 libicu76 libxslt1.1 libssl3t64" > /dev/null
 zadminpassword=$(passwordgen);
 setzadmin --set "$zadminpassword";
 $PANEL_PATH/panel/bin/setso --set sentora_domain "$PANEL_FQDN"
