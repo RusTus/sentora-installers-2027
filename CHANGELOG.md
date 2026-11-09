@@ -410,6 +410,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
   - **Permissions**: Check lists the files and folders anyone on the server could change (777, 666) and the config files with passwords (wp-config.php, env.php, config.php, .env and others) that other users could read; **Fix** takes only the "anyone" rights away, as a background task run as the account's own user (the account's ACLs for the website and the panel are left as they are); files that belong to another user are named, not changed.
   - **Updates** (WordPress): WordPress, its plugins and themes that have a newer version, asked from wordpress.org as WordPress itself asks (a plugin whose newest version needs a newer WordPress is not offered either), kept 6 hours.
   - The site list remembers what it found for 5 minutes (a site's own page forgets it), so it opens much faster for an account with many websites.
+- Release 2027.57: QuickFig 205-207 (crawler blocker for every website and the apps it recognises, who visited each website with Block, hardening switches, permissions check, WordPress updates; the crawler blocker's save is all or nothing).
 - Release 2027.56: Matomo is set up on servers installed before it came with the panel (sentora-matomo-setup, run by sentora-update).
 - Release 2027.55: Repo Browser's Check all repositories now (every repository asked at once, new modules and updates filled in as the page is drawn).
 - Release 2027.54: QuickFig 204 (websites that share the same files are pointed out; the hourly check looks at them once).
