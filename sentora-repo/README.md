@@ -8,6 +8,7 @@ Optional modules for Sentora-2027, installed from the panel's **Repo Browser**. 
 | `webalizer_stats` | Webalizer traffic reports for each account's domains, updated every hour, in the panel's Light or Dark (builds the webalizer program on install) |
 | `visitor_stats` | Visitors reports for each account's domains: visitors per day, pages, referrers, search terms and browsers, in the panel's Light or Dark (builds the visitors program on install) |
 | `log_forwarder` | Sends an account's website logs (and an administrator's server logs) live to its own log server: ELK, OpenSearch, Grafana Loki or Graylog, as syslog over TLS through the server's rsyslog. Clients' forwarding counts towards their package's bandwidth |
+| `quickfig` | WordPress settings without editing wp-config.php (site address, debugging, security, memory, revisions, updates, scheduled tasks from the server), with rescue tools (a site stuck in maintenance, a plugin that breaks the site, the cache, new secret keys, the database connection, the debug log), earlier versions with one-click undo, and a Magento shop's cache and maintenance mode. Files are read and changed by a worker confined to the account's own folder |
 
 ## Using it
 

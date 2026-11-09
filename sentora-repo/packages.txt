@@ -5,3 +5,4 @@ PHP-Adminer
 webalizer_stats
 visitor_stats
 log_forwarder
+quickfig
