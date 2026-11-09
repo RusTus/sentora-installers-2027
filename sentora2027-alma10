@@ -1171,9 +1171,12 @@ echo "from $(release_url "$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO")"
 # The staged copies are no longer needed
 rm -rf "$SRC_STAGE"
 
-# AlmaLinux's web server user and group
+# AlmaLinux's web server user and group: they come with Apache's package, installed now so the
+# panel's user can join the group (it is configured further down)
 HTTP_USER="apache"
 HTTP_GROUP="apache"
+$PACKAGE_INSTALLER httpd
+getent group "$HTTP_GROUP" > /dev/null || { echo "ERROR: Apache's group $HTTP_GROUP is missing (dnf install httpd)"; exit 1; }
 
 #--- The panel's own user
 # The panel runs as "sentora" (through its own PHP-FPM pool, set up with Apache
@@ -1972,7 +1975,7 @@ ui_step "Configuring Sentora"
 # dryden/sys/platform.class.php; setso adds a missing one before it sets it)
 so() { $PANEL_PATH/panel/bin/setso --set "$1" "$2" > /dev/null; }
 so web_user "$HTTP_USER"; so web_group "$HTTP_GROUP"; so nobody_group nobody
-so apache_ctl apachectl; so apache_bin /usr/sbin/httpd; so apache_server_root /etc/httpd; so apache_envvars ""
+so apache_ctl apachectl; so apache_modules_cmd "httpd -M"; so apache_bin /usr/sbin/httpd; so apache_server_root /etc/httpd; so apache_envvars ""
 so apache_module_includes "Include conf.modules.d/*.conf"; so apache_enable_module ""; so apache_log_dir /var/log/httpd
 so php_fpm_pool_dir /etc/php-fpm.d/; so php_fpm_service php-fpm; so php_fpm_socket_dir /run/php-fpm/; so php_fpm_process php-fpm
 so db_service "$DB_SERVICE"; so db_conf_file "$MY_CNF_PATH"; so db_socket /var/lib/mysql/mysql.sock
@@ -1988,7 +1991,7 @@ so clamav_milter_service clamav-milter; so clamav_milter_user clamilt
 so freshclam_conf /etc/freshclam.conf; so freshclam_service clamav-freshclam; so freshclam_user clamupdate
 so spamd_user spamd; so spamassassin_dir /etc/mail/spamassassin; so spamd_defaults_file /etc/sysconfig/spamassassin
 so spamd_defaults_template 'SPAMDOPTIONS="{options}"'; so spamd_service spamassassin; so spamd_maintenance_timer ""
-so spamass_milter_user sa-milt; so spamass_milter_defaults_file /etc/sysconfig/spamass-milter; so spamass_milter_service spamass-milter
+so spamass_milter_skip_auth_flag -a; so spamass_milter_user sa-milt; so spamass_milter_defaults_file /etc/sysconfig/spamass-milter; so spamass_milter_service spamass-milter
 so spamass_milter_defaults_template 'EXTRA_FLAGS="{options}"
 SOCKET="{socket}"
 SOCKET_OPTIONS="-g postfix"'
