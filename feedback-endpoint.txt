@@ -1,0 +1,4 @@
+# Sentora-2027 customer feedback: where panels send their daily report (Sentora Config >
+# customer_feedback, on by default). One https address on the first line that is not a comment,
+# such as https://stats.example.com/api.php ; none, and panels send nothing.
+# A panel reads this file once a day, so a change here reaches every panel within a day.

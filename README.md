@@ -91,7 +91,9 @@ fail2ban-client set <jail> unbanip <address>
 | `preconf/fail2ban/` | fail2ban jails and filters |
 | `preconf/goaccess/` | GoAccess source, built at install |
 | `preconf/php-build/` | Scripts to build and update the extra PHP versions |
-| `sentora-repo/` | The add-on module repository (PHP-Adminer, Webalizer Stats, Visitor Stats), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
+| `sentora-repo/` | The add-on module repository (QuickFig, Apps, Payment Plans, PHP-Adminer, Webalizer Stats, Visitor Stats, Log Forwarder), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
+| `feedback-server/` | The statistics server panels send their daily customer-feedback report to (PHP and SQLite); see its [README](feedback-server/README.md) |
+| `feedback-endpoint.txt` | Where panels send that report: the statistics server's address, read by every panel once a day (none: nothing is sent) |
 
 ## License
 

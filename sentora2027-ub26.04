@@ -2318,10 +2318,16 @@ printf '  %-26s %s\n' "Installation log" "$logfile"
 ui_heading "Next"
 echo "  1. Restart the server (below), then wait 5 minutes for the first daemon run."
 echo "  2. Check it:    sentora-post-install-check   then   sentora-smoke-test"
-echo "  3. Add-on modules (Webalizer Stats, Visitor Stats, PHP-Adminer):"
+echo "  3. Add-on modules (QuickFig, Apps, Payment Plans, Webalizer Stats and more):"
 echo "     Admin > Repo Browser lists them; install the ones you want"
 echo "  4. Later: sentora-update-check (bundled apps) and sentora-update (the panel;"
 echo "     --rollback undoes it); the off-server backup is in Admin > Backup Config."
+echo
+echo "  Customer feedback is on: once a day the panel sends the Sentora-2027 project a"
+echo "  short report about this server (versions, hardware, IP address, how busy it is,"
+echo "  counts of accounts and domains; never a name, email, password or file). What it"
+echo "  sent: /var/lib/sentora/feedback-last.json. To stop it:"
+echo "     setso --set customer_feedback false   (or Admin > Sentora Config)"
 
 # Wait until the user have read before restarts the server...
 if [[ "$INSTALL" != "auto" ]] ; then
