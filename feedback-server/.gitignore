@@ -1,3 +1,4 @@
-config.php
-data/*
-!data/.htaccess
+# this server's own settings and data (never in git)
+public_html/inc/config.php
+public_html/data/*
+!public_html/data/.htaccess

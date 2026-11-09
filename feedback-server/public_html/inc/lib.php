@@ -30,8 +30,16 @@ function fb_db()
     $db->exec('CREATE INDEX IF NOT EXISTS reports_install ON reports (install, at)');
     $db->exec('CREATE INDEX IF NOT EXISTS reports_ip ON reports (remote_ip, at)');
     $db->exec('CREATE TABLE IF NOT EXISTS geo (ip TEXT PRIMARY KEY, country TEXT NOT NULL, at INTEGER NOT NULL)');
+    // the add-on repository's downloads (public/repo): one row each, no address kept (only a hash, for repeats)
+    $db->exec('CREATE TABLE IF NOT EXISTS downloads (n INTEGER PRIMARY KEY AUTOINCREMENT, module TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, panel TEXT, who TEXT NOT NULL)');
+    $db->exec('CREATE INDEX IF NOT EXISTS downloads_who ON downloads (who, at)');
+    $db->exec('CREATE INDEX IF NOT EXISTS downloads_module ON downloads (module, at)');
+    // ratings of the add-ons: one per panel and module (a new one replaces it), with an optional comment;
+    // hidden: taken off the panels' lists on the statistics page
+    $db->exec('CREATE TABLE IF NOT EXISTS ratings (module TEXT NOT NULL, panel TEXT NOT NULL, stars INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT \'\', at INTEGER NOT NULL,
+        version TEXT NOT NULL DEFAULT \'\', hidden INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (module, panel))');
     $cols = array_column($db->query('PRAGMA table_info(installs)')->fetchAll(), 'name');
-    foreach (array('country' => 'TEXT', 'load1' => 'REAL', 'accounts' => 'INTEGER', 'bandwidth' => 'INTEGER') as $c => $t) {
+    foreach (array('country' => 'TEXT', 'load1' => 'REAL', 'accounts' => 'INTEGER', 'bandwidth' => 'INTEGER', 'machine' => 'TEXT') as $c => $t) {
         if (!in_array($c, $cols, true)) {
             $db->exec('ALTER TABLE installs ADD ' . $c . ' ' . $t);
         }
@@ -74,6 +82,8 @@ function fb_clean($in)
     $num = array('cores' => 4096, 'memory' => PHP_INT_MAX, 'memory_free' => PHP_INT_MAX, 'disk' => PHP_INT_MAX, 'disk_free' => PHP_INT_MAX, 'uptime_days' => 100000,
         'bandwidth_month' => PHP_INT_MAX, 'disk_used_accounts' => PHP_INT_MAX);
     $out = array('id' => $in['id']);
+    // the computer's key (a hash: the same through reinstalls on one computer)
+    $out['machine'] = isset($in['machine']) && is_string($in['machine']) && preg_match('/^[0-9a-f]{32}$/', $in['machine']) ? $in['machine'] : '';
     foreach ($text as $k => $max) {
         $v = isset($in[$k]) && is_scalar($in[$k]) ? (string) $in[$k] : '';
         $v = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_check_encoding($v, 'UTF-8') ? $v : '');

@@ -5,7 +5,7 @@
  *
  * Written by RusTus, 2026-11-09
  */
-require __DIR__ . '/../lib.php';
+require __DIR__ . '/inc/lib.php';
 $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
 session_set_cookie_params(array('lifetime' => 0, 'path' => '/', 'httponly' => true, 'samesite' => 'Strict', 'secure' => $https));
 session_name('fbstats');
@@ -60,6 +60,16 @@ if (empty($_SESSION['in'])) {
     exit;
 }
 $db = fb_db();
+if (empty($_SESSION['tok'])) {
+    $_SESSION['tok'] = bin2hex(random_bytes(16));
+}
+// a comment taken off the panels' lists (spam, abuse), or put back
+if (isset($_POST['hide'], $_POST['tok'], $_POST['m'], $_POST['p']) && is_string($_POST['tok']) && hash_equals($_SESSION['tok'], $_POST['tok'])
+    && is_string($_POST['m']) && is_string($_POST['p'])) {
+    $db->prepare('UPDATE ratings SET hidden = ? WHERE module = ? AND panel = ?')->execute(array($_POST['hide'] === '1' ? 1 : 0, $_POST['m'], $_POST['p']));
+    header('Location: ./#ratings');
+    exit;
+}
 $now = time();
 $one = function ($sql, array $a = array()) use ($db) {
     $q = $db->prepare($sql);
@@ -78,6 +88,8 @@ $tiles = array(
     'active (30 days)' => (int) $one('SELECT COUNT(*) FROM installs WHERE last_seen > ?', array($now - 30 * 86400)),
     'new (30 days)' => (int) $one('SELECT COUNT(*) FROM installs WHERE first_seen > ?', array($now - 30 * 86400)),
     'reports kept' => (int) $one('SELECT COUNT(*) FROM reports'),
+    'computers' => (int) $one("SELECT COUNT(DISTINCT machine) FROM installs WHERE machine <> ''"),
+    'reinstalls' => (int) $one("SELECT COUNT(*) FROM installs WHERE machine <> ''") - (int) $one("SELECT COUNT(DISTINCT machine) FROM installs WHERE machine <> ''"),
 );
 // sums of the counts of the servers active in the last 30 days
 $sums = array();
@@ -135,6 +147,26 @@ foreach (array_slice($mods, 0, 25, true) as $m => $n) {
     $h .= '<tr><td>' . fb_h($m) . '</td><td class="n">' . (int) $n . '</td></tr>';
 }
 $out .= $h . '</table></div>';
+// the add-on repository's downloads (public/repo)
+$stars = array();
+foreach ($all('SELECT module, AVG(stars) AS a, COUNT(*) AS n FROM ratings GROUP BY module') as $r) {
+    $stars[$r['module']] = round((float) $r['a'], 1) . ' (' . (int) $r['n'] . ')';
+}
+$h = '<div class="card"><h2>Add-on downloads</h2><table><tr><th>Module</th><th class="n">All</th><th class="n">Installs</th><th class="n">Updates</th><th class="n">30 days</th><th class="n">Panels</th><th class="n">Stars</th></tr>';
+foreach ($all("SELECT module, COUNT(*) AS n, SUM(kind = 'install') AS ins, SUM(kind = 'upgrade') AS upd, SUM(at > ?) AS recent, COUNT(DISTINCT panel) AS panels FROM downloads GROUP BY module ORDER BY n DESC", array($now - 30 * 86400)) as $r) {
+    $h .= '<tr><td>' . fb_h($r['module']) . '</td><td class="n">' . (int) $r['n'] . '</td><td class="n">' . (int) $r['ins'] . '</td><td class="n">' . (int) $r['upd'] . '</td><td class="n">' . (int) $r['recent'] . '</td><td class="n">' . (int) $r['panels'] . '</td>'
+        . '<td class="n">' . fb_h($stars[$r['module']] ?? '-') . '</td></tr>';
+}
+$out .= $h . '</table><p class="muted">Counted at /repo when a panel downloads a module (installs and updates; a repeat within 10 minutes is not counted). Panels: those that send customer feedback.</p></div>';
+// the newest ratings with a comment: each can be taken off the panels' lists
+$h = '<div class="card" id="ratings"><h2>Ratings and comments</h2><table><tr><th>When</th><th>Module</th><th class="n">Stars</th><th>Comment</th><th>Panel</th><th></th></tr>';
+foreach ($all("SELECT module, panel, stars, comment, at, version, hidden FROM ratings ORDER BY at DESC LIMIT 50") as $r) {
+    $h .= '<tr' . ($r['hidden'] ? ' class="muted"' : '') . '><td>' . fb_h(date('Y-m-d H:i', (int) $r['at'])) . '</td><td>' . fb_h($r['module']) . '</td><td class="n">' . (int) $r['stars'] . '</td>'
+        . '<td style="white-space:normal;min-width:240px">' . fb_h($r['comment']) . '</td><td>' . fb_h(substr((string) $r['panel'], 0, 8)) . ' ' . fb_h($r['version']) . '</td>'
+        . '<td>' . ($r['comment'] !== '' ? '<form method="post"><input type="hidden" name="tok" value="' . fb_h($_SESSION['tok']) . '"><input type="hidden" name="m" value="' . fb_h($r['module']) . '"><input type="hidden" name="p" value="' . fb_h($r['panel']) . '">'
+            . '<button name="hide" value="' . ($r['hidden'] ? '0' : '1') . '" style="width:auto;margin:0;padding:3px 8px">' . ($r['hidden'] ? 'Show' : 'Hide') . '</button></form>' : '') . '</td></tr>';
+}
+$out .= $h . '</table><p class="muted">From panels\' Repo Browser (one rating per panel and module; a new one replaces it). Hide takes a comment off what the panels show; its stars still count.</p></div>';
 // the busiest servers: most accounts, with their load and traffic
 $h = '<div class="card"><h2>Heaviest servers (most accounts)</h2><table><tr><th>ID</th><th>Country</th><th class="n">Accounts</th><th class="n">Load</th><th class="n">Cores</th><th class="n">Traffic this month</th></tr>';
 foreach ($all('SELECT id, country, accounts, load1, cores, bandwidth FROM installs WHERE last_seen > ? ORDER BY accounts DESC, bandwidth DESC LIMIT 15', array($now - 30 * 86400)) as $r) {

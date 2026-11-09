@@ -4,7 +4,7 @@
  *
  * Written by RusTus, 2026-11-09
  */
-require __DIR__ . '/../lib.php';
+require __DIR__ . '/inc/lib.php';
 header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
@@ -40,13 +40,13 @@ if ($country === '' && $r['public_ip'] !== '') {
 $json = json_encode($r);
 $db->beginTransaction();
 $db->prepare('INSERT INTO reports (install, at, remote_ip, report) VALUES (?, ?, ?, ?)')->execute(array($r['id'], $now, $ip, $json));
-$db->prepare('INSERT INTO installs (id, first_seen, last_seen, reports, remote_ip, panel, os, arch, virt, cpu, cores, memory, disk, public_ip, internal_ip, report, country, load1, accounts, bandwidth)
-    VALUES (:id, :t, :t, 1, :ip, :panel, :os, :arch, :virt, :cpu, :cores, :mem, :disk, :pub, :int, :rep, :cc, :load, :acc, :bw)
+$db->prepare('INSERT INTO installs (id, first_seen, last_seen, reports, remote_ip, panel, os, arch, virt, cpu, cores, memory, disk, public_ip, internal_ip, report, country, load1, accounts, bandwidth, machine)
+    VALUES (:id, :t, :t, 1, :ip, :panel, :os, :arch, :virt, :cpu, :cores, :mem, :disk, :pub, :int, :rep, :cc, :load, :acc, :bw, :mach)
     ON CONFLICT(id) DO UPDATE SET last_seen = :t, reports = reports + 1, remote_ip = :ip, panel = :panel, os = :os, arch = :arch, virt = :virt, cpu = :cpu,
-    cores = :cores, memory = :mem, disk = :disk, public_ip = :pub, internal_ip = :int, report = :rep, country = :cc, load1 = :load, accounts = :acc, bandwidth = :bw')
+    cores = :cores, memory = :mem, disk = :disk, public_ip = :pub, internal_ip = :int, report = :rep, country = :cc, load1 = :load, accounts = :acc, bandwidth = :bw, machine = :mach')
     ->execute(array(':id' => $r['id'], ':t' => $now, ':ip' => $ip, ':panel' => $r['panel'], ':os' => $r['os'], ':arch' => $r['arch'], ':virt' => $r['virt'],
         ':cpu' => $r['cpu'], ':cores' => $r['cores'], ':mem' => $r['memory'], ':disk' => $r['disk'], ':pub' => $r['public_ip'], ':int' => $r['internal_ip'], ':rep' => $json,
-        ':cc' => $country, ':load' => $r['load'][1], ':acc' => max(0, $r['counts']['accounts']), ':bw' => $r['bandwidth_month']));
+        ':cc' => $country, ':load' => $r['load'][1], ':acc' => max(0, $r['counts']['accounts']), ':bw' => $r['bandwidth_month'], ':mach' => $r['machine']));
 // a server's oldest reports go (the newest ones stay)
 $db->prepare('DELETE FROM reports WHERE install = ? AND n NOT IN (SELECT n FROM reports WHERE install = ? ORDER BY n DESC LIMIT ?)')->execute(array($r['id'], $r['id'], (int) $c['keep']));
 $db->commit();

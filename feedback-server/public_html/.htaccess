@@ -1,0 +1,6 @@
+# Sentora-2027 feedback server. The code library and your settings (inc/) and the database (data/)
+# have their own .htaccess that refuses every request; nothing starting with a dot is served.
+Options -Indexes
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
