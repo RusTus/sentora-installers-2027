@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>205</latestversion>
+    <latestversion>206</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/quickfig.zpp</downloadurl>
     <name>QuickFig</name>
     <desc>Your WordPress settings without editing wp-config.php: the site address, debugging, security, memory, updates and scheduled tasks, with rescue tools for a site that broke, the cache, maintenance mode and own tools of a Magento shop, a switch to https, reminders when debug mode is left on or a site is stuck in maintenance, and a crawler blocker for every website (bad bots, scrapers posing as an old Chrome, robots.txt rules for the app it finds: WordPress, WooCommerce, Magento, OpenCart, PrestaShop, Joomla, Drupal and more).</desc>
