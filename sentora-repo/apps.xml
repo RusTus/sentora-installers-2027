@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
+<updateserver>
+    <latestversion>100</latestversion>
+    <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/apps.zpp</downloadurl>
+    <name>Apps</name>
+    <desc>Install WordPress into one of your websites in a few clicks: the panel makes its database, installs it as your own account and sets the admin you choose. No setup page is ever left open on the internet.</desc>
+    <ostype>lin</ostype>
+    <authorname>Sentora for Ubuntu 26.04</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+</updateserver>
