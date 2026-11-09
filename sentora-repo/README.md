@@ -7,6 +7,7 @@ Optional modules for Sentora-2027, installed from the panel's **Repo Browser**. 
 | `PHP-Adminer` | Adminer 6.3.0 for each account's own MySQL databases, locked to the panel login and the account's own MySQL users, in the panel's Light or Dark |
 | `webalizer_stats` | Webalizer traffic reports for each account's domains, updated every hour, in the panel's Light or Dark (builds the webalizer program on install) |
 | `visitor_stats` | Visitors reports for each account's domains: visitors per day, pages, referrers, search terms and browsers, in the panel's Light or Dark (builds the visitors program on install) |
+| `log_forwarder` | Sends an account's website logs (and an administrator's server logs) live to its own log server: ELK, OpenSearch, Grafana Loki or Graylog, as syslog over TLS through the server's rsyslog. Clients' forwarding counts towards their package's bandwidth |
 
 ## Using it
 
