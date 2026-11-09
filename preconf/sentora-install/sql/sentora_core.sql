@@ -440,6 +440,7 @@ insert  into `x_modules`(`mo_id_pk`,`mo_category_fk`,`mo_name_vc`,`mo_version_in
 (72,1,'Dashboard',200,'dashboard','user','Your dashboard: what to do next and how your account is doing, at a glance. Add, remove and arrange its widgets.',NULL,'true',NULL,''),
 (76,2,'Panel Update',200,'panel_update','user','Update the panel to the newest published release, or go back to the version before an update, from the panel. The same as sentora-update on the server\'s console.',NULL,'true',NULL,''),
 (77,5,'Site Health',200,'site_health','user','Whether each of your websites works, and what needs attention: checked every hour from this server, with the certificate, the PHP version, PHP errors and error pages.',NULL,'true',NULL,''),
+(78,7,'Branding',200,'branding','user','Give the panel your own look for your clients: your logo, company name and colour on the login page and in the panel, and your own panel address (such as panel.yourdomain.com) with its certificate.',NULL,'true',NULL,''),
 (73,2,'Widget Admin',200,'widget_admin','user','Choose which dashboard widgets each group may use and which are on by default, and upload new widgets.',NULL,'true',NULL,''),
 (74,2,'SpamAV Admin',200,'spamav_admin','user','Virus scanning (ClamAV) and spam filtering (SpamAssassin) for all mail on this server: settings, status and updates.',NULL,'true',NULL,''),
 (75,6,'SpamAV',200,'spamav','user','Spam and virus protection for your mailboxes: what was caught, and how spam is handled for each mailbox.',NULL,'true',NULL,''),
@@ -601,7 +602,8 @@ insert  into `x_permissions` (`pe_id_pk`,`pe_group_fk`,`pe_module_fk`) values
 (92,1,48), (93,2,48), (94,3,48), (95,1,49), (98,1,50), (99,2,50), (100,3,50),
 (101,1,51), (102,2,51), (103,3,51),
 (130,1,27), (131,2,27), (132,3,27),
-(133,1,77), (134,2,77), (135,3,77);
+(133,1,77), (134,2,77), (135,3,77),
+(136,1,78), (137,2,78);
 
 /*Table structure for table `x_profiles` */
 
