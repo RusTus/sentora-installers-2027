@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+# Sentora-2027 patch: run it on a fresh server BEFORE sentora2027-install. It is not part of the
+# installer and changes nothing of Sentora; it brings the system itself up to date:
+#   1. installs every pending update of this system (the kernel too);
+#   2. applies Sentora's stopgaps for known holes the system has not fixed yet (each one removes
+#      itself once the server runs a fixed kernel or package);
+#   3. says whether to restart before installing Sentora (a new kernel only runs after a restart).
+#
+#   wget -O sentora2027-patch https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora2027-patch
+#   bash sentora2027-patch             patch, then say whether to restart
+#   bash sentora2027-patch --check     only show what it would do (changes nothing)
+#   bash sentora2027-patch --reboot    patch, and restart by itself when a restart is needed
+#
+# Supported: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise Linux 10, Fedora.
+# Log: /var/log/sentora2027-patch.log
+#
+# Stopgaps in this version (2026-11-10):
+#   CVE-2026-98432  Linux kernel, IPv4 TCP handshake (use-after-free, CVSS 9.8). Until the server
+#                   runs a fixed kernel, incoming TCP packets carrying IPv4 options are dropped
+#                   (ordinary traffic never uses them; the filter Red Hat suggests). It stays on
+#                   across restarts and takes itself away once a fixed kernel runs.
+set -u
+PATCH_DATE=2026-11-10
+SELF_DIR=/usr/local/sbin
+STOP_DIR=/etc/sentora-patch
+LOG=/var/log/sentora2027-patch.log
+
+MODE=patch
+for a in "$@"; do
+    case "$a" in
+        --check) MODE=check ;;
+        --reboot) REBOOT=1 ;;
+        --boot) MODE=boot ;;   # (used by the stopgaps' service at start-up: stopgaps only, no updates)
+        -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $a (see --help)"; exit 1 ;;
+    esac
+done
+REBOOT=${REBOOT:-0}
+
+[ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
+[ -r /etc/os-release ] || { echo "This system does not say what it is (/etc/os-release)."; exit 1; }
+. /etc/os-release
+case "${ID:-} ${VERSION_ID:-}" in
+    "ubuntu 26.04")                          FAMILY=apt ;;
+    "debian 13"*)                            FAMILY=apt ;;
+    "almalinux 10"*|"rocky 10"*|"rhel 10"*)  FAMILY=dnf ;;
+    "fedora "*)                              FAMILY=dnf ;;
+    *) echo "sentora2027-patch does not know ${PRETTY_NAME:-this system} (it patches the systems Sentora-2027 supports)."; exit 1 ;;
+esac
+WSL=0; grep -qi microsoft /proc/version 2> /dev/null && WSL=1
+
+if [ "$MODE" != boot ]; then
+    exec > >(tee -a "$LOG") 2>&1
+    echo "== sentora2027-patch ($PATCH_DATE) on ${PRETTY_NAME:-$ID $VERSION_ID}, $(date '+%Y-%m-%d %H:%M %Z')$([ "$MODE" = check ] && echo ': --check, nothing is changed')"
+fi
+
+# ----- helpers -----------------------------------------------------------------------------------
+
+# the newest kernel installed (the one a restart would start)
+newest_kernel() {
+    ls /boot/vmlinuz-* 2> /dev/null | sed 's#^/boot/vmlinuz-##' | grep -Ev 'rescue|\.hmac$' | sort -V | tail -1
+}
+
+# whether a restart is needed to run what was installed
+restart_needed() {
+    [ $WSL -eq 1 ] && return 1   # (WSL's kernel comes from Windows: wsl --update)
+    [ -f /var/run/reboot-required ] && return 0
+    local n; n=$(newest_kernel)
+    [ -n "$n" ] && [ "$n" != "$(uname -r)" ] && return 0
+    if [ "$FAMILY" = dnf ]; then
+        if command -v needs-restarting > /dev/null 2>&1; then needs-restarting -r > /dev/null 2>&1 || return 0
+        else dnf needs-restarting -r > /dev/null 2>&1; [ $? -eq 1 ] && return 0; fi
+    fi
+    return 1
+}
+
+# the package version of a kernel (apt systems): e.g. 7.0.0-43.43 or 6.12.113-1
+deb_kernel_version() {
+    dpkg-query -W -f='${Version}' "linux-image-$1" 2> /dev/null \
+        || dpkg-query -W -f='${Version}' "linux-image-unsigned-$1" 2> /dev/null
+}
+
+# whether a kernel's own changelog lists a CVE (rpm systems, and Debian/Ubuntu when it is there)
+changelog_lists() { # kernel-release CVE
+    if [ "$FAMILY" = dnf ]; then
+        rpm -q --changelog "kernel-core-$1" 2> /dev/null | grep -q "$2" && return 0
+        rpm -q --changelog "kernel-$1" 2> /dev/null | grep -q "$2" && return 0
+    else
+        local f
+        for f in /usr/share/doc/linux-image-"$1"/changelog.Debian.gz /usr/share/doc/linux-modules-"$1"/changelog.Debian.gz; do
+            [ -f "$f" ] && zgrep -q "$2" "$f" && return 0
+        done
+    fi
+    return 1
+}
+
+ensure_nft() {
+    command -v nft > /dev/null 2>&1 && return 0
+    echo "   installing nftables (for the filter)"
+    if [ "$FAMILY" = apt ]; then DEBIAN_FRONTEND=noninteractive apt-get -qq -y install nftables > /dev/null 2>&1
+    else dnf -y -q install nftables > /dev/null 2>&1; fi
+    command -v nft > /dev/null 2>&1
+}
+
+# the start-up service that keeps the stopgaps on (it runs this script with --boot)
+boot_service() { # on|off
+    local unit=/etc/systemd/system/sentora-patch-stopgaps.service
+    if [ "$1" = on ]; then
+        install -m 755 "$(readlink -f "$0")" "$SELF_DIR/sentora2027-patch" 2> /dev/null
+        cat > "$unit" <<EOF
+[Unit]
+Description=Sentora patch: stopgaps for security holes the system has not fixed yet
+After=network-pre.target firewalld.service nftables.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=$SELF_DIR/sentora2027-patch --boot
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload && systemctl enable sentora-patch-stopgaps.service > /dev/null 2>&1
+    else
+        [ -f "$unit" ] || return 0
+        systemctl disable sentora-patch-stopgaps.service > /dev/null 2>&1
+        rm -f "$unit"; systemctl daemon-reload
+    fi
+}
+
+# ----- stopgap: CVE-2026-98432 (kernel, IPv4 TCP handshake) ---------------------------------------
+# Fixed kernels (from the distributions' own notices): Ubuntu 26.04 7.0.0-43.43 (first in -proposed,
+# then -updates); Debian 13 6.12.113-1 (DSA-6568-1); RHEL 10 and its rebuilds: the kernel whose
+# changelog lists the CVE (RHSA-2026:93413). Fedora: its changelogs do not list CVEs, so the filter
+# stays until a kernel's changelog or this script says otherwise (it is harmless for normal traffic).
+CVE1=CVE-2026-98432
+cve1_fixed() { # kernel-release: 0 fixed, 1 not fixed, 2 can not tell
+    local k="$1" v
+    case "$ID" in
+        ubuntu) v=$(deb_kernel_version "$k"); [ -n "$v" ] || return 2
+                dpkg --compare-versions "$v" ge 7.0.0-43.43 && return 0; return 1 ;;
+        debian) changelog_lists "$k" "$CVE1" && return 0
+                v=$(deb_kernel_version "$k"); [ -n "$v" ] || return 2
+                dpkg --compare-versions "$v" ge 6.12.113-1 && return 0; return 1 ;;
+        *)      changelog_lists "$k" "$CVE1" && return 0
+                [ "$ID" = fedora ] && return 2; return 1 ;;
+    esac
+}
+cve1_rules() {
+    cat <<'EOF'
+# Sentora patch: stopgap for CVE-2026-98432 until a fixed kernel runs. Drops incoming TCP packets
+# whose IPv4 header carries options (ordinary traffic never does). Removed by sentora2027-patch.
+table inet sentora_cve_2026_98432
+delete table inet sentora_cve_2026_98432
+table inet sentora_cve_2026_98432 {
+    chain input {
+        type filter hook input priority -310; policy accept;
+        meta nfproto ipv4 meta l4proto tcp ip hdrlength > 5 counter drop
+    }
+}
+EOF
+}
+cve1() { # check|apply|boot
+    local running; running=$(uname -r)
+    if [ $WSL -eq 1 ]; then
+        [ "$1" = boot ] || echo " - $CVE1 (kernel): WSL's kernel comes from Windows; run 'wsl --update' in Windows."
+        return 0
+    fi
+    cve1_fixed "$running"; local st=$?
+    if [ $st -eq 0 ]; then
+        if [ -f "$STOP_DIR/$CVE1.nft" ] || nft list table inet sentora_cve_2026_98432 > /dev/null 2>&1; then
+            if [ "$1" = check ]; then echo " - $CVE1: the running kernel is fixed; its filter would be taken away"
+            else
+                nft delete table inet sentora_cve_2026_98432 2> /dev/null; rm -f "$STOP_DIR/$CVE1.nft"
+                [ "$1" = boot ] || echo " - $CVE1: the running kernel ($running) is fixed: the filter is taken away"
+            fi
+        else
+            [ "$1" = boot ] || echo " - $CVE1: the running kernel ($running) is fixed"
+        fi
+        return 0
+    fi
+    local why="the running kernel ($running) is not fixed"; [ $st -eq 2 ] && why="can not tell whether the running kernel ($running) is fixed"
+    local next; next=$(newest_kernel)
+    if [ "$next" != "$running" ] && cve1_fixed "$next"; then why="$why; the fixed $next runs after a restart"; fi
+    if [ "$1" = check ]; then echo " - $CVE1: $why: the filter would be put on (until a fixed kernel runs)"; return 0; fi
+    ensure_nft || { echo " - $CVE1: $why, and nftables could not be installed: no filter (install nftables and run this again)"; return 1; }
+    mkdir -p "$STOP_DIR" && chmod 700 "$STOP_DIR"
+    cve1_rules > "$STOP_DIR/$CVE1.nft"
+    if nft -f "$STOP_DIR/$CVE1.nft"; then
+        [ "$1" = boot ] || echo " - $CVE1: $why: filter on (TCP packets with IPv4 options are dropped; it stays on across restarts until a fixed kernel runs)"
+    else
+        echo " - $CVE1: the filter could not be loaded (nft -f $STOP_DIR/$CVE1.nft)"; return 1
+    fi
+}
+
+STOPGAPS="cve1"
+
+# ----- start-up (the service): stopgaps only ------------------------------------------------------
+if [ "$MODE" = boot ]; then
+    for s in $STOPGAPS; do "$s" boot; done
+    # nothing left to keep on: the service goes too
+    ls "$STOP_DIR"/*.nft > /dev/null 2>&1 || { boot_service off; rmdir "$STOP_DIR" 2> /dev/null; }
+    exit 0
+fi
+
+# ----- 1. updates --------------------------------------------------------------------------------
+echo
+echo "1. Updates"
+if [ "$FAMILY" = apt ]; then
+    export DEBIAN_FRONTEND=noninteractive
+    APT_OPTS=(-o DPkg::Lock::Timeout=1800 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+    apt-get -qq "${APT_OPTS[@]}" update || echo "   (the package lists could not all be read; going on with what there is)"
+    PENDING=$(apt-get -s "${APT_OPTS[@]}" full-upgrade 2> /dev/null | grep -c '^Inst ')
+    if [ "$PENDING" -eq 0 ]; then echo "   none pending"
+    elif [ "$MODE" = check ]; then
+        echo "   $PENDING package(s) would be updated:"; apt-get -s full-upgrade 2> /dev/null | awk '/^Inst /{print "     " $2}' | head -40
+    else
+        echo "   installing $PENDING update(s)"
+        apt-get -qq -y "${APT_OPTS[@]}" full-upgrade > /tmp/sentora2027-patch-apt.log 2>&1 \
+            && echo "   done" || { echo "   the updates did not all install:"; tail -15 /tmp/sentora2027-patch-apt.log; }
+    fi
+else
+    dnf -q makecache > /dev/null 2>&1 || echo "   (the package lists could not all be read; going on with what there is)"
+    PENDING=$(dnf -q check-update 2> /dev/null | awk 'NF==3 && $1 ~ /\./' | wc -l)
+    if [ "$PENDING" -eq 0 ]; then echo "   none pending"
+    elif [ "$MODE" = check ]; then
+        echo "   $PENDING package(s) would be updated:"; dnf -q check-update 2> /dev/null | awk 'NF==3 && $1 ~ /\./ {print "     " $1}' | head -40
+    else
+        echo "   installing $PENDING update(s)"
+        dnf -y upgrade > /tmp/sentora2027-patch-dnf.log 2>&1 \
+            && echo "   done" || { echo "   the updates did not all install:"; tail -15 /tmp/sentora2027-patch-dnf.log; }
+    fi
+fi
+
+# ----- 2. stopgaps -------------------------------------------------------------------------------
+echo
+echo "2. Stopgaps for holes the system has not fixed yet"
+for s in $STOPGAPS; do "$s" "$MODE"; done
+if [ "$MODE" = patch ]; then
+    if ls "$STOP_DIR"/*.nft > /dev/null 2>&1; then boot_service on
+    else boot_service off; rmdir "$STOP_DIR" 2> /dev/null; fi
+fi
+
+# ----- 3. restart --------------------------------------------------------------------------------
+echo
+echo "3. Restart"
+if restart_needed; then
+    echo "   A restart is needed (the running kernel is $(uname -r); the newest installed is $(newest_kernel))."
+    if [ "$MODE" = check ]; then echo "   (--check: nothing restarted)"
+    elif [ $REBOOT -eq 1 ]; then
+        echo "   Restarting now. Afterwards run this again (it confirms the kernel), then the Sentora installer."
+        sleep 5; systemctl reboot
+    else
+        echo "   Restart (reboot), run this again to confirm, then run the Sentora installer."
+    fi
+else
+    echo "   none needed$([ "$MODE" = patch ] && echo ': the server is ready for the Sentora installer')"
+fi
