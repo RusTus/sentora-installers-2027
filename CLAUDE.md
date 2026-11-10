@@ -109,12 +109,12 @@ BIND's real unit is bind.service, LLMNR off, DBD::MariaDB for SpamAssassin, mari
 php-bundles and sogo-bundle take system fedora45 (SOGo on Fedora uses GNUstep base's master branch and
 the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer lists the tested
 releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
-Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26.
+Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26. On the owner's Fedora 45 VM (2026-11-10, release 2027.70): post-install check 91 OK / 0 FAIL, smoke test 26/26 with SOGo, 7 minutes.
 
 **Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
 systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
 
-**Next (the owner's list):** the WSL version (`sentora2027-wsl.ps1`, on the release) needs its first run on a real Windows 11 PC; Fedora 45 on the owner's VM. Debian VM confirmed 2027.65 (smoke 26/26).
+**Next (the owner's list):** the WSL version (`sentora2027-wsl.ps1`, on the release) needs its first run on a real Windows 11 PC (the owner is setting up a 23H2 VM with nested Hyper-V). Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
