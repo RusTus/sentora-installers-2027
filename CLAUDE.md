@@ -79,13 +79,23 @@ Versions when a newer build is ready; nothing is ever compiled on a server (owne
 2. When the owner sends AlmaLinux VM results: fix what SELinux blocks (policy module), then
    `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62/63 core.
 
+**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 102):** billing belongs to each seller
+(administrator or reseller); the panel's administrator does not manage it. Processors are files in the
+module's `code/processors/` (PayPal, Stripe; `pp_pay::Processors()` lists them), and every payment is
+checked by `pp_pay::Apply`. New clients on priced packages are billed automatically. Figures at the top
+of the seller's page; every step noted in `x_pp_log`. Not yet tried against real MySQL or the real
+PayPal/Stripe test modes. The module is only kept as the .zpp: unzip it to change it. Its tests:
+`tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
+before publishing a change).
+
 **Ideas the owner is still thinking about (do not start without asking):** a SELinux policy module
 (after the VM test), a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each
 panel's system on the feedback server's stats page, one install command that picks the right
 installer. Hosting for the add-on repository and the feedback server was deferred by the owner.
 
-**Working with the owner:** plain words, short; test before saying something works; release only
-when the owner asks or has said "release as you see fit" (they did for this work). The owner uses
+**Working with the owner:** plain words, short; test before saying something works; commit and
+publish as you see fit (the owner's rule since 2026-11-10: they say when to wait); a panel release only when
+the owner asks or has said "release as you see fit". The owner uses
 speech to text: "Centaur", "Centora" = Sentora, "himsa" = hemsaw, "zPanel" sometimes means the panel.
 Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
 push (`git fetch origin master2027 && git merge-base --is-ancestor origin/master2027 HEAD && git
