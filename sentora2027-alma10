@@ -1030,8 +1030,47 @@ SELINUX_ON=0
 command -v getenforce > /dev/null 2>&1 && [ "$(getenforce 2> /dev/null)" != "Disabled" ] && SELINUX_ON=1
 echo "SELinux: $(getenforce 2> /dev/null || echo 'not installed')"
 
+# The package lists must be readable before anything is installed. A mirror (or something on the network
+# in between) that answers with something else than its package list makes every install fail: first
+# dnf's cache is cleared and it tries again; then the system's own repositories are switched from their
+# mirror list (plain http mirrors) to the distribution's own server over HTTPS (the same signed packages:
+# nothing in between can change them); then the installation stops, before anything was installed.
+# Reads and rewrites "$logfile.apt" (dnf makecache's output).
+https_repos() {
+    local f
+    for f in /etc/yum.repos.d/almalinux*.repo /etc/yum.repos.d/rocky*.repo; do
+        [ -f "$f" ] || continue
+        [ -f "$f.sentora-orig" ] || cp -p "$f" "$f.sentora-orig"
+        sed -i -e 's|^mirrorlist=|#mirrorlist=|' \
+            -e 's|^# *baseurl=https://repo.almalinux.org|baseurl=https://repo.almalinux.org|' \
+            -e 's|^# *baseurl=http://dl.rockylinux.org|baseurl=https://dl.rockylinux.org|' "$f"
+    done
+}
+package_lists_readable() {
+    local try
+    for try in 1 2 3; do
+        grep -qiE "Failed to download metadata|parser error|Cannot download repomd|Curl error" "$logfile.apt" 2> /dev/null || return 0
+        case $try in
+            1) echo "The package lists could not be read: clearing dnf's cache and trying again" ;;
+            2) echo "Still not readable: the system's repositories now use their distribution's own server over HTTPS"
+               echo "(their files before: /etc/yum.repos.d/*.repo.sentora-orig)"
+               https_repos ;;
+            3) ui_err "The package lists could not be read (see above): nothing was installed."
+               echo "  Check that this server reaches its package mirrors (dnf clean all; dnf makecache), then run the installer again."
+               rm -f "$logfile.apt"
+               exit 1 ;;
+        esac
+        dnf clean all > /dev/null 2>&1
+        sleep 5
+        dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
+    done
+}
+
 #--- Adapt repositories and packages sources
 ui_step "Checking the package sources"
+dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
+package_lists_readable
+rm -f "$logfile.apt"
 # The system's own repositories (BaseOS, AppStream) stay as they are. Added: EPEL (Fedora's extra
 # packages for Red Hat-family systems: ProFTPD, SpamAssassin, ClamAV, fail2ban) and CRB (the
 # libraries EPEL's packages need), both signed and updated like the others.
@@ -1071,6 +1110,7 @@ rpm -qa | sort
 #--- Ensures that all packages are up to date
 ui_step "Updating the system (this can take a while)"
 dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
+package_lists_readable
 if grep -qi "not yet valid\|in the future" "$logfile.apt" 2> /dev/null; then
     rm -f "$logfile.apt"
     echo "ERROR: the package lists are dated after this server's clock ($(date '+%Y-%m-%d %H:%M %Z')): the clock is behind."
@@ -1078,22 +1118,6 @@ if grep -qi "not yet valid\|in the future" "$logfile.apt" 2> /dev/null; then
     echo "top of the installer to a time server this network can reach), then run the installer again."
     exit 1
 fi
-# A mirror that answers with something else than its package list (a broken or busy mirror, a page
-# from the network in between) makes every install fail: the cache is cleared and dnf tries again,
-# then the installation stops with what to check when the lists still can not be read
-for SOURCES_TRY in 1 2 3; do
-    grep -qiE "Failed to download metadata|parser error|Cannot download repomd|Curl error" "$logfile.apt" 2> /dev/null || break
-    if [ "$SOURCES_TRY" -eq 3 ]; then
-        ui_err "The package lists could not be read (see above): nothing was installed."
-        echo "  Check that this server reaches its package mirrors (dnf clean all; dnf makecache), then run the installer again."
-        rm -f "$logfile.apt"
-        exit 1
-    fi
-    echo "The package lists could not be read (try $SOURCES_TRY): clearing dnf's cache and trying again"
-    dnf clean all > /dev/null 2>&1
-    sleep $(( SOURCES_TRY * 10 ))
-    dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
-done
 rm -f "$logfile.apt"
 dnf -y -q upgrade
 
