@@ -1,0 +1,66 @@
+# SOGo for AlmaLinux 10 / Rocky 10 (they have no SOGo package): builds SOGo with everything it needs
+# into /opt/sentora-sogo (preconf/sogo-build/build-sentora-sogo.sh) in an AlmaLinux 10 container, and
+# puts sentora-sogo-alma10-amd64.tar.gz on the "current" release, where sentora2027-alma10 takes it
+# (checked against the SHA-256 GitHub lists for it). Nothing is compiled on a customer's server.
+# Run it from Actions > SOGo bundle > Run workflow (version empty: SOGo's newest release).
+name: SOGo bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SOGo version (e.g. 5.12.13; empty = the newest)
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sogo-bundle
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container: quay.io/almalinuxorg/almalinux:10
+    steps:
+      - name: Tools
+        run: dnf -y -q install git tar gzip > /dev/null
+
+      - name: Check out master2027
+        uses: actions/checkout@v5
+        with:
+          ref: master2027
+
+      - name: Build SOGo
+        env:
+          OUT: ${{ github.workspace }}/out
+        run: mkdir -p out && bash preconf/sogo-build/build-sentora-sogo.sh "${{ inputs.version }}"
+
+      - name: Keep the bundle for the next job
+        uses: actions/upload-artifact@v4
+        with:
+          name: sogo-bundle
+          path: out/sentora-sogo-alma10-amd64.tar.gz
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sogo-bundle
+
+      - name: Put it on the current release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -xzOf sentora-sogo-alma10-amd64.tar.gz opt/sentora-sogo/BUILD-INFO
+          sha256sum sentora-sogo-alma10-amd64.tar.gz
+          for try in 1 2 3 4 5; do
+            gh release upload current sentora-sogo-alma10-amd64.tar.gz --clobber --repo "$GITHUB_REPOSITORY" && exit 0
+            echo "Upload failed (try $try)"; sleep $(( try * 15 ))
+          done
+          exit 1

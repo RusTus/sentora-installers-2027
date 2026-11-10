@@ -1,0 +1,16 @@
+SOGo for AlmaLinux 10 / Rocky 10
+================================
+
+AlmaLinux and Rocky have no SOGo package (and SOGo's own packages for Red Hat systems need a support
+subscription), so Sentora builds it from SOGo's free sources: GitHub, Actions > SOGo bundle > Run
+workflow. It runs build-sentora-sogo.sh in an AlmaLinux 10 container and puts
+sentora-sogo-alma10-amd64.tar.gz on the "current" release; sentora2027-alma10 installs it into
+/opt/sentora-sogo (checked against the SHA-256 GitHub lists for it). Nothing is compiled on a server.
+
+What it builds, all into /opt/sentora-sogo: libobjc2 (AlmaLinux 10 has no gcc-objc, so clang is used),
+GNUstep make and base, libwbxml (ActiveSync), ytnef (Outlook attachments), SOPE and SOGo with
+ActiveSync. sogod needs only LD_LIBRARY_PATH=/opt/sentora-sogo/lib64:/opt/sentora-sogo/lib; the
+tools sogo-tool, sogo-ealarms-notify and sogo-backup get small wrappers in /usr/local/sbin (the panel's
+setting sogo_tool_dir).
+
+A new SOGo release: run the workflow again (version empty = the newest), then run the install test.
