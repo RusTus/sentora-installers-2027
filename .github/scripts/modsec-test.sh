@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run inside the install test's container, after the install: the Web Hardening add-on (the .zpp at
+# Run inside the install test's container, after the install and sentora-smoke-test --keep (its
+# domain is the site attacked): the Web Hardening add-on (the .zpp at
 # /root/php_hardening.zpp, put in place as Repo Browser would) switches ModSecurity on; requests that
 # look like attacks must get 403, an ordinary one and the panel's own must not; what was caught must
 # reach the add-on's list; then it is switched off and Apache must run without ModSecurity.
@@ -13,7 +14,8 @@ bad() { echo "  FAIL $*"; FAIL=1; }
 ph()  { php -r 'chdir("/etc/sentora/panel"); require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php";
     require "modules/php_hardening/code/ph.php"; require "modules/php_hardening/code/daemon.php"; require "modules/php_hardening/code/modsec.php"; '"$1"; }
 daemon() { php "$PANEL/bin/daemon.php" > /root/modsec-daemon.txt 2>&1; grep -E 'Web Hardening' /root/modsec-daemon.txt | sed 's/^/        daemon: /'; }
-code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Host: $1" "http://127.0.0.1$2"; }
+# the final answer for a page of a host (followed through the site's http-to-https redirect, if it has one)
+code() { curl -sk -L --max-time 20 --resolve "$1:80:127.0.0.1" --resolve "$1:443:127.0.0.1" -o /dev/null -w '%{http_code}' "http://$1$2"; }
 cd "$PANEL" || exit 1
 
 echo "== the add-on, as Repo Browser installs it"
@@ -29,7 +31,12 @@ ST=$(ph 'echo json_encode(ph::Status("modsec"));'); echo "        state: $ST"
 case "$ST" in *'"st_state_vc":"on"'*) ok "the add-on switched it on" ;; *) bad "the add-on did not switch it on" ;; esac
 if $(sp apache_modules_cmd) 2> /dev/null | grep -q security2_module; then ok "Apache has ModSecurity loaded"; else bad "Apache has no ModSecurity loaded"; fi
 systemctl is-active --quiet "$(sp apache_sn)" && ok "Apache runs" || bad "Apache does not run"
-H=modsec-test.example
+# a real hosted site: the domain sentora-smoke-test --keep left in place (a name with no site is
+# answered by the panel's own vhost, whose redirect comes before ModSecurity's request checks)
+H=$(ph '$q = $GLOBALS["zdbh"]->prepare("SELECT vh_name_vc FROM x_vhosts WHERE vh_deleted_ts IS NULL AND vh_name_vc LIKE :p ORDER BY vh_id_pk DESC LIMIT 1"); $q->execute(array(":p" => "smoke%.test")); echo (string) $q->fetchColumn();')
+if [ -z "$H" ]; then bad "no hosted domain to attack (run sentora-smoke-test --keep first)"; echo "MODSEC: FAILED"; exit 1; fi
+echo "        attacking the hosted site $H"
+c=$(code "$H" '/'); echo "        $H answers $c before the attacks"
 c=$(code "$H" '/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E'); [ "$c" = 403 ] && ok "cross-site scripting: 403" || bad "cross-site scripting: $c (403 expected)"
 c=$(code "$H" "/?id=1%27%20OR%20%271%27%3D%271%27%20--%20"); [ "$c" = 403 ] && ok "SQL injection: 403" || bad "SQL injection: $c (403 expected)"
 c=$(code "$H" '/?file=../../../../etc/passwd'); [ "$c" = 403 ] && ok "path traversal: 403" || bad "path traversal: $c (403 expected)"

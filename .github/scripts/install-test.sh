@@ -122,7 +122,8 @@ for u in $(grep -E '^\s+FAIL' "$OUT/post-install-check.txt" | grep -oE 'systemct
 done | tee "$OUT/stopped-services-why.txt"
 
 say "sentora-smoke-test"
-in_box 'sentora-smoke-test' > "$OUT/smoke-test.txt" 2>&1
+# (--keep: its test client and domain stay, for the ModSecurity test below to attack a real site)
+in_box 'sentora-smoke-test --keep' > "$OUT/smoke-test.txt" 2>&1
 grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
