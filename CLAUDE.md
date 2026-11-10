@@ -71,7 +71,13 @@ containers with systemd. **SELinux:** labels are set in the AlmaLinux installer'
 enter /var/sentora/logs). Some refusals are not logged (dontaudit): when a service fails with
 "permission denied" and `ausearch` shows nothing, check its rules with `sesearch` (an AlmaLinux 10
 container with selinux-policy-targeted, -targeted-extra from CRB, and setools-console). Never
-switch SELinux off ("less secure, not done").
+switch SELinux off ("less secure, not done"). **AppArmor (Debian, Ubuntu, since 2026-11-10):** on, never switched off. Sentora's paths for a
+program go in `preconf/apparmor/local/<profile>` (installers repo), which the installers' `aa_sentora` writes into
+/etc/apparmor.d/local/<profile> between `# BEGIN Sentora` / `# END Sentora` and reloads. So far: BIND (usr.sbin.named)
+and ProFTPD (proftpd, Ubuntu only). MySQL and ClamAV need nothing. Find what a program needs with its profile in
+complain mode (`aa-complain`, reboot, use it, then `journalctl -k -b | grep apparmor=`). Tested on the owner's
+Ubuntu VM (enforcing, smoke 26/26, nothing refused); Debian only on GitHub so far. Servers installed before keep
+AppArmor off (the post-install check warns): no update step switches it on yet.
 
 **PHP bundles:** built on GitHub by Actions > PHP bundles (system ubuntu26.04, debian13 or alma10;
 versions empty = usual set, `8.4` = newest from php.net, or exact; `list_only` rewrites the list).
@@ -85,7 +91,9 @@ containers with systemd, restarted, and must pass sentora-post-install-check (no
 sentora-smoke-test; nothing is published otherwise (`skip_tests` only for a broken test system). The
 script is `.github/scripts/install-test.sh` (also runs on a test machine: TEST_CA, CGROUP_DIR, TEST_SOGO,
 TEST_KEEP). Actions > Install test runs it alone; each run keeps its results (logs, checks) 14 days.
-On the runner the host's AppArmor profiles are unloaded (they confined ProFTPD inside the containers).
+On the runner the host's own AppArmor profiles are unloaded; for Debian and Ubuntu the test then loads the
+container's own profiles into the runner's kernel (they confine the same programs inside the container) and fails
+on any refusal. The workflow takes `installers_ref` and `core_ref`: test a work branch before it goes to master2027.
 
 **SOGo on AlmaLinux:** built by Actions > SOGo bundle (`preconf/sogo-build/`: libobjc2 with clang,
 GNUstep make/base, libwbxml, ytnef, SOPE, SOGo + ActiveSync) into /opt/sentora-sogo, published as
