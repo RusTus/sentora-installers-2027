@@ -46,14 +46,15 @@ released together.
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
-## Where we are (handoff, 2026-11-10, after release 2027.63)
+## Where we are (handoff, 2026-11-10, after release 2027.68)
 
 Read this first in a new session; the CHANGELOG has every change in detail.
 
 **Supported systems (each has its installer on the `current` release):** Ubuntu 26.04
 (`sentora2027-ub26.04`), Debian 13 (`sentora2027-deb13`, MariaDB 11.8, PHP 8.4), AlmaLinux 10 and
 Rocky 10 (`sentora2027-alma10`, MariaDB 10.11, PHP 8.3, Dovecot 2.3 with `preconf/dovecot2-23`,
-SELinux enforcing, no SOGo). What differs between systems lives in hidden x_settings read through
+SELinux enforcing, SOGo from Sentora's own build). `sentora2027-install` (on the release) picks the right
+installer for the system it runs on. What differs between systems lives in hidden x_settings read through
 `dryden/sys/platform.class.php` (`sys_platform::Get`, shell tools: `setso --get <name>`); each
 installer sets its values in its "Configuring Sentora" step. Keep the core free of distribution
 names (see the standing rule above).
@@ -75,13 +76,27 @@ Each run writes `php-bundles.json` on the release (system, version, SHA-256 of e
 panel checks it daily (`dryden/sys/phpbundles.class.php`): a notice and an Update button in PHP
 Versions when a newer build is ready; nothing is ever compiled on a server (owner's decision).
 
-**Next, agreed with the owner:**
-1. Automatic install tests on GitHub Actions: on each release, install on Ubuntu 26.04, Debian 13
-   and AlmaLinux 10 (containers with systemd), run sentora-post-install-check and
-   sentora-smoke-test, and only publish when they pass. (Containers need `--privileged`, cgroup2
-   and systemd as PID 1; see how the sessions tested: a Dockerfile with systemd, `CMD /sbin/init`.)
-2. `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62-65 core
-   (the milter sockets and ClamAV paths became settings in 2027.64; Debian keeps the old values).
+**Install tests (since 2027.68):** both release workflows first run `install-test.yml` (installers
+repo): Ubuntu 26.04, Debian 13 and AlmaLinux 10 are installed from master2027 of both repositories in
+containers with systemd, restarted, and must pass sentora-post-install-check (no FAIL) and
+sentora-smoke-test; nothing is published otherwise (`skip_tests` only for a broken test system). The
+script is `.github/scripts/install-test.sh` (also runs on a test machine: TEST_CA, CGROUP_DIR, TEST_SOGO,
+TEST_KEEP). Actions > Install test runs it alone; each run keeps its results (logs, checks) 14 days.
+On the runner the host's AppArmor profiles are unloaded (they confined ProFTPD inside the containers).
+
+**SOGo on AlmaLinux:** built by Actions > SOGo bundle (`preconf/sogo-build/`: libobjc2 with clang,
+GNUstep make/base, libwbxml, ytnef, SOPE, SOGo + ActiveSync) into /opt/sentora-sogo, published as
+`sentora-sogo-alma10-amd64.tar.gz` with a list of the system libraries it needs (RUNTIME-LIBS; the
+installer installs the missing ones). Service `sogo` (unit written by the installer, only
+LD_LIBRARY_PATH), tool wrappers in /usr/local/sbin (setting sogo_tool_dir). New SOGo release: run the
+workflow (version empty = newest), then the install test.
+
+**Server Monitor process list:** a root service `sentora-procstat` (installed and kept running by the
+server_monitor daemon hook) writes /var/lib/sentora/monitor/procs.json; the page uses it while fresh
+(SELinux hides other processes from the panel, and nothing in SELinux was widened for it).
+
+**Next (the owner's list):** Red Hat Enterprise Linux (likely close to the AlmaLinux installer), then a
+WSL version for Windows. Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
@@ -95,9 +110,7 @@ PayPal/Stripe test modes; no webhooks yet, so a refund or chargeback after payme
 `tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
 before publishing a change; `run.sh <unzipped module folder>` tests a working copy, without it the .zpp).
 
-**Ideas the owner is still thinking about (do not start without asking):** a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each
-panel's system on the feedback server's stats page, one install command that picks the right
-installer. Hosting for the add-on repository and the feedback server was deferred by the owner.
+**Ideas the owner is still thinking about (do not start without asking):** Hosting for the add-on repository and the feedback server was deferred by the owner.
 
 **Working with the owner:** plain words, short; test before saying something works; commit and
 publish as you see fit (the owner's rule since 2026-11-10: they say when to wait); a panel release only when
