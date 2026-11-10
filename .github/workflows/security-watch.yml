@@ -1,0 +1,34 @@
+# Sentora security watch: every Monday, and from Actions > Security watch > Run workflow.
+# It only looks (changes nothing): CISA's list of holes being used in attacks (software a Sentora
+# server runs), and the newest releases of what Sentora ships itself (PHP builds, Roundcube,
+# phpMyAdmin, Matomo, SOGo, OWASP CRS, Snuffleupagus). When something needs attention the run fails,
+# so GitHub emails you, and its summary page says what to do. Seen it and handling it? Add its key
+# to .github/security-watch-ack.txt (the summary shows the key) and the next runs stop failing on it.
+name: Security watch
+
+on:
+  schedule:
+    - cron: '23 13 * * 1'   # Mondays 13:23 UTC (morning in America/Chicago)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: CISA's list - entries added in the last how many days
+        default: '10'
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out master2027
+        uses: actions/checkout@v4
+        with:
+          ref: master2027
+      - name: Look
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DAYS: ${{ inputs.days || '10' }}
+        run: python3 .github/scripts/security-watch.py --days "$DAYS"

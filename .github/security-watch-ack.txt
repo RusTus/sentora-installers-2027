@@ -1,0 +1,4 @@
+# Security watch (.github/workflows/security-watch.yml): findings seen and being handled, or not needed.
+# One key per line (the run's summary shows each finding's key), then # and a short note.
+# A listed finding still shows on the summary page, but no longer makes the run fail.
+# Take a line out once it is handled (or leave it: it does no harm).
