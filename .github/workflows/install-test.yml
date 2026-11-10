@@ -59,7 +59,11 @@ jobs:
       # programs inside the test containers ("Permission denied" for root); a real server has none of
       # them, so they are unloaded on this throw-away runner only
       - name: Runner's AppArmor profiles off
-        run: sudo aa-teardown > /dev/null 2>&1 || sudo systemctl stop apparmor || true
+        # (Docker then loads its own profile, docker-default, again when it restarts)
+        run: |
+          sudo aa-teardown > /dev/null 2>&1 || true
+          sudo systemctl restart docker
+          sudo aa-status 2> /dev/null | head -3 || true
 
       - name: Install, restart, check and smoke test (${{ matrix.system }})
         env:
