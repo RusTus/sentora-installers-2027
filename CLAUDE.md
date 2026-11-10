@@ -52,7 +52,7 @@ Read this first in a new session; the CHANGELOG has every change in detail.
 
 **Supported systems (each has its installer on the `current` release):** Ubuntu 26.04
 (`sentora2027-ub26.04`), Debian 13 (`sentora2027-deb13`, MariaDB 11.8, PHP 8.4), AlmaLinux 10 and
-Rocky 10 (`sentora2027-alma10`, MariaDB 10.11, PHP 8.3, Dovecot 2.3 with `preconf/dovecot2-23`,
+Rocky 10 and Red Hat Enterprise Linux 10 (`sentora2027-alma10`, MariaDB 10.11, PHP 8.3, Dovecot 2.3 with `preconf/dovecot2-23`,
 SELinux enforcing, SOGo from Sentora's own build). `sentora2027-install` (on the release) picks the right
 installer for the system it runs on. What differs between systems lives in hidden x_settings read through
 `dryden/sys/platform.class.php` (`sys_platform::Get`, shell tools: `setso --get <name>`); each
@@ -95,8 +95,11 @@ workflow (version empty = newest), then the install test.
 server_monitor daemon hook) writes /var/lib/sentora/monitor/procs.json; the page uses it while fresh
 (SELinux hides other processes from the panel, and nothing in SELinux was widened for it).
 
-**Next (the owner's list):** Red Hat Enterprise Linux (likely close to the AlmaLinux installer), then a
-WSL version for Windows. Debian VM confirmed 2027.65 (smoke 26/26).
+**RHEL 10:** the AlmaLinux installer, with a subscription check (`subscription-manager identity`),
+CodeReady Builder via subscription-manager, and EPEL's release rpm from Fedora checked with its key.
+Tested on UBI 10 only (detection, refusal, signature); a full install needs a registered RHEL server.
+
+**Next (the owner's list):** a WSL version for Windows. Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or

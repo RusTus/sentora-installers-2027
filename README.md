@@ -21,7 +21,7 @@ The installer downloads from the GitHub releases of both repositories with the t
 | --- | --- | --- |
 | [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer for Ubuntu 26.04 |
 | | `sentora2027-deb13` | The installer for Debian 13 |
-| | `sentora2027-alma10` | The installer for AlmaLinux 10 (and Rocky Linux 10) |
+| | `sentora2027-alma10` | The installer for AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10 |
 | | `sentora2027-install` | One install command for all of them: picks the right installer |
 | | `sentora-sogo-alma10-amd64.tar.gz` | SOGo for AlmaLinux 10 (built by **Actions > SOGo bundle**) |
 | | `sentora-installers-2027.zip` | This repository |
@@ -42,7 +42,8 @@ To publish a new version, push to `master2027` and run **Actions > Release > Run
 
 ## Installing
 
-The same command on every supported system (Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10), on a
+The same command on every supported system (Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat
+Enterprise Linux 10), on a
 clean server, as root. It finds out which system this is, downloads that system's installer below
 (checked against its SHA-256) and runs it; `--check` only downloads and checks it.
 
@@ -81,6 +82,8 @@ dnf install -y wget
 wget -O sentora2027-alma10 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-alma10
 bash sentora2027-alma10
 ```
+
+On Red Hat Enterprise Linux 10 the same installer works on a registered server (`subscription-manager register`; Red Hat's free developer subscription works too): it switches on CodeReady Builder and adds EPEL (its release package from Fedora, installed only when Fedora's EPEL key signed it).
 
 On AlmaLinux everything comes from AlmaLinux's own packages and EPEL (PHP 8.3, MariaDB 10.11, Apache, Postfix, Dovecot 2.3, BIND 9.18, ProFTPD, SpamAssassin, ClamAV, fail2ban), kept current by `dnf upgrade` and dnf-automatic's daily security updates. SELinux stays on (enforcing): the installer labels Sentora's folders and switches on what the services need; firewalld, when it runs, gets Sentora's ports. SOGo (groupware and ActiveSync) comes from Sentora's own build (AlmaLinux has no SOGo package): **Actions > SOGo bundle** builds it from SOGo's free sources into `/opt/sentora-sogo` (see `preconf/sogo-build/README`), and the installer downloads it, checked against its SHA-256.
 
