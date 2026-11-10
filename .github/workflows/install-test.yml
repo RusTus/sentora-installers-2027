@@ -1,5 +1,5 @@
 # Install tests: Sentora is installed from master2027 of both repositories on a fresh Ubuntu 26.04,
-# Debian 13 and AlmaLinux 10 (containers with systemd), the "server" is restarted, and
+# Debian 13, AlmaLinux 10, Rocky Linux 10 and Fedora 45 (containers with systemd), the "server" is restarted, and
 # sentora-post-install-check and sentora-smoke-test must pass (no FAIL; smoke test PASSED).
 #
 # Both release workflows (this repository's and sentora-core-2027's) run it first and publish only
@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
     inputs:
       systems:
-        description: Systems to test (ub26.04 deb13 alma10)
-        default: ub26.04 deb13 alma10
+        description: Systems to test (ub26.04 deb13 alma10 rocky10 fedora45)
+        default: ub26.04 deb13 alma10 rocky10 fedora45
   workflow_call:
 
 permissions:
@@ -29,8 +29,8 @@ jobs:
         env:
           WANT: ${{ inputs.systems }}
         run: |
-          want=${WANT:-ub26.04 deb13 alma10}
-          echo "list=$(printf '%s\n' $want | grep -E '^(ub26\.04|deb13|alma10)$' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          want=${WANT:-ub26.04 deb13 alma10 rocky10 fedora45}
+          echo "list=$(printf '%s\n' $want | grep -E '^(ub26\.04|deb13|alma10|rocky10|fedora45)$' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
 
   install:
     needs: systems

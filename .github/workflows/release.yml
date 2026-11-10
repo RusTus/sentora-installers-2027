@@ -60,6 +60,7 @@ jobs:
           git show master2027:sentora2027-ub26.04 > sentora2027-ub26.04
           git show master2027:sentora2027-deb13 > sentora2027-deb13
           git show master2027:sentora2027-alma10 > sentora2027-alma10
+          git show master2027:sentora2027-fedora > sentora2027-fedora
           git show master2027:sentora2027-install > sentora2027-install
           git show master2027:sentora-tls-check.sh > sentora-tls-check.sh
           for f in sentora-migrate-export sentora-smoke-test sentora-web-probe; do
@@ -87,7 +88,7 @@ jobs:
           EOF
           mkdir -p old
           upload=""
-          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
+          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora2027-fedora sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             sha256sum "$f"
             if [ "$FORCE" = "true" ]; then
               echo "$f: upload (forced)"; upload="$upload $f"; continue

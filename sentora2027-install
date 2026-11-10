@@ -20,9 +20,10 @@ case "${ID:-} ${VERSION_ID:-}" in
     "ubuntu 26.04")              INSTALLER=sentora2027-ub26.04 ;;
     "debian 13"*)                INSTALLER=sentora2027-deb13 ;;
     "almalinux 10"*|"rocky 10"*|"rhel 10"*) INSTALLER=sentora2027-alma10 ;;
+    "fedora "*)                  INSTALLER=sentora2027-fedora ;;
     *)
         echo "Sentora-2027 does not support ${PRETTY_NAME:-this system} yet."
-        echo "Supported: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10 (fresh servers)."
+        echo "Supported: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise Linux 10 and Fedora (fresh servers)."
         exit 1 ;;
 esac
 echo "${PRETTY_NAME:-$ID $VERSION_ID}: the installer is $INSTALLER"

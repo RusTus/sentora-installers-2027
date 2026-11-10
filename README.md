@@ -22,6 +22,7 @@ The installer downloads from the GitHub releases of both repositories with the t
 | [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer for Ubuntu 26.04 |
 | | `sentora2027-deb13` | The installer for Debian 13 |
 | | `sentora2027-alma10` | The installer for AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10 |
+| | `sentora2027-fedora` | The installer for Fedora 45 |
 | | `sentora2027-install` | One install command for all of them: picks the right installer |
 | | `sentora-sogo-alma10-amd64.tar.gz` | SOGo for AlmaLinux 10 (built by **Actions > SOGo bundle**) |
 | | `sentora-installers-2027.zip` | This repository |
@@ -43,7 +44,7 @@ To publish a new version, push to `master2027` and run **Actions > Release > Run
 ## Installing
 
 The same command on every supported system (Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat
-Enterprise Linux 10), on a
+Enterprise Linux 10, Fedora 45), on a
 clean server, as root. It finds out which system this is, downloads that system's installer below
 (checked against its SHA-256) and runs it; `--check` only downloads and checks it.
 
@@ -82,6 +83,8 @@ dnf install -y wget
 wget -O sentora2027-alma10 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-alma10
 bash sentora2027-alma10
 ```
+
+On Fedora 45, `sentora2027-fedora`: everything from Fedora's own packages (PHP 8.5, MariaDB 12, Apache, Postfix, Dovecot 2.4, BIND 9.18, ProFTPD, SpamAssassin, ClamAV), SELinux on, and the extra PHP versions and SOGo built for Fedora 45 on GitHub. Fedora has a new release every six months: each one is added when the install test passes on it.
 
 On Red Hat Enterprise Linux 10 the same installer works on a registered server (`subscription-manager register`; Red Hat's free developer subscription works too): it switches on CodeReady Builder and adds EPEL (its release package from Fedora, installed only when Fedora's EPEL key signed it).
 
