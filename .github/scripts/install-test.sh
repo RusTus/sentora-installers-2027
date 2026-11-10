@@ -118,7 +118,7 @@ done | tee "$OUT/stopped-services-why.txt"
 
 say "sentora-smoke-test"
 in_box 'sentora-smoke-test' > "$OUT/smoke-test.txt" 2>&1
-grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt"
+grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
 say "Result for $SYS"
