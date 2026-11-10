@@ -22,6 +22,10 @@ on:
         description: Upload even when nothing changed
         type: boolean
         default: false
+      skip_tests:
+        description: Publish without the install tests (only when a test system itself is broken)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,7 +35,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Ubuntu 26.04, Debian 13 and AlmaLinux 10 are installed from master2027 of both repositories and
+  # checked (sentora-installers-2027: .github/workflows/install-test.yml); nothing is published unless
+  # every one passed
+  install-test:
+    if: ${{ !inputs.skip_tests }}
+    uses: ./.github/workflows/install-test.yml
+
   release:
+    needs: install-test
+    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out master2027

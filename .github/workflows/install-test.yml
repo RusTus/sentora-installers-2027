@@ -1,0 +1,71 @@
+# Install tests: Sentora is installed from master2027 of both repositories on a fresh Ubuntu 26.04,
+# Debian 13 and AlmaLinux 10 (containers with systemd), the "server" is restarted, and
+# sentora-post-install-check and sentora-smoke-test must pass (no FAIL; smoke test PASSED).
+#
+# Both release workflows (this repository's and sentora-core-2027's) run it first and publish only
+# when every system passed. It can also be run alone: Actions > Install test > Run workflow.
+# Each system's results (installer screen and log, check and smoke test output) are kept as an
+# artifact of the run for 14 days. The script that does the work: .github/scripts/install-test.sh.
+name: Install test
+
+on:
+  workflow_dispatch:
+    inputs:
+      systems:
+        description: Systems to test (ub26.04 deb13 alma10)
+        default: ub26.04 deb13 alma10
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  systems:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.pick.outputs.list }}
+    steps:
+      - id: pick
+        env:
+          WANT: ${{ inputs.systems }}
+        run: |
+          want=${WANT:-ub26.04 deb13 alma10}
+          echo "list=$(printf '%s\n' $want | grep -E '^(ub26\.04|deb13|alma10)$' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  install:
+    needs: systems
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJSON(needs.systems.outputs.list) }}
+    steps:
+      - name: Check out the installers (master2027)
+        uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-installers-2027
+          ref: master2027
+          path: installers
+
+      - name: Check out the core (master2027)
+        uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-core-2027
+          ref: master2027
+          path: core
+
+      - name: Install, restart, check and smoke test (${{ matrix.system }})
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash installers/.github/scripts/install-test.sh "${{ matrix.system }}" core installers results
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-test-${{ matrix.system }}
+          path: |
+            results/*.txt
+            results/*.log
+          retention-days: 14
