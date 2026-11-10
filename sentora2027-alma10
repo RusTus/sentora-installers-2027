@@ -1958,13 +1958,14 @@ sogopassword=""
 SOGO_PREFIX=/opt/sentora-sogo
 SOGO_TAR=sentora-sogo-alma10-amd64.tar.gz
 SOGO_STAGE=$(mktemp -d /tmp/sentora-sogo.XXXXXX)
+REL_DIR="$SOGO_STAGE"   # (download_file keeps its notes here: the release folder is gone by now)
 if [ "$(uname -m)" != "x86_64" ]; then
     echo "SOGo is built for x86_64 only: this server gets Roundcube alone."
 elif ! download_file "$SOGO_TAR" "$SOGO_STAGE/$SOGO_TAR" "$SENTORA_INSTALLERS_REPO"; then
-    ui_warn "SOGo skipped: $SOGO_TAR could not be downloaded (webmail is Roundcube)."
+    echo "WARNING: SOGo skipped: $SOGO_TAR could not be downloaded (webmail is Roundcube)."
 elif ! tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -qx 'opt/sentora-sogo/sbin/sogod' \
         || tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -vq '^opt/sentora-sogo/'; then
-    ui_warn "SOGo skipped: $SOGO_TAR is not a Sentora SOGo bundle."
+    echo "WARNING: SOGo skipped: $SOGO_TAR is not a Sentora SOGo bundle."
 else
     rm -rf "$SOGO_PREFIX"
     tar -xzf "$SOGO_STAGE/$SOGO_TAR" -C /
@@ -2027,7 +2028,7 @@ SOGOUNIT
     # Apache serves /SOGo (web, CalDAV, CardDAV) and /Microsoft-Server-ActiveSync; its web files are here
     sed "s|/usr/lib/x86_64-linux-gnu/GNUstep/SOGo/|$SOGO_PREFIX/lib64/GNUstep/SOGo/|g" $PANEL_CONF/sogo/sogo-apache.conf > /etc/httpd/conf.d/sogo.conf
     systemctl enable memcached sogo
-    systemctl restart memcached sogo || ui_warn "SOGo did not start (systemctl status sogo)."
+    systemctl restart memcached sogo || echo "WARNING: SOGo did not start (systemctl status sogo)."
 fi
 rm -rf "$SOGO_STAGE"
 
