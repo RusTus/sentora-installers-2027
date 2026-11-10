@@ -100,6 +100,10 @@ installer. Hosting for the add-on repository and the feedback server was deferre
 publish as you see fit (the owner's rule since 2026-11-10: they say when to wait); a panel release only when
 the owner asks or has said "release as you see fit". The owner uses
 speech to text: "Centaur", "Centora" = Sentora, "himsa" = hemsaw, "zPanel" sometimes means the panel.
-Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
+**Several sessions work on these repositories at the same time (the owner's rule):** before
+changing anything, `git fetch origin master2027` and bring the branch up to it (fast-forward, or rebase
+your own commits on it); do it again just before pushing, and check that everything merges and the tests
+still pass. A .zpp add-on is a zip and can not be merged: when two sessions changed the same add-on,
+unzip both, merge the files, and build it again. Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
 push (`git fetch origin master2027 && git merge-base --is-ancestor origin/master2027 HEAD && git
 push origin HEAD:refs/heads/master2027`). Never put model names in repository content.
