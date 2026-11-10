@@ -61,7 +61,10 @@ names (see the standing rule above).
 
 **Tested:** Debian 13 on the owner's VM (post-install check 0 FAIL, smoke test 26/26). AlmaLinux 10.2
 on the owner's VM with SELinux enforcing (release 2027.65: post-install check 81 OK / 0 FAIL, smoke
-test 25/26 with SOGo skipped, no SELinux denials since boot). Debian and AlmaLinux also in Docker
+test 25/26 with SOGo skipped, no SELinux denials since boot); again on 2026-11-10 with release 2027.69 and
+SOGo from Sentora's build: post-install check 87 OK / 0 FAIL, smoke test 26/26. Debian VM: 2027.69, smoke 26/26.
+The owner's network alters plain-http downloads (AlmaLinux mirrors' repomd.xml arrived garbled): the dnf installers
+now switch to the distribution's HTTPS server when the package lists can not be read. Debian and AlmaLinux also in Docker
 containers with systemd. **SELinux:** labels are set in the AlmaLinux installer's SELinux step
 (semanage fcontext, restorecon, booleans); what labels can not fix goes in
 `preconf/selinux/sentora.cil` (installers repo, loaded with `semodule -i`; one rule so far: BIND may
