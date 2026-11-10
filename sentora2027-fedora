@@ -1044,6 +1044,22 @@ if grep -qi "not yet valid\|in the future" "$logfile.apt" 2> /dev/null; then
     echo "top of the installer to a time server this network can reach), then run the installer again."
     exit 1
 fi
+# A mirror that answers with something else than its package list (a broken or busy mirror, a page
+# from the network in between) makes every install fail: the cache is cleared and dnf tries again,
+# then the installation stops with what to check when the lists still can not be read
+for SOURCES_TRY in 1 2 3; do
+    grep -qiE "Failed to download metadata|parser error|Cannot download repomd|Curl error" "$logfile.apt" 2> /dev/null || break
+    if [ "$SOURCES_TRY" -eq 3 ]; then
+        ui_err "The package lists could not be read (see above): nothing was installed."
+        echo "  Check that this server reaches its package mirrors (dnf clean all; dnf makecache), then run the installer again."
+        rm -f "$logfile.apt"
+        exit 1
+    fi
+    echo "The package lists could not be read (try $SOURCES_TRY): clearing dnf's cache and trying again"
+    dnf clean all > /dev/null 2>&1
+    sleep $(( SOURCES_TRY * 10 ))
+    dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
+done
 rm -f "$logfile.apt"
 dnf -y -q upgrade
 
