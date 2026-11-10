@@ -1,12 +1,22 @@
-# Builds the extra PHP versions for Debian 13 or AlmaLinux 10 (sentora-php-<version>-debian13-amd64.tar.gz,
-# sentora-php-<version>-alma10-amd64.tar.gz) in a container of that system, with the build scripts in preconf/php-build, and puts them on the release
-# tagged "current" (replacing files of the same names). sentora2027-deb13 and sentora-php-install
-# download them from there. Run it from Actions > PHP bundles > Run workflow, again whenever PHP
-# publishes a release for one of the versions (sentora-update-check says so on a server).
+# Builds the extra PHP versions (Sentora's own builds, beside the system's PHP) for one system:
+#   ubuntu26.04 (Ubuntu 26.04), debian13 (Debian 13), alma10 (AlmaLinux 10 and Rocky Linux 10)
+# in a container of that system, with the build scripts in preconf/php-build, and puts them on the
+# release tagged "current" (replacing files of the same names): sentora-php-<major.minor>-<system>-amd64.tar.gz.
+# The installers and sentora-php-install download them from there. A bundle runs only on the system
+# it was built on.
 #
-# Each version is checked against the SHA-256 php.net publishes for it (7.1 and its libraries against
-# theirs: see build-sentora-php71.sh). A bundle runs only on the system it was built on; the Ubuntu
-# 26.04 bundles are built by hand (see preconf/php-build/README).
+# Run it from Actions > PHP bundles > Run workflow. Versions:
+#   empty        the system's usual set: Ubuntu 8.2 8.3 8.4, Debian 8.2 8.3 8.5, AlmaLinux 8.2 8.4 8.5
+#   8.4          the newest 8.4 release, asked from php.net
+#   8.4.28       exactly that release
+#   7.1, 7.4     the steps for old apps (7.4: Ubuntu only); 8.1 the same as any 8.x (no more releases)
+# Each PHP source is checked against the SHA-256 php.net publishes for it (7.1 and 7.4 and their
+# libraries against theirs: see their build scripts).
+#
+# After the builds it writes php-bundles.json on the release: for every bundle there, its system,
+# major.minor, exact version and SHA-256. Servers read it to see whether a newer build is ready
+# (PHP Versions shows a notice with an Update button) and sentora-php-install checks a download
+# against it when GitHub's API does not answer. "list only" rewrites it without building anything.
 name: PHP bundles
 
 on:
@@ -15,12 +25,16 @@ on:
       system:
         description: The system to build for
         type: choice
-        options: [debian13, alma10]
-        default: debian13
+        options: [ubuntu26.04, debian13, alma10]
+        default: ubuntu26.04
       versions:
-        description: PHP versions to build (full numbers; 7.1 builds 7.1.33, Ubuntu and Debian only)
+        description: "PHP versions (empty: the system's usual set; 8.4 = the newest 8.4; or exact, such as 8.4.28; 7.1, 7.4)"
         type: string
-        default: "8.5.12 8.3.36 8.2.35 7.1"
+        default: ""
+      list_only:
+        description: Only rewrite php-bundles.json (build nothing)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,22 +45,47 @@ concurrency:
 
 jobs:
   list:
+    if: ${{ !inputs.list_only }}
     runs-on: ubuntu-latest
     outputs:
       versions: ${{ steps.v.outputs.versions }}
     steps:
       - id: v
         env:
+          SYSTEM: ${{ inputs.system }}
           VERSIONS: ${{ inputs.versions }}
         run: |
-          json=$(printf '%s\n' $VERSIONS | grep -E '^(7\.1|8\.[0-9]+\.[0-9]+)$' | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
-          [ "$json" != "[]" ] || { echo "No valid version in: $VERSIONS"; exit 1; }
-          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os, re, sys, urllib.request
+          system = os.environ['SYSTEM']
+          usual = {'ubuntu26.04': '8.2 8.3 8.4', 'debian13': '8.2 8.3 8.5', 'alma10': '8.2 8.4 8.5'}[system]
+          asked = os.environ.get('VERSIONS', '').split() or usual.split()
+          out = []
+          for v in asked:
+              if v in ('7.1', '7.4'):
+                  if v == '7.4' and system != 'ubuntu26.04':
+                      sys.exit('7.4 is built for Ubuntu 26.04 only')
+                  out.append(v)
+              elif re.fullmatch(r'8\.\d+\.\d+', v):
+                  out.append(v)
+              elif re.fullmatch(r'8\.\d+', v):
+                  # the newest release of that branch, as php.net lists it
+                  with urllib.request.urlopen('https://www.php.net/releases/index.php?json&max=1&version=' + v, timeout=30) as r:
+                      d = json.load(r)
+                  full = sorted((k for k in d if re.fullmatch(re.escape(v) + r'\.\d+', k)), key=lambda s: [int(x) for x in s.split('.')])
+                  if not full:
+                      sys.exit('php.net lists no release of ' + v)
+                  out.append(full[-1])
+              else:
+                  sys.exit('Not a version: ' + v)
+          print('versions=' + json.dumps(out))
+          print('Building: ' + ' '.join(out), file=sys.stderr)
+          EOF
 
   build:
     needs: list
     runs-on: ubuntu-latest
-    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || 'debian:13' }}
+    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,11 +109,11 @@ jobs:
           V: ${{ matrix.version }}
         run: |
           mkdir -p out && cd out
-          if [ "$V" = "7.1" ]; then
-              bash ../preconf/php-build/build-sentora-php71.sh
-          else
-              bash ../preconf/php-build/build-sentora-php.sh "$V"
-          fi
+          case "$V" in
+            7.1) bash ../preconf/php-build/build-sentora-php71.sh ;;
+            7.4) bash ../preconf/php-build/build-sentora-php74.sh ;;
+            *)   bash ../preconf/php-build/build-sentora-php.sh "$V" ;;
+          esac
           ls -la
       - uses: actions/upload-artifact@v4
         with:
@@ -83,15 +122,17 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [list, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
+        if: ${{ !inputs.list_only }}
         with:
           path: bundles
           merge-multiple: true
       - name: Replace them on the current release
+        if: ${{ !inputs.list_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,5 +143,42 @@ jobs:
           for try in 1 2 3 4 5; do
             gh release upload current "$@" --clobber --repo "$GITHUB_REPOSITORY" && exit 0
             echo "Upload failed (try $try), trying again in $(( try * 15 ))s"; sleep $(( try * 15 ))
+          done
+          exit 1
+      - name: Write php-bundles.json (every bundle on the release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p all
+          gh release download current --repo "$GITHUB_REPOSITORY" -p 'sentora-php-*-amd64.tar.gz' -D all --clobber
+          python3 - all > php-bundles.json <<'EOF'
+          import hashlib, json, os, re, sys, tarfile, time
+          d = sys.argv[1]
+          out = {'updated': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()), 'bundles': {}}
+          for f in sorted(os.listdir(d)):
+              m = re.fullmatch(r'sentora-php-(\d+\.\d+)-(.+)-amd64\.tar\.gz', f)
+              if not m:
+                  continue
+              mm, system = m.group(1), m.group(2)
+              p = os.path.join(d, f)
+              sha = hashlib.sha256(open(p, 'rb').read()).hexdigest()
+              version = ''
+              with tarfile.open(p) as t:
+                  for name in ('opt/sentora-php/%s/BUILD-INFO' % mm, './opt/sentora-php/%s/BUILD-INFO' % mm):
+                      try:
+                          first = t.extractfile(name).readline().decode('utf-8', 'replace')
+                          v = re.search(r'PHP (\d+\.\d+\.\d+)', first)
+                          version = v.group(1) if v else ''
+                          break
+                      except KeyError:
+                          continue
+              out['bundles'].setdefault(system, {})[mm] = {'version': version, 'file': f, 'sha256': sha}
+              print('%s %s: %s' % (system, mm, version or '(no BUILD-INFO)'), file=sys.stderr)
+          json.dump(out, sys.stdout, indent=1, sort_keys=True)
+          EOF
+          cat php-bundles.json
+          for try in 1 2 3 4 5; do
+            gh release upload current php-bundles.json --clobber --repo "$GITHUB_REPOSITORY" && exit 0
+            sleep $(( try * 15 ))
           done
           exit 1

@@ -1,6 +1,12 @@
 Extra PHP versions (8.2 - 8.4) for Sentora on Ubuntu 26.04
 ==========================================================
 
+(All three systems: Actions > PHP bundles > Run workflow builds them on GitHub, in a container of the
+system (ubuntu26.04, debian13 or alma10), puts them on the "current" release and writes php-bundles.json
+there, the list servers read to offer an update (PHP Versions shows a notice with an Update button).
+Versions: empty for the system's usual set, 8.4 for the newest 8.4 on php.net, 8.4.28 for exactly
+that one, 7.1 or 7.4 for the steps for old apps. The rest of this file is for building by hand.)
+
 (Debian 13: the same scripts build sentora-php-<version>-debian13-amd64.tar.gz when run on Debian 13,
 for 8.2, 8.3 and 8.5 (Debian's own PHP is 8.4) and 7.1 (without the imap add-on: Debian 13 has no
 c-client). The "PHP bundles" workflow of this repository (Actions > PHP bundles > Run workflow) builds
