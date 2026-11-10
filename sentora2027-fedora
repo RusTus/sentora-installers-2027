@@ -2377,6 +2377,16 @@ if [ -d /etc/systemd ] && systemctl list-unit-files systemd-resolved.service > /
     systemctl try-restart systemd-resolved > /dev/null 2>&1
 fi
 
+#--- Cockpit (the system's own web console, port 9090: switched on by default on RHEL and Fedora Server)
+# is a full administrator's page open to the network beside the panel: it is switched off, and its
+# port closed. The administrator can switch it on again (see the message), e.g. reachable only over SSH.
+if systemctl list-unit-files cockpit.socket > /dev/null 2>&1 && systemctl is-enabled --quiet cockpit.socket 2> /dev/null; then
+    systemctl disable --now cockpit.socket > /dev/null 2>&1
+    firewall-cmd --permanent --remove-service=cockpit > /dev/null 2>&1
+    echo "Cockpit (web console, port 9090) switched off: Sentora's panel is the web page here."
+    echo "  To use it again: systemctl enable --now cockpit.socket (and reach it through an SSH tunnel)."
+fi
+
 #--- The firewall (firewalld, when it runs): the ports Sentora serves
 if systemctl is-active --quiet firewalld 2> /dev/null; then
     ui_step "Opening the firewall for Sentora's services"

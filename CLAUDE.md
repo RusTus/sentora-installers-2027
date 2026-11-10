@@ -100,7 +100,8 @@ server_monitor daemon hook) writes /var/lib/sentora/monitor/procs.json; the page
 
 **RHEL 10:** the AlmaLinux installer, with a subscription check (`subscription-manager identity`),
 CodeReady Builder via subscription-manager, and EPEL's release rpm from Fedora checked with its key.
-Tested on UBI 10 only (detection, refusal, signature); a full install needs a registered RHEL server.
+Tested on the owner's registered RHEL 10.2 VM (2026-11-10, release 2027.69): post-install check 0 FAIL,
+smoke test 26/26 with SOGo (15 minutes, RHEL's updates are slow). Cockpit (9090) is now switched off by the installer.
 
 **Fedora 45:** `sentora2027-fedora` (copy of the AlmaLinux installer: no EPEL, Dovecot 2.4 with the
 Debian/Ubuntu settings, dnf5-plugin-automatic with /etc/dnf/automatic.conf made from dnf5's template,
