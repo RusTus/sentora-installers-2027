@@ -23,6 +23,7 @@
 # Every source is checked against its published SHA-256 (OpenLDAP publishes SHA3-512; ICU a PGP
 # signature, checked when this was written, and the SHA-256 here is of that file; PECL publishes none:
 # those are the SHA-256 of the files as downloaded then). Writes the .tar.gz in the current folder.
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)   # (this folder: snuffleupagus.sh is beside it)
 set -euo pipefail
 
 V=7.4.33
@@ -172,7 +173,7 @@ addon redis redis-5.3.7 --enable-redis
 addon memcached memcached-3.2.0 --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
 addon imagick imagick-3.7.0 --with-imagick=/usr
 # Snuffleupagus (the PHP hardening extension), switched off: the Web Hardening add-on switches it on
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/snuffleupagus.sh"
+. "$HERE/snuffleupagus.sh"
 sp_fetch "$WORK" || fail snuffleupagus
 addon snuffleupagus "$WORK/snuffleupagus/src" --enable-snuffleupagus
 # (c-client is in /usr/lib; OpenSSL, found through pkg-config, in /usr/lib/x86_64-linux-gnu)
