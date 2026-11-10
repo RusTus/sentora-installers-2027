@@ -79,8 +79,11 @@ Versions when a newer build is ready; nothing is ever compiled on a server (owne
 2. When the owner sends AlmaLinux VM results: fix what SELinux blocks (policy module), then
    `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62/63 core.
 
-**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 103):** billing belongs to each seller
-(administrator or reseller); the panel's administrator does not manage it. Processors are files in the
+**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
+(administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
+off (off skips the payment check). The page opens with the seller's packages; each package has its own
+page where its price is set (prices in the module's x_pp_prices; the panel's package tables are only read:
+the owner's rule, nothing of the core or its tables changes for an add-on). Processors are files in the
 module's `code/processors/` (PayPal, Stripe; `pp_pay::Processors()` lists them), and every payment is
 checked by `pp_pay::Apply`. New clients on priced packages are billed automatically. Figures at the top
 of the seller's page; every step noted in `x_pp_log`. Security-reviewed in 103 (see the CHANGELOG). Not yet tried against real MySQL or the real

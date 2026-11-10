@@ -111,6 +111,7 @@ check($up['sb'] === array('clientid' => 'SBCLIENTID01', 'secret' => 'SBSECRET000
 check($up['s']['ps_clientid_vc'] === '' && $up['s']['ps_secret_tx'] === null && $up['s']['ps_sbsecret_tx'] === null, 'the old copies of the keys are cleared');
 check($up['ready'] === true, 'live PayPal is ready after the upgrade');
 check($up['i']['in_proc_vc'] === 'paypal' && $up['i']['in_order_vc'] === 'OLDORDER123', 'an open PayPal order is still known as PayPal\'s');
+check((int) $up['s']['ps_on_in'] === 1, 'a seller that was billing before the switch existed stays on');
 check((int) $up['s']['ps_auto_in'] === 1 && (int) $up['s']['ps_autofrom_in'] > time() - 60, 'automatic plans start from the upgrade (existing clients are not billed by surprise)');
 $again = shell_exec('PP_DB=' . escapeshellarg($db) . ' php -r ' . escapeshellarg($code) . ' 2>&1');
 check(json_decode($again, true)['live'] === $up['live'], 'running the upgrade again changes nothing');
@@ -133,11 +134,38 @@ $settings = array('inName' => 'Res One Hosting', 'inAddress' => "1 Main St\nTown
     'inTaxRate' => '20', 'inPrefix' => 'R1-', 'inNext' => '1', 'inLead' => '7', 'inGrace' => '3', 'inSuspend' => '1', 'inTest' => '1', 'inProc' => 'paypal',
     'inAuto' => '1', 'inUsual' => 'month');
 
+section('Your packages: each one priced on its own page (before any settings)');
+$zdbh->exec("INSERT INTO x_quotas (qt_package_fk, qt_domains_in, qt_subdomains_in, qt_mailboxes_in, qt_mysql_in, qt_diskspace_bi, qt_bandwidth_bi) VALUES (2, 5, -1, 10, 3, " . (2000 * 1024000) . ", 0)");
+$r = req(2);
+check(strpos($r['html'], 'Your packages') !== false && strpos($r['html'], 'package=2') !== false && strpos($r['html'], 'package=3') !== false && strpos($r['html'], 'package=1"') === false,
+    'a new seller sees its own packages at once (not the administrator\'s), each one a link', $r['html']);
+check(strpos($r['html'], 'Your packages') < strpos($r['html'], 'Your details and payments'), 'the packages come before the settings');
+$r = req(2, '', array(), array('package' => '2'));
+check(strpos($r['html'], '<h3>Basic</h3>') !== false && strpos($r['html'], 'Domains</span><b>5</b>') !== false && strpos($r['html'], 'Sub-domains</span><b>Unlimited</b>') !== false
+    && strpos($r['html'], 'Disk space</span><b>2,000 MB</b>') !== false && strpos($r['html'], 'Monthly bandwidth</span><b>Unlimited</b>') !== false, 'the package\'s page shows what it includes, as Package Manager made it', $r['html']);
+$r = req(2, 'Prices', array('inMonth4' => '3.50', 'inYear4' => ''), array('package' => '4'));
+check(strpos($r['text'], 'The price of Free is saved') !== false && pp::Prices(2)[4] === array(350, 0), 'its price is saved from its page (even before the settings)', $r['text']);
+check(strpos($r['html'], 'value="3.50"') !== false, 'and the page shows it');
+$r = req(2, 'Prices', array('inMonth4' => 'abc'), array('package' => '4'));
+check(strpos($r['text'], 'is not an amount') !== false && pp::Prices(2)[4] === array(350, 0), 'a price that is not an amount is refused', $r['text']);
+$r = req(2, 'Prices', array('inMonth1' => '1.00'), array('package' => '1'));
+check(!isset(pp::Prices(2)[1]) && !isset(pp::Prices(1)[1]), 'a package that is not the seller\'s can not be priced');
+check(strpos(req(2, '', array(), array('package' => '1'))['html'], 'No such package of yours') !== false, 'nor opened');
+$zdbh->exec("UPDATE x_pp_prices SET pr_month_in = 0 WHERE pr_package_fk = 4");
+$r = req(2);
+check(strpos($r['html'], 'No price yet: set it') !== false, 'packages without a price say so');
+check(strpos($r['html'], 'Payment Plans is off') !== false, 'a new seller starts with Payment Plans off');
+$r = req(2, 'OnOff', array('inOn' => '1'));
+check(strpos($r['text'], 'Save Your details and payments first') !== false && pp::Seller(2)['new'] ?? false, 'it can not be turned on before the details are saved', $r['text']);
+
 section('Seller settings: choosing PayPal, keys checked');
 $r = req(2, 'Settings', $settings + array('inK_paypal_sandbox_clientid' => 'SBCLIENTID01', 'inK_paypal_sandbox_secret' => 'WRONGSECRET'));
 check(strpos($r['text'], 'PayPal refused') !== false, 'a wrong secret is reported by PayPal', $r['text']);
 $r = req(2, 'Settings', $settings + array('inK_paypal_sandbox_clientid' => 'SBCLIENTID01', 'inK_paypal_sandbox_secret' => 'SBSECRET0001'));
 check(strpos($r['text'], 'PayPal accepts your keys (test mode') !== false, 'the right keys are accepted', $r['text']);
+check((int) pp::Seller(2)['ps_on_in'] === 0 && strpos(req(2)['html'], 'Payment Plans is off') !== false, 'saving the settings does not turn billing on by itself');
+$r = req(2, 'OnOff', array('inOn' => '1'));
+check(strpos($r['text'], 'Payment Plans is on') !== false && (int) pp::Seller(2)['ps_on_in'] === 1, 'Turn on', $r['text']);
 $stored = row("SELECT pk_data_tx FROM x_pp_keys WHERE pk_seller_fk = 2 AND pk_proc_vc = 'paypal' AND pk_mode_vc = 'sandbox'");
 check($stored && strpos($stored['pk_data_tx'], 'SBSECRET0001') === false && strpos($stored['pk_data_tx'], 'enc1:') !== false, 'the secret is stored encrypted, never in plain text', json_encode($stored));
 $r = req(2, 'Settings', $settings + array('inK_paypal_sandbox_clientid' => 'ANOTHERCLIENT'));
@@ -155,6 +183,12 @@ check(strpos($r['html'], 'PayPal keys') !== false && strpos($r['html'], 'Stripe 
 section('Prices');
 $r = req(2, 'Prices', array('inMonth2' => '10.00', 'inYear2' => '100', 'inMonth3' => '', 'inYear3' => '99,00', 'inMonth4' => '', 'inYear4' => ''));
 check(pp::Prices(2) === array(2 => array(1000, 10000), 3 => array(0, 9900), 4 => array(0, 0)), 'prices saved in cents', json_encode(pp::Prices(2)));
+$r = req(2, 'Prices', array('inMonth3' => '7.00', 'inYear3' => '99.00'), array('package' => '3'));
+check(pp::Prices(2) === array(2 => array(1000, 10000), 3 => array(700, 9900), 4 => array(0, 0)), 'saving one package\'s page changes no other package', json_encode(pp::Prices(2)));
+req(2, 'Prices', array('inMonth3' => '', 'inYear3' => '99.00'), array('package' => '3'));
+$r = req(2, '', array(), array('package' => '2'));
+check(strpos($r['html'], 'before VAT (20%)') !== false, 'the price is shown before tax, with the rate');
+check(strpos(req(11, '', array(), array('package' => '2'))['html'], 'value="10.00"') === false, 'a client can not open the seller\'s package page');
 
 section('Automatic billing waits for live mode; plans started by hand while testing');
 $s2 = pp::Seller(2);
@@ -466,6 +500,7 @@ section('The administrator bills a reseller; amounts in other currencies');
 $adm = array('inName' => 'Server Co', 'inProc' => '', 'inTest' => '0', 'inCurrency' => 'HUF', 'inTaxRate' => '') + $settings;
 $r = req(1, 'Settings', $adm);
 check(strpos($r['text'], 'Saved: live mode') !== false, 'an administrator with no online payment (marks invoices paid)', $r['text']);
+req(1, 'OnOff', array('inOn' => '1'));
 req(1, 'Prices', array('inMonth1' => '5000'));
 $r = req(1);
 check(strpos($r['html'], '1 client(s) on a priced package are not billed yet') !== false, 'res1 can be billed; admin2 (an administrator) is never counted', $r['html']);
@@ -528,6 +563,35 @@ putenv('PP_NOKEY=1');
 $r = req(2, 'Settings', $live + array('inK_paypal_live_clientid' => 'NEWCLIENTID9', 'inK_paypal_live_secret' => 'NEWSECRET999'));
 putenv('PP_NOKEY');
 check(strpos($r['text'], 'could not be stored') !== false && !pp_pay::Ready(pp::Seller(2), 'paypal', 'live'), 'a secret that can not be encrypted is not stored at all', $r['text']);
+
+section('Payment Plans off: the payment check is skipped');
+$overdue = function ($id) use ($zdbh) {
+    $zdbh->exec("UPDATE x_pp_invoices SET in_due_in = " . (time() - 10 * 86400) . ", in_created_in = " . (time() - 11 * 86400) . ", in_reminded_in = 0 WHERE in_id_pk = " . (int) $id);
+};
+req(2, 'InvoiceNow', array('inClient' => '10'));
+$i10 = lastinv(10);
+$overdue($i10['in_id_pk']);
+daemon();
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 10")['ac_enabled_in'] === 0, '(c_old switched off for an unpaid invoice)');
+$r = req(2, 'OnOff', array('inOn' => '0'));
+check(strpos($r['text'], 'Payment Plans is off') !== false && strpos($r['text'], '1 client(s) switched off for an unpaid invoice are on again') !== false
+    && (int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 10")['ac_enabled_in'] === 1, 'Turn off: clients switched off for an unpaid invoice are on again', $r['text']);
+check(ws_suspend::Reason(12) === 'Abuse', 'a client switched off for another reason stays off');
+req(2, 'Plan', array('inClient' => '16', 'inPeriod' => 'month', 'inPaidUntil' => date('Y-m-d')));
+$n = (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'];
+$zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_reseller_fk, ac_package_fk, ac_group_fk, ac_created_ts) VALUES (19, 'c_off', 'off@example.com', 2, 2, 3, " . time() . ")");
+$zdbh->exec("UPDATE x_pp_plans SET pl_suspended_in = 0 WHERE pl_acc_fk = 10");
+$overdue($i10['in_id_pk']);
+daemon();
+check((int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] === $n && pp::Plan(19) === null, 'while off: no invoices (c_era is due), no automatic plans (c_off is new)');
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 10")['ac_enabled_in'] === 1, 'while off: nobody is switched off (c_old\'s invoice is overdue)');
+$r = req(2, 'InvoiceNow', array('inClient' => '16'));
+check(strpos($r['text'], 'Payment Plans is off') !== false, '"Invoice now" says it is off', $r['text']);
+sleep(2);
+req(2, 'OnOff', array('inOn' => '1'));
+daemon();
+check(pp::Plan(19) === null, 'turning on again bills by themselves only clients made from then on (c_off came before)');
+check((int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] > $n, 'and billing runs again (c_era\'s invoice is made)');
 
 section('A client moved to another account');
 $zdbh->exec("UPDATE x_accounts SET ac_reseller_fk = 1 WHERE ac_id_pk = 15");

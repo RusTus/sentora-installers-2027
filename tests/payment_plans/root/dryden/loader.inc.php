@@ -53,6 +53,7 @@ $zdbh->exec('PRAGMA busy_timeout=5000');
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_email_vc TEXT, ac_reseller_fk INT, ac_package_fk INT,
     ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_created_ts INT, ac_deleted_ts INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_packages (pk_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, pk_name_vc TEXT, pk_reseller_fk INT, pk_deleted_ts INT)");
+$zdbh->exec("CREATE TABLE IF NOT EXISTS x_quotas (qt_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, qt_package_fk INT, qt_domains_in INT DEFAULT 0, qt_subdomains_in INT DEFAULT 0, qt_parkeddomains_in INT DEFAULT 0, qt_mailboxes_in INT DEFAULT 0, qt_fowarders_in INT DEFAULT 0, qt_distlists_in INT DEFAULT 0, qt_ftpaccounts_in INT DEFAULT 0, qt_mysql_in INT DEFAULT 0, qt_diskspace_bi BIGINT DEFAULT 0, qt_bandwidth_bi BIGINT DEFAULT 0)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_profiles (ud_user_fk INT, ud_fullname_vc TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_account_suspend (as_acc_fk INT PRIMARY KEY, as_reason_vc TEXT, as_by_fk INT, as_time_in INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS t_events (ev TEXT)");
