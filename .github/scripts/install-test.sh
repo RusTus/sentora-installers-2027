@@ -17,11 +17,11 @@ SYS=${1:?system}; CORE=$(cd "${2:?core checkout}" && pwd); INST=$(cd "${3:?insta
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 case "$SYS" in
     ub26.04) IMAGE=ubuntu:26.04; INSTALLER=sentora2027-ub26.04; TAG=ubuntu26.04
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus > /dev/null && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata > /dev/null && apt-get clean' ;;
     deb13) IMAGE=debian:13; INSTALLER=sentora2027-deb13; TAG=debian13
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus > /dev/null && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata > /dev/null && apt-get clean' ;;
     alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; INSTALLER=sentora2027-alma10; TAG=alma10
-        PREP='RUN dnf -y -q install systemd procps-ng hostname iproute > /dev/null && dnf clean all' ;;
+        PREP='RUN dnf -y -q install systemd procps-ng hostname iproute tzdata > /dev/null && dnf clean all' ;;
     *) echo "unknown system $SYS (ub26.04, deb13, alma10)"; exit 2 ;;
 esac
 NAME=sentora-test-$SYS
@@ -88,6 +88,10 @@ say "Restarting the server (services must come back by themselves)"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 90); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 in_box 'systemctl --failed --no-legend' | tee "$OUT/failed-units.txt"
+# why each one failed (its own log since the restart)
+for u in $(awk '{for (i = 1; i <= NF; i++) if ($i ~ /\.service$/) {print $i; break}}' "$OUT/failed-units.txt"); do
+    echo "--- $u"; in_box "systemctl status $u --no-pager -l 2>&1 | tail -25; journalctl -u $u -b --no-pager 2>&1 | tail -25"
+done | tee "$OUT/failed-units-why.txt"
 # the database first, then one daemon run (as cron would, 5 minutes after the start)
 for _ in $(seq 1 60); do in_box 'mysqladmin ping > /dev/null 2>&1 || mariadb-admin ping > /dev/null 2>&1' && break; sleep 2; done
 in_box 'php /etc/sentora/panel/bin/daemon.php > /dev/null 2>&1'
