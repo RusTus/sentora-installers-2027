@@ -1971,7 +1971,13 @@ else
     tar -xzf "$SOGO_STAGE/$SOGO_TAR" -C /
     chown -R root:root "$SOGO_PREFIX"
     echo "SOGo: $(grep -E '^(sogo|built)=' "$SOGO_PREFIX/BUILD-INFO" | tr '\n' ' ')"
-    $PACKAGE_INSTALLER memcached
+    # memcached (SOGo's cache), and the system libraries the build links to that this server is missing
+    # (listed by the build, one file each: dnf installs the package that has it)
+    SOGO_LIBS=""
+    while IFS= read -r lib; do
+        [[ "$lib" =~ ^/usr/lib64/[A-Za-z0-9._+-]+$ ]] && [ ! -e "$lib" ] && SOGO_LIBS="$SOGO_LIBS $lib"
+    done < "$SOGO_PREFIX/RUNTIME-LIBS"
+    $PACKAGE_INSTALLER memcached $SOGO_LIBS
     id sogo > /dev/null 2>&1 || useradd -r -d /var/lib/sogo -m -s /sbin/nologin -c "SOGo groupware" sogo
     mkdir -p /etc/sogo /var/log/sogo /var/spool/sogo /var/backups/sogo $PANEL_CONF/sogo
     chown sogo:sogo /var/log/sogo /var/spool/sogo /var/backups/sogo

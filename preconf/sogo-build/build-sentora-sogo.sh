@@ -117,6 +117,12 @@ for f in "$SOGOD" "$PREFIX/sbin/sogo-tool" "$PREFIX/lib64/GNUstep/SOGo/ActiveSyn
     [ -e "$f" ] || { echo "$f was not built"; exit 1; }
     if LD_LIBRARY_PATH="$PREFIX/lib64:$PREFIX/lib" ldd "$f" | grep 'not found'; then echo "$f: libraries missing"; exit 1; fi
 done
+# the system libraries it links to: the installer installs whichever of them a server is missing
+# (by file, so dnf picks the package that has it, e.g. libcurl or libcurl-minimal)
+find "$PREFIX" -type f \( -perm -u+x -o -name '*.so*' \) -print0 \
+    | xargs -0 -r env LD_LIBRARY_PATH="$PREFIX/lib64:$PREFIX/lib" ldd 2> /dev/null \
+    | awk '$2 == "=>" && $3 ~ /^\// {print $3}' | grep -v "^$PREFIX/" | sed 's|^/lib64/|/usr/lib64/|' | sort -u > "$PREFIX/RUNTIME-LIBS"
+echo "System libraries it needs: $(wc -l < "$PREFIX/RUNTIME-LIBS")"
 cat > "$PREFIX/BUILD-INFO" <<EOF
 system=alma10
 sogo=$SOGO
