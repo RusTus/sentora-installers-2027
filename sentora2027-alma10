@@ -1436,7 +1436,7 @@ systemctl restart postfix
 ui_step "Installing SpamAssassin and ClamAV"
 # (not sa-compile: compiling the rules is only a small speed-up, and its package setup
 # compiles them at once, which takes minutes and fails on a server without rules yet)
-install_available spamassassin spamass-milter perl-DBD-MySQL clamav clamd clamav-milter clamav-freshclam
+install_available spamassassin spamass-milter spamass-milter-postfix perl-DBD-MySQL clamav clamd clamav-milter clamav-freshclam
 # SpamAssassin's children run as their own user (AlmaLinux has none for it)
 id spamd > /dev/null 2>&1 || useradd -r -d /var/lib/spamassassin -s /sbin/nologin -c "SpamAssassin" spamd
 mkdir -p /var/lib/spamassassin; chown spamd:spamd /var/lib/spamassassin
@@ -1445,9 +1445,13 @@ for u in clamilt sa-milt; do
 done
 # (ClamAV's socket folder, /run/clamd.scan, is for the group virusgroup)
 id clamilt > /dev/null 2>&1 && getent group virusgroup > /dev/null && usermod -aG virusgroup clamilt
-mkdir -p /var/spool/postfix/clamav /var/spool/postfix/spamass $PANEL_DATA/sieve/spamav /var/log/clamav
-chown clamilt:postfix /var/spool/postfix/clamav 2> /dev/null; chmod 750 /var/spool/postfix/clamav
-chown sa-milt:postfix /var/spool/postfix/spamass 2> /dev/null; chmod 750 /var/spool/postfix/spamass
+# The mail connections' sockets are where AlmaLinux's packages and SELinux rules put them:
+# /run/spamass-milter/postfix (spamass-milter-postfix, group postfix) and /run/clamav-milter
+# (made at each boot; Sentora's daemon gives it the postfix group, so Postfix can reach the socket)
+printf 'd /run/clamav-milter 0710 clamilt postfix\n' > /etc/tmpfiles.d/clamav-milter.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/clamav-milter.conf /usr/lib/tmpfiles.d/spamass-milter.conf \
+    /usr/lib/tmpfiles.d/spamass-milter-postfix.conf > /dev/null 2>&1
+mkdir -p $PANEL_DATA/sieve/spamav /var/log/clamav
 chown vmail:mail $PANEL_DATA/sieve/spamav; chmod 750 $PANEL_DATA/sieve/spamav
 chown clamscan:clamscan /var/log/clamav 2> /dev/null; chmod 775 /var/log/clamav
 # The packages start with their own settings: stopped until the daemon has written Sentora's
@@ -1988,9 +1992,11 @@ so spamd_bin /usr/bin/spamd; so clamd_bin /usr/sbin/clamd; so sogo_bin /usr/sbin
 so clamav_user clamscan; so clamd_conf /etc/clamd.d/scan.conf; so clamd_socket /run/clamd.scan/clamd.sock; so clamd_service clamd@scan
 so clamav_milter_conf /etc/mail/clamav-milter.conf; so clamav_milter_pid /run/clamav-milter/clamav-milter.pid
 so clamav_milter_service clamav-milter; so clamav_milter_user clamilt
+so clamav_milter_socket /run/clamav-milter/clamav-milter.socket; so clamav_log_dir /var/log/clamav
 so freshclam_conf /etc/freshclam.conf; so freshclam_service clamav-freshclam; so freshclam_user clamupdate
 so spamd_user spamd; so spamassassin_dir /etc/mail/spamassassin; so spamd_defaults_file /etc/sysconfig/spamassassin
 so spamd_defaults_template 'SPAMDOPTIONS="{options}"'; so spamd_service spamassassin; so spamd_maintenance_timer ""
+so spamass_milter_socket /run/spamass-milter/postfix/sock
 so spamass_milter_skip_auth_flag -a; so spamass_milter_user sa-milt; so spamass_milter_defaults_file /etc/sysconfig/spamass-milter; so spamass_milter_service spamass-milter
 so spamass_milter_defaults_template 'EXTRA_FLAGS="{options}"
 SOCKET="{socket}"
@@ -2193,7 +2199,15 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
     fc named_log_t "$PANEL_DATA/logs/bind(/.*)?"
     fc etc_t "$PANEL_CONF/proftpd(/.*)?"
     fc xferlog_t "$PANEL_DATA/logs/proftpd(/.*)?"
+    # fail2ban reads the panel's two login logs (it may enter the folder, not the panel's other files)
+    fc httpd_sys_content_t "/var/lib/sentora"
+    fc httpd_log_t "/var/lib/sentora/(sentora|phpmyadmin)-auth\.log"
+    # Dovecot's other logs (AlmaLinux labels only dovecot.log for it)
+    fc dovecot_var_log_t "/var/log/dovecot-(info|debug)\.log"
     restorecon -RF "$PANEL_PATH" "$PANEL_DATA" /var/lib/sentora > /dev/null 2>&1
+    # files made by this installer before here, which got the label of their folder, not their own
+    restorecon -RF /var/log/dovecot.log /var/log/dovecot-info.log /var/log/dovecot-debug.log /var/log/clamav \
+        /run/clamav-milter /run/spamass-milter > /dev/null 2>&1
     # Apache and PHP-FPM may reach the database, send mail, and fetch (Matomo, updates, Let's
     # Encrypt); FTP users reach their own folders; BIND writes its own zones
     for b in httpd_can_network_connect_db httpd_can_network_connect httpd_can_sendmail httpd_setrlimit \
@@ -2202,6 +2216,10 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
         setsebool -P "$b" on > /dev/null 2>&1 && echo "SELinux: $b on" || echo "SELinux: $b not set (not known here)"
     done
     echo "SELinux: labels set for $PANEL_PATH, $PANEL_DATA and /var/lib/sentora"
+    # what started before its files had their labels starts again now
+    for u in dovecot fail2ban clamav-freshclam; do
+        systemctl is-enabled --quiet "$u" 2> /dev/null && systemctl restart "$u" > /dev/null 2>&1
+    done
 fi
 
 #--- The firewall (firewalld, when it runs): the ports Sentora serves
