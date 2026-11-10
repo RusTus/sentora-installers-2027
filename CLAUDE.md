@@ -46,7 +46,7 @@ released together.
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
-## Where we are (handoff, 2026-11-10, after release 2027.68)
+## Where we are (handoff, 2026-11-10, after release 2027.70)
 
 Read this first in a new session; the CHANGELOG has every change in detail.
 
@@ -111,13 +111,10 @@ the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer 
 releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
 Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26.
 
-**Open (2026-11-10):** the other session's ModSecurity test (`.github/scripts/modsec-test.sh`) fails on
-every system: it sends its attacks over http to a host with no site (`modsec-test.example`), so the
-panel's own vhost answers with its http-to-https redirect (302) before ModSecurity's request checks run.
-It needs a real hosted domain (or https to a site vhost). Until it passes, the release workflows publish
-nothing; Fedora is on master2027 waiting for that release.
+**Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
+systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
 
-**Next (the owner's list):** a WSL version for Windows. Debian VM confirmed 2027.65 (smoke 26/26).
+**Next (the owner's list):** the WSL version (`sentora2027-wsl.ps1`, on the release) needs its first run on a real Windows 11 PC; Fedora 45 on the owner's VM. Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
