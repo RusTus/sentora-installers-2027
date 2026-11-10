@@ -1857,6 +1857,8 @@ mkdir -p $PANEL_DATA/logs/proftpd
 chmod 755 $PANEL_DATA/logs/proftpd
 
 # Register proftpd for autostart and (re)start it with the Sentora config
+# ProFTPD's AppArmor profile (where the system has one): add Sentora's FTP paths
+aa_sentora proftpd
 systemctl enable proftpd
 systemctl restart proftpd
 

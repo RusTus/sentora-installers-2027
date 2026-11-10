@@ -109,7 +109,7 @@ if in_box 'test -d /etc/apparmor.d && command -v apparmor_parser' > /dev/null 2>
     in_box 'mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
         cd /etc/apparmor.d && for f in *; do
             [ -f "$f" ] && [ ! -e "disable/$f" ] || continue
-            apparmor_parser -r -K "$f" 2>&1 | grep -v "^Warning\|^Caching" | sed "s/^/  $f: /"
+            apparmor_parser --config-file /dev/null -r -K "$f" 2>&1 | grep -v "^Warning\|^Caching" | sed "s/^/  $f: /"
         done' 2>&1 | tee "$OUT/apparmor-load.txt"
     in_box 'dmesg -C' > /dev/null 2>&1 || sudo -n dmesg -C > /dev/null 2>&1 || true
     AA=1

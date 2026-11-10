@@ -1,0 +1,12 @@
+# ProFTPD: Sentora's FTP settings, the panel's certificate, its logs, the MySQL logins and the
+# hosting folders (each FTP account's home)
+include <abstractions/mysql>
+/etc/sentora/configs/proftpd/ r,
+/etc/sentora/configs/proftpd/** r,
+/etc/sentora/configs/ssl/sentora.crt r,
+/etc/sentora/configs/ssl/sentora-chain.crt r,
+/etc/sentora/configs/ssl/sentora.key r,
+/var/sentora/logs/proftpd/ r,
+/var/sentora/logs/proftpd/** rw,
+/var/sentora/hostdata/ r,
+/var/sentora/hostdata/** rw,
