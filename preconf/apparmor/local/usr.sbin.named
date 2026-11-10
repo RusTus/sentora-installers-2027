@@ -5,3 +5,5 @@
 /var/named/** rwk,
 /var/sentora/logs/bind/ r,
 /var/sentora/logs/bind/** rwk,
+# (the kernel version, as Ubuntu's own profile allows)
+@{PROC}/version_signature r,

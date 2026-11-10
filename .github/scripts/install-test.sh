@@ -118,6 +118,8 @@ fi
 say "Restarting the server (services must come back by themselves)"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 90); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
+# (the check reads which profiles are loaded from securityfs, which a container has to mount)
+[ $AA -eq 1 ] && in_box 'mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security'
 in_box 'systemctl --failed --no-legend' | tee "$OUT/failed-units.txt"
 # why each one failed (its own log since the restart)
 for u in $(awk '{for (i = 1; i <= NF; i++) if ($i ~ /\.service$/) {print $i; break}}' "$OUT/failed-units.txt"); do

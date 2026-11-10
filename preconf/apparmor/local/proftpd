@@ -10,3 +10,9 @@ include <abstractions/mysql>
 /var/sentora/logs/proftpd/** rw,
 /var/sentora/hostdata/ r,
 /var/sentora/hostdata/** rw,
+# right after a login ProFTPD (still root) opens the account's hosting folder, which only that
+# account's user may enter: root's override of file permissions, limited to the paths above
+capability dac_override,
+capability dac_read_search,
+/etc/mysql/** r,
+/run/proftpd.sock rw,
