@@ -17,9 +17,9 @@ SYS=${1:?system}; CORE=$(cd "${2:?core checkout}" && pwd); INST=$(cd "${3:?insta
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 case "$SYS" in
     ub26.04) IMAGE=ubuntu:26.04; INSTALLER=sentora2027-ub26.04; TAG=ubuntu26.04
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata apparmor && apt-get clean' ;;
     deb13) IMAGE=debian:13; INSTALLER=sentora2027-deb13; TAG=debian13
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata apparmor && apt-get clean' ;;
     alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; INSTALLER=sentora2027-alma10; TAG=alma10
         PREP='RUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all' ;;
     rocky10) IMAGE=quay.io/rockylinux/rockylinux:10; INSTALLER=sentora2027-alma10; TAG=alma10
@@ -99,6 +99,22 @@ if ! grep -q "Sentora is installed" "$OUT/install-screen.txt"; then
 fi
 grep -E '^\s+\[ !! \]|WARNING' "$OUT/install-screen.txt" | head -20 || true
 
+# AppArmor (Debian, Ubuntu): a real server loads the system's profiles at boot (its apparmor service);
+# in a container that service does nothing, so the container's own profiles (with Sentora's local
+# additions, as the installer left them) are loaded into this machine's kernel here. They confine the
+# same programs inside the container, from the restart below on; every refusal is a failure.
+AA=0
+if in_box 'test -d /etc/apparmor.d && command -v apparmor_parser' > /dev/null 2>&1 && [ -d /sys/kernel/security/apparmor ]; then
+    say "AppArmor: loading the system's profiles (enforce mode, as on a real server)"
+    in_box 'mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
+        cd /etc/apparmor.d && for f in *; do
+            [ -f "$f" ] && [ ! -e "disable/$f" ] || continue
+            apparmor_parser -r -K "$f" 2>&1 | grep -v "^Warning\|^Caching" | sed "s/^/  $f: /"
+        done' 2>&1 | tee "$OUT/apparmor-load.txt"
+    in_box 'dmesg -C' > /dev/null 2>&1 || sudo -n dmesg -C > /dev/null 2>&1 || true
+    AA=1
+fi
+
 say "Restarting the server (services must come back by themselves)"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 90); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
@@ -134,10 +150,23 @@ in_box 'bash /root/modsec-test.sh' > "$OUT/modsec-test.txt" 2>&1
 cat "$OUT/modsec-test.txt"
 in_box "tail -60 \"\$(php -q /etc/sentora/panel/bin/setso --get apache_log_dir)/modsec_audit.log\"" > "$OUT/modsec-audit.log" 2>&1
 
+if [ $AA -eq 1 ]; then
+    say "AppArmor: which programs ran confined, and what it refused"
+    in_box 'for p in named mysqld mariadbd proftpd clamd freshclam; do
+        for pid in $(pidof $p); do printf "  %-10s %s\n" "$p" "$(cat /proc/$pid/attr/current 2> /dev/null)"; break; done; done' | tee "$OUT/apparmor-confined.txt"
+    { in_box 'dmesg' 2> /dev/null || sudo -n dmesg; } | grep 'apparmor="DENIED"' > "$OUT/apparmor-denied.txt" || true
+    if [ -s "$OUT/apparmor-denied.txt" ]; then
+        awk '{o="";n=split("operation profile name requested_mask capname",k," ");for(i=1;i<=n;i++)if(match($0,k[i]"=\"[^\"]*\""))o=o" "substr($0,RSTART,RLENGTH);print o}' "$OUT/apparmor-denied.txt" | sort | uniq -c | sort -rn | head -40
+    else
+        echo "  nothing refused"
+    fi
+fi
+
 say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
+if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
 [ $ok -eq 1 ] && echo "$SYS: installed, post-install check without FAIL, smoke test passed, ModSecurity works"
 [ $ok -eq 1 ]

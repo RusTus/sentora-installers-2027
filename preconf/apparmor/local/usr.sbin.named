@@ -1,0 +1,7 @@
+# BIND: Sentora keeps its settings, zones and logs outside /etc/bind
+/etc/sentora/configs/bind/etc/** r,
+/etc/sentora/configs/bind/zones/** r,
+/var/named/ rw,
+/var/named/** rwk,
+/var/sentora/logs/bind/ r,
+/var/sentora/logs/bind/** rwk,

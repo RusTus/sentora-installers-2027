@@ -14,6 +14,12 @@ on:
       systems:
         description: Systems to test (ub26.04 deb13 alma10 rocky10 fedora45)
         default: ub26.04 deb13 alma10 rocky10 fedora45
+      installers_ref:
+        description: Installers branch to test (a work branch before it goes to master2027)
+        default: master2027
+      core_ref:
+        description: Core branch to test
+        default: master2027
   workflow_call:
 
 permissions:
@@ -41,18 +47,18 @@ jobs:
       matrix:
         system: ${{ fromJSON(needs.systems.outputs.list) }}
     steps:
-      - name: Check out the installers (master2027)
+      - name: Check out the installers
         uses: actions/checkout@v5
         with:
           repository: RusTus/sentora-installers-2027
-          ref: master2027
+          ref: ${{ inputs.installers_ref || 'master2027' }}
           path: installers
 
-      - name: Check out the core (master2027)
+      - name: Check out the core
         uses: actions/checkout@v5
         with:
           repository: RusTus/sentora-core-2027
-          ref: master2027
+          ref: ${{ inputs.core_ref || 'master2027' }}
           path: core
 
       # The runner's own AppArmor profiles (for its programs, e.g. ProFTPD) would also confine the same

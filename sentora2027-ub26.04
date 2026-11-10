@@ -1002,16 +1002,27 @@ disable_file() {
     mv "$1" "$1_disabled_by_sentora" &> /dev/null
 }
 
-#--- AppArmor must be disabled to avoid problems
-# Ubuntu 26.04 has no /etc/init.d/apparmor and snapd relies on AppArmor,
-# so stop and disable the service and unload the profiles instead of purging it.
-if systemctl cat apparmor.service &> /dev/null; then
-    ui_step "Disabling AppArmor"
-    systemctl stop apparmor &> /dev/null
-    systemctl disable apparmor &> /dev/null
-    command -v aa-teardown &> /dev/null && aa-teardown &> /dev/null
-    echo -e "AppArmor has been stopped and disabled."
-fi
+#--- AppArmor stays on (as the system ships it)
+# Its profiles confine some of the programs Sentora uses. Where Sentora keeps a program's files
+# outside what its profile allows, aa_sentora adds exactly those paths (preconf/apparmor/local) to the
+# profile's local file, between "# BEGIN Sentora" and "# END Sentora" (package updates keep that file;
+# the profile itself is never changed or disabled), and reloads the profile. Called right after each
+# program is set up, and for all of them at the end.
+aa_active() { [ "$(cat /sys/module/apparmor/parameters/enabled 2> /dev/null)" = "Y" ] && command -v apparmor_parser > /dev/null 2>&1; }
+aa_sentora() { # profile names (files in /etc/apparmor.d)
+    local p src dst
+    for p in "$@"; do
+        src="$PANEL_CONF/apparmor/local/$p"; dst="/etc/apparmor.d/local/$p"
+        [ -f "/etc/apparmor.d/$p" ] && [ -f "$src" ] || continue
+        rm -f "/etc/apparmor.d/disable/$p"
+        mkdir -p /etc/apparmor.d/local; touch "$dst"
+        sed -i '/^# BEGIN Sentora/,/^# END Sentora/d' "$dst"
+        { echo "# BEGIN Sentora (the paths Sentora uses; written by Sentora's installer)"; grep -v '^#' "$src"; echo "# END Sentora"; } >> "$dst"
+        if aa_active && ! apparmor_parser -r -W "/etc/apparmor.d/$p" > /dev/null 2>&1; then
+            echo "WARNING: AppArmor: the profile $p did not load with Sentora's paths (apparmor_parser -r /etc/apparmor.d/$p shows why)"
+        fi
+    done
+}
 
 #--- Adapt repositories and packages sources
 ui_step "Checking the package sources"
@@ -1897,15 +1908,8 @@ cat $BIND_FILES/rndc.key $PANEL_CONF/bind/named.conf > $BIND_FILES/named.conf
 cat $BIND_FILES/rndc.key $PANEL_CONF/bind/rndc.conf > $BIND_FILES/rndc.conf
 rm -f $BIND_FILES/rndc.key
 
-# Ubuntu's AppArmor profile for named only allows /etc/bind, while Sentora keeps
-# BIND's config, zones and logs in /etc/sentora, /var/named and /var/sentora, so
-# named fails to start while that profile is loaded. Disable this one profile; the
-# disable link also stops bind9 package updates from loading it again.
-if [ -f /etc/apparmor.d/usr.sbin.named ]; then
-    mkdir -p /etc/apparmor.d/disable
-    ln -sf /etc/apparmor.d/usr.sbin.named /etc/apparmor.d/disable/usr.sbin.named
-    command -v apparmor_parser > /dev/null && apparmor_parser -R /etc/apparmor.d/usr.sbin.named > /dev/null 2>&1
-fi
+# BIND's AppArmor profile allows /etc/bind only: add Sentora's paths for BIND (config, zones, logs)
+aa_sentora usr.sbin.named
 
 if named-checkconf $BIND_FILES/named.conf; then
     systemctl enable "$BIND_SERVICE"
@@ -2218,10 +2222,14 @@ echo -e "\n--- Done Updating admin contact info.\n"
 
 echo -e "# -------------------------------------------------------------------------------"
 
-# Package installs (such as MySQL) load their AppArmor profiles again on
-# Ubuntu 26.04, unload them so Sentora's paths are not blocked.
-if [[ "$OS" = "Ubuntu" && "$VER" = "26.04" ]] && command -v aa-teardown &> /dev/null; then
-    aa-teardown &> /dev/null
+# AppArmor on at every start, with Sentora's paths in every profile that needs them (the services
+# are restarted below, so they run confined from now on; a system without the apparmor package gets it)
+install_available apparmor > /dev/null 2>&1
+if systemctl cat apparmor.service &> /dev/null; then
+    aa_sentora $(ls "$PANEL_CONF/apparmor/local" 2> /dev/null)
+    systemctl enable apparmor &> /dev/null
+    systemctl reload-or-restart apparmor &> /dev/null
+    aa_active && echo "AppArmor is on: $(aa-status --enforced 2> /dev/null || echo some) profiles in enforce mode"
 fi
 
 echo -e "\n--- Restarting Services"
