@@ -45,3 +45,48 @@ released together.
   groups the daemon, modules and tools use come from x_settings (hidden ones: so_usereditable_en =
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
+
+## Where we are (handoff, 2026-11-10, after release 2027.63)
+
+Read this first in a new session; the CHANGELOG has every change in detail.
+
+**Supported systems (each has its installer on the `current` release):** Ubuntu 26.04
+(`sentora2027-ub26.04`), Debian 13 (`sentora2027-deb13`, MariaDB 11.8, PHP 8.4), AlmaLinux 10 and
+Rocky 10 (`sentora2027-alma10`, MariaDB 10.11, PHP 8.3, Dovecot 2.3 with `preconf/dovecot2-23`,
+SELinux enforcing, no SOGo). What differs between systems lives in hidden x_settings read through
+`dryden/sys/platform.class.php` (`sys_platform::Get`, shell tools: `setso --get <name>`); each
+installer sets its values in its "Configuring Sentora" step. Keep the core free of distribution
+names (see the standing rule above).
+
+**Tested:** Debian 13 on the owner's VM (post-install check 0 FAIL, smoke test 26/26). Debian and
+AlmaLinux in Docker containers with systemd (post-install check 0 FAIL, smoke test passes).
+**Not yet tested on a real server:** AlmaLinux 10 with SELinux enforcing (containers have no
+SELinux). The owner will install it on a VM; collect denials with
+`ausearch -m avc -ts boot | audit2why` and turn them into a small Sentora SELinux policy module
+(never switch SELinux off: "less secure, not done").
+
+**PHP bundles:** built on GitHub by Actions > PHP bundles (system ubuntu26.04, debian13 or alma10;
+versions empty = usual set, `8.4` = newest from php.net, or exact; `list_only` rewrites the list).
+Each run writes `php-bundles.json` on the release (system, version, SHA-256 of every build). The
+panel checks it daily (`dryden/sys/phpbundles.class.php`): a notice and an Update button in PHP
+Versions when a newer build is ready; nothing is ever compiled on a server (owner's decision).
+
+**Next, agreed with the owner:**
+1. Automatic install tests on GitHub Actions: on each release, install on Ubuntu 26.04, Debian 13
+   and AlmaLinux 10 (containers with systemd), run sentora-post-install-check and
+   sentora-smoke-test, and only publish when they pass. (Containers need `--privileged`, cgroup2
+   and systemd as PID 1; see how the sessions tested: a Dockerfile with systemd, `CMD /sbin/init`.)
+2. When the owner sends AlmaLinux VM results: fix what SELinux blocks (policy module), then
+   `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62/63 core.
+
+**Ideas the owner is still thinking about (do not start without asking):** a SELinux policy module
+(after the VM test), a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each
+panel's system on the feedback server's stats page, one install command that picks the right
+installer. Hosting for the add-on repository and the feedback server was deferred by the owner.
+
+**Working with the owner:** plain words, short; test before saying something works; release only
+when the owner asks or has said "release as you see fit" (they did for this work). The owner uses
+speech to text: "Centaur", "Centora" = Sentora, "himsa" = hemsaw, "zPanel" sometimes means the panel.
+Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
+push (`git fetch origin master2027 && git merge-base --is-ancestor origin/master2027 HEAD && git
+push origin HEAD:refs/heads/master2027`). Never put model names in repository content.
