@@ -10,7 +10,7 @@
 # Needs docker that can run privileged containers with cgroup v2. The files the installer downloads
 # are served from this machine (SENTORA_DOWNLOAD_URL): the core and installers zips made from the two
 # checkouts, and the system's PHP bundles from the current release (when gh can fetch them).
-# On a test machine: TEST_SOGO (a SOGo bundle file to use instead of the release's), CGROUP_DIR (a cgroup2 mount, default /sys/fs/cgroup) and TEST_CA (a certificate
+# On a test machine: TEST_KEEP=1 (keep the container afterwards), TEST_SOGO (a SOGo bundle file to use instead of the release's), CGROUP_DIR (a cgroup2 mount, default /sys/fs/cgroup) and TEST_CA (a certificate
 # file the containers must trust, e.g. a proxy's) when that machine needs them.
 set -uo pipefail
 SYS=${1:?system}; CORE=$(cd "${2:?core checkout}" && pwd); INST=$(cd "${3:?installers checkout}" && pwd); OUT=${4:?results folder}
@@ -51,7 +51,7 @@ say "Serving them on port $PORT"
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 ( cd "$DL" && exec python3 -m http.server "$PORT" --bind "$GW" > "$OUT/http.log" 2>&1 ) &
 HTTP=$!
-trap 'kill $HTTP 2> /dev/null; docker logs "$NAME" > "$OUT/container.log" 2>&1; docker rm -f "$NAME" > /dev/null 2>&1' EXIT
+trap 'kill $HTTP 2> /dev/null; docker logs "$NAME" > "$OUT/container.log" 2>&1; [ -n "${TEST_KEEP:-}" ] || docker rm -f "$NAME" > /dev/null 2>&1' EXIT
 sleep 1
 
 say "A fresh $IMAGE with systemd"
@@ -111,6 +111,10 @@ say "sentora-post-install-check"
 in_box 'sentora-post-install-check' > "$OUT/post-install-check.txt" 2>&1
 grep -E '^\s+(FAIL|WARN)|^Result' "$OUT/post-install-check.txt"
 FAILS=$(grep -oE 'Result: .* ([0-9]+) FAIL' "$OUT/post-install-check.txt" | grep -oE '[0-9]+ FAIL' | grep -oE '[0-9]+')
+# the log of each service the check found stopped
+for u in $(grep -E '^\s+FAIL' "$OUT/post-install-check.txt" | grep -oE 'systemctl status [A-Za-z0-9@._-]+' | awk '{print $3}' | sort -u); do
+    echo "--- $u"; in_box "systemctl status $u --no-pager -l 2>&1 | tail -20; journalctl -u $u -b --no-pager 2>&1 | tail -30"
+done | tee "$OUT/stopped-services-why.txt"
 
 say "sentora-smoke-test"
 in_box 'sentora-smoke-test' > "$OUT/smoke-test.txt" 2>&1
