@@ -1541,7 +1541,7 @@ sed -i 's| FollowSymLinks [-]Indexes| +FollowSymLinks -Indexes|' $PANEL_PATH/pan
 ui_step "Installing PHP"
 # (php-ldap: sites that log users in against Active Directory, such as Snipe-IT; php-process: posix)
 install_available php php-fpm php-common php-bcmath php-cli php-mysqlnd php-gd php-pear php-pecl-imagick php-xml php-intl \
-    php-mbstring php-devel php-pecl-zip php-ldap php-process php-opcache php-soap php-sodium php-gmp
+    php-mbstring php-devel php-pecl-zip php-ldap php-process php-soap php-sodium php-gmp
 PHPVER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
 echo "Detected PHP: $PHPVER"
 if [[ "$PHPVER" != 8.* ]]; then
@@ -1819,7 +1819,10 @@ systemctl restart proftpd
 ##
 ui_step "Installing and configuring BIND"
 install_available bind bind-utils
-BIND_SERVICE="named"
+# (Fedora installs BIND's service as bind.service, with named.service only an alias that can not be
+# switched on at boot: the real name, also for the panel's setting bind_service)
+BIND_SERVICE=$(basename "$(readlink -f /usr/lib/systemd/system/named.service 2> /dev/null)" .service)
+[ -n "$BIND_SERVICE" ] && [ "$BIND_SERVICE" != "." ] || BIND_SERVICE="named"
 if ! command -v named-checkconf > /dev/null 2>&1; then
     echo -e "\nERROR: BIND (bind, bind-utils) did not install, so DNS will not work."
     echo "Run 'dnf install bind bind-utils' to see why, then run the installer again."
@@ -2088,6 +2091,7 @@ so spamass_milter_defaults_template 'EXTRA_FLAGS="{options}"
 SOCKET="{socket}"
 SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
+so dnf_automatic_package dnf5-plugin-automatic; so dnf_automatic_timer dnf5-automatic.timer
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
 so php_bundle_tag fedora45; so php_bundle_libs "$PHP_BUNDLE_LIBS"
 # ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
@@ -2316,6 +2320,14 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
     for u in dovecot fail2ban clamav-freshclam named; do
         systemctl is-enabled --quiet "$u" 2> /dev/null && systemctl restart "$u" > /dev/null 2>&1
     done
+fi
+
+#--- Fedora's name resolver answers local-network name lookups (LLMNR, port 5355) on every interface:
+# a server has no use for that, so it is switched off (normal DNS lookups are unchanged)
+if [ -d /etc/systemd ] && systemctl list-unit-files systemd-resolved.service > /dev/null 2>&1; then
+    mkdir -p /etc/systemd/resolved.conf.d
+    printf '# Sentora: no local-network name lookups on a server\n[Resolve]\nLLMNR=no\nMulticastDNS=no\n' > /etc/systemd/resolved.conf.d/90-sentora.conf
+    systemctl try-restart systemd-resolved > /dev/null 2>&1
 fi
 
 #--- The firewall (firewalld, when it runs): the ports Sentora serves

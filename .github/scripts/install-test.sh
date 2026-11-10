@@ -107,7 +107,8 @@ for u in $(awk '{for (i = 1; i <= NF; i++) if ($i ~ /\.service$/) {print $i; bre
 done | tee "$OUT/failed-units-why.txt"
 # the database first, then one daemon run (as cron would, 5 minutes after the start)
 for _ in $(seq 1 60); do in_box 'mysqladmin ping > /dev/null 2>&1 || mariadb-admin ping > /dev/null 2>&1' && break; sleep 2; done
-in_box 'php /etc/sentora/panel/bin/daemon.php > /dev/null 2>&1'
+# (as cron runs it, so its report is the one the check reads: the restart may have cut a run short)
+in_box 'php -q /etc/sentora/panel/bin/daemon.php > /var/sentora/logs/daemon-last-run.log 2>&1'
 
 say "sentora-post-install-check"
 in_box 'sentora-post-install-check' > "$OUT/post-install-check.txt" 2>&1
