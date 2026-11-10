@@ -19,6 +19,21 @@
 #                   kernel 6.12.113-1 (DSA-6568-1), which the updates install; until the server runs it
 #                   (after the restart), incoming TCP packets carrying IPv4 options are dropped (ordinary
 #                   traffic never uses them). The filter takes itself away once the fixed kernel runs.
+#
+# Checked on 2026-11-10 and already fixed by this system's own updates (step 1), so no stopgap:
+#   CVE-2026-46300  "Fragnesia": Linux kernel, ESP-in-TCP (espintcp). A user on the server (or a
+#                   hacked website) can become root. On CISA's list of exploited holes since
+#                   2026-10-28. Fixed in Debian 13's kernel 6.12.90-1 (DSA-6295-1, May 2026): the updates install it;
+#                   it protects after the restart.
+#   CVE-2026-109618 "PHP2Shell": two PHP holes that let anyone run code through a website, without
+#   CVE-2026-109619 logging in (CVSS 9.2); attackers chain them with Fragnesia to get root. Fixed in
+#                   PHP 8.5.12, 8.4.27, 8.3.36 and 8.2.35 (2026-10-21). The system's PHP comes from
+#                   Debian's php8.4 security update (DSA-6574-1) (installed by the Sentora installer
+#                   after this script, already fixed); Sentora's own PHP 8.2-8.5 builds on the release
+#                   are on the fixed versions. Not covered: PHP 7.1, 7.4 and 8.1 (end of life, no fix
+#                   from PHP).
+#   CVE-2026-123158 "SSHole": OpenSSH password bypass. Only systems with musl and no PAM (Alpine);
+#                   Debian 13 uses glibc with PAM: not affected.
 set -u
 PATCH_DATE=2026-11-10
 SELF_DIR=/usr/local/sbin
