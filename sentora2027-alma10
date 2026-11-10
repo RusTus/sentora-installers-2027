@@ -99,7 +99,7 @@ ui_bar() { # background text
 }
 ui_banner() { # subtitle
     [ $UI_TTY -eq 1 ] && clear
-    ui_bar "$BG_TITLE" "  Sentora-$SENTORA_CORE_VERSION for AlmaLinux 10  -  Installer"
+    ui_bar "$BG_TITLE" "  Sentora-$SENTORA_CORE_VERSION for AlmaLinux, Rocky and RHEL 10  -  Installer"
     [ -n "$1" ] && printf '%s  %s%s\n' "$C_DIM" "$1" "$C_RESET"
     echo
 }
@@ -255,15 +255,15 @@ ui_banner "Installer $SENTORA_INSTALLER_VERSION, downloading from $SENTORA_SOURC
 
 ui_note "Checking that minimal requirements are ok"
 
-# AlmaLinux 10 (or Rocky Linux 10) only: the settings below are for its Dovecot 2.3, PHP 8.3,
-# MariaDB 10.11 and BIND 9.18 (the extra PHP versions are built for x86_64). Ubuntu 26.04 and Debian 13
-# have their own installers.
-OS=$(. /etc/os-release 2> /dev/null && echo "${NAME%% *}")
+# AlmaLinux 10, Rocky Linux 10 or Red Hat Enterprise Linux 10 only (the same system: AlmaLinux and Rocky
+# rebuild RHEL): the settings below are for its Dovecot 2.3, PHP 8.3, MariaDB 10.11 and BIND 9.18 (the
+# extra PHP versions and SOGo are built for x86_64). Ubuntu 26.04 and Debian 13 have their own installers.
+OS=$(. /etc/os-release 2> /dev/null && echo "$NAME")
 OS_ID=$(. /etc/os-release 2> /dev/null && echo "$ID")
 VER=$(. /etc/os-release 2> /dev/null && echo "$VERSION_ID")
 ARCH=$(uname -m)
-if [[ ! "$OS_ID" =~ ^(almalinux|rocky)$ || "${VER%%.*}" != "10" ]]; then
-    ui_err "This installer is for AlmaLinux 10 (or Rocky Linux 10) only (this is ${OS:-an unknown system} ${VER})."
+if [[ ! "$OS_ID" =~ ^(almalinux|rocky|rhel)$ || "${VER%%.*}" != "10" ]]; then
+    ui_err "This installer is for AlmaLinux 10, Rocky Linux 10 or Red Hat Enterprise Linux 10 only (this is ${OS:-an unknown system} ${VER})."
     [ "$OS_ID" = "ubuntu" ] && echo "  On Ubuntu 26.04 use sentora2027-ub26.04 instead."
     [ "$OS_ID" = "debian" ] && echo "  On Debian 13 use sentora2027-deb13 instead."
     exit 1
@@ -276,6 +276,15 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 ui_ok "$OS $VER $ARCH, as root"
+# Red Hat Enterprise Linux gets its packages through the server's subscription: without one nothing
+# can be installed (Red Hat's free developer subscription works too)
+if [ "$OS_ID" = "rhel" ] && ! subscription-manager identity > /dev/null 2>&1; then
+    ui_err "This Red Hat Enterprise Linux server is not registered, so it can not install packages."
+    echo "  Register it, then run the installer again:"
+    echo "     subscription-manager register"
+    echo "  (a Red Hat account with a subscription; Red Hat's free developer subscription works too)."
+    exit 1
+fi
 
 # Valid dotted IPv4 address?
 is_ipv4() {
@@ -1023,15 +1032,36 @@ echo "SELinux: $(getenforce 2> /dev/null || echo 'not installed')"
 
 #--- Adapt repositories and packages sources
 ui_step "Checking the package sources"
-# AlmaLinux's own repositories (BaseOS, AppStream) stay as they are. Added: EPEL (Fedora's extra
+# The system's own repositories (BaseOS, AppStream) stay as they are. Added: EPEL (Fedora's extra
 # packages for Red Hat-family systems: ProFTPD, SpamAssassin, ClamAV, fail2ban) and CRB (the
 # libraries EPEL's packages need), both signed and updated like the others.
-$PACKAGE_INSTALLER epel-release dnf-plugins-core
-if command -v crb > /dev/null 2>&1; then
-    crb enable
+if [ "$OS_ID" = "rhel" ]; then
+    # Red Hat Enterprise Linux: its packages come with the server's subscription (checked before
+    # anything was installed), its CRB is "CodeReady Builder", and EPEL is not in its repositories:
+    # epel-release comes from Fedora, and is installed only when Fedora's EPEL key signed it
+    subscription-manager repos --enable "codeready-builder-for-rhel-10-$(uname -m)-rpms"
+    if ! rpm -q epel-release > /dev/null 2>&1; then
+        EPEL_DIR=$(mktemp -d /tmp/sentora-epel.XXXXXX)
+        if wget -nv -O "$EPEL_DIR/RPM-GPG-KEY-EPEL-10" https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-10 \
+           && wget -nv -O "$EPEL_DIR/epel-release.rpm" https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm \
+           && rpm --import "$EPEL_DIR/RPM-GPG-KEY-EPEL-10" \
+           && rpm -K "$EPEL_DIR/epel-release.rpm" | grep -qiE 'digests signatures OK|signatures OK'; then
+            $PACKAGE_INSTALLER "$EPEL_DIR/epel-release.rpm"
+        else
+            echo "ERROR: EPEL's release package could not be downloaded or its signature is not Fedora's EPEL key."
+        fi
+        rm -rf "$EPEL_DIR"
+    fi
+    $PACKAGE_INSTALLER dnf-plugins-core
 else
-    dnf config-manager --set-enabled crb
+    $PACKAGE_INSTALLER epel-release dnf-plugins-core
+    if command -v crb > /dev/null 2>&1; then
+        crb enable
+    else
+        dnf config-manager --set-enabled crb
+    fi
 fi
+rpm -q epel-release > /dev/null 2>&1 || { ui_err "EPEL could not be added (ProFTPD, SpamAssassin, ClamAV and fail2ban come from it): see $logfile."; exit 1; }
 dnf repolist
 
 #--- List all already installed packages (may help to debug)
