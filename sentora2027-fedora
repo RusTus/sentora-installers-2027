@@ -1,0 +1,2492 @@
+#!/usr/bin/env bash
+
+# Official Sentora Automated Installation Script
+# =============================================
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Supported Operating Systems:
+# Fedora (64bit; the releases in FEDORA_VERSIONS below). Its sister installers: sentora2027-ub26.04,
+# sentora2027-deb13 and sentora2027-alma10 (AlmaLinux, Rocky, RHEL). Everything comes from Fedora's own
+# packages (PHP 8.5, MariaDB 12, Apache, Postfix, Dovecot 2.4, BIND 9.18, ProFTPD), so dnf and the daily
+# security updates (dnf-automatic) keep them current. SELinux stays on (enforcing).
+#
+# Contributions from:
+#
+#   Anthony DeBeaulieu (anthony.d@sentora.org)
+#   TGagtes 
+#   Pascal Peyremorte (ppeyremorte@sentora.org)
+#   Mehdi Blagui
+#   Kevin Andrews (kevin@zvps.uk)
+#
+#   and all those who participated to this and to previous installers.
+#   Thanks to all.
+
+##
+# The release: Sentora-2027. The version is set in the panel's database (dbversion) and
+# names the files this installer downloads.
+##
+
+SENTORA_INSTALLER_VERSION="2027"
+SENTORA_CORE_VERSION="2027"
+# Time servers this server should use, separated by spaces (for example a server or
+# router on your own network: "ntp.example.lan 192.168.1.1"). Empty keeps
+# Fedora's own (chrony, pool.ntp.org). The clock must be right before anything is installed.
+SENTORA_NTP_SERVERS=""
+
+# Sentora is downloaded from the GitHub releases of these two repositories. Both have a
+# release with the tag below ("current": a new version replaces its files), holding the
+# files named here (the extra PHP versions are optional). SENTORA_RELEASE_TAG="latest"
+# takes each repository's newest release instead, pre-releases included.
+SENTORA_GITHUB="https://github.com"
+SENTORA_CORE_REPO="RusTus/sentora-core-2027"
+SENTORA_INSTALLERS_REPO="RusTus/sentora-installers-2027"
+SENTORA_RELEASE_TAG="current"
+# Or download every file from one folder on your own web server instead of GitHub
+# (for example "http://files.example.lan/sentora"). Empty uses GitHub.
+SENTORA_DOWNLOAD_URL=""
+SENTORA_CORE_ZIP="sentora-core-2027.zip"
+SENTORA_INSTALLERS_ZIP="sentora-installers-2027.zip"
+
+PANEL_PATH="/etc/sentora"
+PANEL_DATA="/var/sentora"
+PANEL_CONF="/etc/sentora/configs"
+
+# *************************************************
+#--- The installer's screen: a title bar, highlighted questions, and during the
+# installation one line per finished step with a progress bar below (the details go
+# to the log file in /root/). Plain text when the output is not a terminal.
+UI_TTY=0
+[ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ] && UI_TTY=1
+if [ $UI_TTY -eq 1 ]; then
+    C_RESET=$'\e[0m'; C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'
+    C_GREEN=$'\e[32m'; C_YELLOW=$'\e[33m'; C_RED=$'\e[31m'; C_CYAN=$'\e[36m'; C_WHITE=$'\e[97m'
+    BG_TITLE=$'\e[44m'; BG_OK=$'\e[42m'; BG_WARN=$'\e[43m'
+else
+    C_RESET=''; C_BOLD=''; C_DIM=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_WHITE=''
+    BG_TITLE=''; BG_OK=''; BG_WARN=''
+fi
+# block characters and symbols on a UTF-8 terminal, plain ones otherwise
+UI_UTF8=0
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) UI_UTF8=1 ;; esac
+# (status marks in plain letters: every terminal font has them, PuTTY's included)
+UI_TICK='[ OK ]'; UI_WARNSIGN='[ !! ]'; UI_CROSS='[FAIL]'
+UI_SPIN=('|' '/' '-' '\')
+if [ $UI_UTF8 -eq 1 ]; then
+    UI_FULL=$'\xe2\x96\x88'; UI_EMPTY=$'\xe2\x96\x91'
+else
+    UI_FULL='#'; UI_EMPTY='.'
+fi
+ui_cols() { local c; c=$(tput cols 2> /dev/null); [ "${c:-0}" -ge 40 ] 2> /dev/null && echo "$c" || echo 80; }
+# a full-width coloured bar with text
+ui_bar() { # background text
+    local cols pad
+    cols=$(ui_cols)
+    pad=$(( cols - ${#2} ))
+    [ $pad -lt 0 ] && pad=0
+    printf '%s%s%s%*s%s\n' "$1" "$C_BOLD$C_WHITE" "$2" "$pad" '' "$C_RESET"
+}
+ui_banner() { # subtitle
+    [ $UI_TTY -eq 1 ] && clear
+    ui_bar "$BG_TITLE" "  Sentora-$SENTORA_CORE_VERSION for Fedora  -  Installer"
+    [ -n "$1" ] && printf '%s  %s%s\n' "$C_DIM" "$1" "$C_RESET"
+    echo
+}
+ui_heading() { printf '\n%s%s  %s  %s\n\n' "$BG_TITLE" "$C_BOLD$C_WHITE" "$1" "$C_RESET"; }
+ui_ok() { printf '  %s%s%s %s\n' "$C_GREEN" "$UI_TICK" "$C_RESET" "$1"; }
+ui_warn() { printf '  %s%s %s%s\n' "$C_YELLOW" "$UI_WARNSIGN" "$1" "$C_RESET"; }
+ui_err() { printf '  %s%s %s%s\n' "$C_RED$C_BOLD" "$UI_CROSS" "$1" "$C_RESET"; }
+ui_note() { printf '%s-- %s%s\n' "$C_CYAN" "$1" "$C_RESET"; }
+# a question on its own line, answered on a plain input line: ui_ask "Question" default VAR
+# Without a keyboard (input from a file, a script or /dev/null) a question takes its
+# preset answer, if it has one; otherwise the installer stops instead of asking forever.
+ui_no_input() {
+    echo
+    echo "  Stopped: no answer to \"$1\" (no keyboard input). For an install without"
+    echo "  questions, give -t, -d and -i, and set these before running the installer:"
+    echo "    ADMIN_NAME ADMIN_EMAIL ADMIN_PHONE ADMIN_ADDRESS ADMIN_PROVINCE"
+    echo "    ADMIN_POSTALCODE ADMIN_COUNTRY"
+    echo "  for example: ADMIN_NAME='Jo Smith' ADMIN_EMAIL=jo@example.com ... bash $0 ..."
+    exit 1
+}
+ui_ask() {
+    printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET"
+    if ! read -r -e -p "  > " -i "$2" "$3"; then
+        [ -n "$2" ] || ui_no_input "$1"
+        printf -v "$3" '%s' "$2"
+        echo "$2"
+    fi
+}
+ui_yesno() { # question -> sets yn
+    printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET"
+    read -r -e -p "  (y/n) > " yn || ui_no_input "$1"
+}
+
+# Installation steps: ui_step "Title" ends the step before it (a line with its time
+# and any warnings it logged) and starts the next, drawn as a progress bar that a
+# small background ticker keeps moving (so a long step never looks hung).
+UI_STEP=0
+UI_TOTAL=$(grep -c '^ *ui_step "' "$0" 2> /dev/null)
+[ "${UI_TOTAL:-0}" -gt 0 ] 2> /dev/null || UI_TOTAL=34
+UI_TITLE=""
+UI_STEP_START=0
+UI_INSTALL_START=0
+UI_TICKER=""
+UI_LOGPOS=0
+# The step whose progress bar may be drawn: a ticker stops by itself as soon as this is not its
+# own step any more, or the installer is gone, so a stray one can never draw over later steps
+UI_TICKFILE=$(mktemp /tmp/sentora-install-step.XXXXXX)
+UI_MAINPID=$$
+ui_repeat() { local i out=''; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+ui_draw() { # spinner-frame
+    local cols width pct filled elapsed total room title times
+    cols=$(ui_cols)
+    width=$(( cols / 4 )); [ $width -lt 10 ] && width=10; [ $width -gt 30 ] && width=30
+    pct=$(( (UI_STEP - 1) * 100 / UI_TOTAL )); [ $pct -gt 99 ] && pct=99
+    filled=$(( pct * width / 100 ))
+    elapsed=$(( $(date +%s) - UI_STEP_START ))
+    total=$(( $(date +%s) - UI_INSTALL_START ))
+    times=$(printf '%d:%02d  (total %d:%02d)' $(( elapsed / 60 )) $(( elapsed % 60 )) $(( total / 60 )) $(( total % 60 )))
+    room=$(( cols - width - 16 - ${#UI_STEP} - ${#UI_TOTAL} - ${#times} - 4 ))
+    title="$UI_TITLE"
+    [ ${#title} -gt $room ] && title="${title:0:$(( room - 3 ))}..."
+    printf '\r\e[K %s%s%s%s%s %3d%%  %d/%d  %s%s%s %-*s %s%s%s' \
+        "$C_GREEN" "$(ui_repeat "$UI_FULL" "$filled")" "$C_DIM" "$(ui_repeat "$UI_EMPTY" $(( width - filled )))" "$C_RESET" \
+        "$pct" "$UI_STEP" "$UI_TOTAL" "$C_CYAN" "$1" "$C_RESET" "$room" "$title" "$C_DIM" "$times" "$C_RESET" >&3
+}
+ui_ticker_stop() {
+    if [ -n "$UI_TICKER" ]; then
+        echo 0 > "$UI_TICKFILE" 2> /dev/null
+        kill "$UI_TICKER" 2> /dev/null
+        # (not "wait": in the exit trap bash complains about it)
+        local _; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$UI_TICKER" 2> /dev/null || break; sleep 0.05; done
+        # still there (a lost signal): stopped for certain
+        kill -0 "$UI_TICKER" 2> /dev/null && kill -9 "$UI_TICKER" 2> /dev/null
+        UI_TICKER=""
+    fi
+}
+ui_end_step() {
+    ui_ticker_stop
+    [ -z "$UI_TITLE" ] && return
+    local took=$(( $(date +%s) - UI_STEP_START )) found='' mark color
+    # what this step logged as a warning or an error
+    if [ -n "$logfile" ] && [ -f "$logfile" ]; then
+        local size; size=$(stat -c %s "$logfile" 2> /dev/null || echo 0)
+        if [ "$size" -gt "$UI_LOGPOS" ]; then
+            found=$(tail -c +$(( UI_LOGPOS + 1 )) "$logfile" | sed 's/\x1b\[[0-9;]*m//g' \
+                | grep -E '^(WARNING|ERROR|PROBLEM)|did not (install|start|build|pass)|^E: ' | head -5)
+            UI_LOGPOS=$size
+        fi
+    fi
+    if [ -n "$found" ]; then mark="$UI_WARNSIGN"; color="$C_YELLOW"; else mark="$UI_TICK"; color="$C_GREEN"; fi
+    if [ $UI_TTY -eq 1 ]; then printf '\r\e[K' >&3; fi
+    printf '  %s%s%s %s %s(%d:%02d)%s\n' "$color" "$mark" "$C_RESET" "$UI_TITLE" "$C_DIM" $(( took / 60 )) $(( took % 60 )) "$C_RESET" >&3
+    if [ -n "$found" ]; then
+        while IFS= read -r w; do
+            printf '         %s%s%s\n' "$C_YELLOW" "${w:0:$(( $(ui_cols) - 12 ))}" "$C_RESET" >&3
+            echo "$UI_TITLE: $w" >> "$logfile.warnings"
+        done <<< "$found"
+    fi
+}
+ui_step() { # title
+    ui_end_step
+    UI_STEP=$(( UI_STEP + 1 ))
+    [ $UI_STEP -gt $UI_TOTAL ] && UI_TOTAL=$UI_STEP
+    UI_TITLE="$1"
+    UI_STEP_START=$(date +%s)
+    echo -e "\n-- $1"   # in the log
+    if [ $UI_TTY -eq 1 ]; then
+        echo "$UI_STEP" > "$UI_TICKFILE"
+        ( trap 'exit 0' TERM; i=0; while [ "$(cat "$UI_TICKFILE" 2> /dev/null)" = "$UI_STEP" ] && kill -0 "$UI_MAINPID" 2> /dev/null; do ui_draw "${UI_SPIN[$(( i % ${#UI_SPIN[@]} ))]}"; i=$(( i + 1 )); sleep 0.25; done ) &
+        UI_TICKER=$!
+    else
+        printf '%s-- [%d/%d] %s%s\n' "$C_CYAN" "$UI_STEP" "$UI_TOTAL" "$1" "$C_RESET" >&3
+    fi
+}
+ui_done() {
+    ui_end_step
+    UI_TITLE=""
+    if [ $UI_TTY -eq 1 ]; then
+        local cols width total; cols=$(ui_cols); width=$(( cols / 4 )); [ $width -lt 10 ] && width=10; [ $width -gt 30 ] && width=30
+        total=$(( $(date +%s) - UI_INSTALL_START ))
+        printf '\r\e[K %s%s%s 100%%  %sall %d steps done in %d:%02d%s\n' "$C_GREEN" "$(ui_repeat "$UI_FULL" "$width")" "$C_RESET" "$C_BOLD" "$UI_STEP" \
+            $(( total / 60 )) $(( total % 60 )) "$C_RESET" >&3
+    fi
+}
+# an installation that stops early says so on the screen, with the end of its log
+ui_exit() {
+    local rc=$?
+    exec 2> /dev/null   # the installer is ending: bash's own job notices must not reach the log or the screen
+    ui_ticker_stop
+    rm -f "$UI_TICKFILE"
+    [ -n "${MYSQL_ROOT_CNF:-}" ] && rm -f "$MYSQL_ROOT_CNF"
+    if [ -n "${UI_INSTALLING:-}" ] && [ $rc -ne 0 ]; then
+        [ $UI_TTY -eq 1 ] && printf '\r\e[K' >&3
+        printf '\n' >&3
+        ui_bar "$BG_WARN" "  The installation stopped at: $UI_TITLE" >&3
+        printf '\n%s' "$C_DIM" >&3
+        grep -v 'wait_for: No record of process' "$logfile" | tail -n 15 | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^/  /' >&3
+        printf '%s\n  The whole log: %s\n\n' "$C_RESET" "$logfile" >&3
+    fi
+}
+trap 'ui_exit' EXIT
+# Files this installer makes get the usual permissions, whatever the shell that started it had
+# (with umask 0, MariaDB ignores its settings file as world-writable, and more)
+umask 022
+
+#--- Display the 'welcome' splash/user warning info..
+if [ -n "$SENTORA_DOWNLOAD_URL" ]; then
+    SENTORA_SOURCE="$SENTORA_DOWNLOAD_URL"
+else
+    SENTORA_SOURCE="GitHub (release $SENTORA_RELEASE_TAG)"
+fi
+ui_banner "Installer $SENTORA_INSTALLER_VERSION, downloading from $SENTORA_SOURCE"
+
+ui_note "Checking that minimal requirements are ok"
+
+# Fedora only (the releases in FEDORA_VERSIONS): the settings below are for its Dovecot 2.4, PHP 8.5,
+# MariaDB 12 and BIND 9.18 (the extra PHP versions and SOGo are built for x86_64, for each Fedora release).
+# The Fedora releases this installer was tested on (Fedora has a new one every six months: the install
+# test on GitHub says when the next one works)
+FEDORA_VERSIONS="45"
+OS=$(. /etc/os-release 2> /dev/null && echo "$NAME")
+OS_ID=$(. /etc/os-release 2> /dev/null && echo "$ID")
+VER=$(. /etc/os-release 2> /dev/null && echo "$VERSION_ID")
+ARCH=$(uname -m)
+if [[ "$OS_ID" != "fedora" || ! " $FEDORA_VERSIONS " =~ " ${VER} " ]]; then
+    ui_err "This installer is for Fedora $FEDORA_VERSIONS only (this is ${OS:-an unknown system} ${VER})."
+    [[ "$OS_ID" =~ ^(almalinux|rocky|rhel)$ ]] && echo "  On AlmaLinux, Rocky Linux or RHEL 10 use sentora2027-alma10 instead."
+    [ "$OS_ID" = "ubuntu" ] && echo "  On Ubuntu 26.04 use sentora2027-ub26.04 instead."
+    [ "$OS_ID" = "debian" ] && echo "  On Debian 13 use sentora2027-deb13 instead."
+    exit 1
+fi
+if [ "$ARCH" != "x86_64" ]; then
+    ui_warn "The extra PHP versions are built for x86_64 only: this $ARCH server gets Fedora's PHP alone."
+fi
+if [ "$(id -u)" -ne 0 ]; then
+    ui_err "Run the installer as root: sudo -i, then run it again."
+    exit 1
+fi
+ui_ok "$OS $VER $ARCH, as root"
+
+# Valid dotted IPv4 address?
+is_ipv4() {
+    [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+    local o
+    for o in "${BASH_REMATCH[@]:1}"; do (( o <= 255 )) || return 1; done
+}
+
+# Options, read before anything is installed (a wrong one stops here, not after apt)
+#   -d <panel-domain>
+#   -i <server-ip> (or -i local or -i public, see below)
+#   -t <timezone-string>
+# like :
+#   sentora_install.sh -t Europe/Paris -d panel.domain.tld -i xxx.xxx.xxx.xxx
+# notes:
+#   -d and -i must be both present or both absent
+#   -i local  force use of local detected ip
+#   -i public  force use of public detected ip
+#   if -t is used without -d/-i, timezone is set from value given and not asked to user
+#   if -t absent and -d/-i are present, timezone is not set at all
+
+while getopts d:i:t: opt; do
+  case $opt in
+  d)
+      PANEL_FQDN=$OPTARG
+      INSTALL="auto"
+      ;;
+  i)
+      PUBLIC_IP=$OPTARG   # "local" and "public" are resolved once the addresses are known
+      ;;
+  t)
+      tz="$OPTARG"
+      if [ ! -f "/usr/share/zoneinfo/$tz" ]; then
+          echo "-t $tz: not a time zone (for example Europe/Paris, America/New_York or UTC)."
+          exit 2
+      fi
+      ;;
+  *)
+      echo "Usage: $0 [-t <timezone>] [-d <panel domain> -i <ip, local or public>]"
+      echo "  e.g. $0 -t Europe/Paris -d panel.domain.tld -i public"
+      exit 2
+      ;;
+  esac
+done
+if [[ ("$PANEL_FQDN" != "" && "$PUBLIC_IP" == "") || 
+      ("$PANEL_FQDN" == "" && "$PUBLIC_IP" != "") ]] ; then
+    echo "-d and -i must be both present or both absent."
+    exit 2
+fi
+if [[ -n "$PUBLIC_IP" && "$PUBLIC_IP" != "local" && "$PUBLIC_IP" != "public" ]] && ! is_ipv4 "$PUBLIC_IP"; then
+    echo "-i must be an IPv4 address, 'local' or 'public' (got: '$PUBLIC_IP')."
+    exit 2
+fi
+
+# Check for some common control panels that we know will affect the installation/operating of Sentora.
+if [ -e /usr/local/cpanel ] || [ -e /usr/local/directadmin ] || [ -e /usr/local/solusvm/www ] || [ -e /usr/local/home/admispconfig ] || [ -e /usr/local/lxlabs/kloxo ] ; then
+    echo "It appears that a control panel is already installed on your server; This installer"
+    echo "is designed to install and configure Sentora on a clean OS installation only."
+    echo -e "\nPlease re-install your OS before attempting to install using this script."
+    exit 1
+fi
+
+# Check for some common packages that we know will affect the installation/operating of Sentora.
+
+PACKAGE_INSTALLER="dnf -y -q install"
+
+inst() {
+   rpm -q "$1" &> /dev/null
+}
+
+DB_PCKG="mariadb-server"
+HTTP_PCKG="httpd"
+
+
+# Install only the packages that the configured repositories actually provide.
+# dnf stops the whole command when one name is unknown, so a single package
+# dropped from a newer release would otherwise skip all the others.
+install_available() {
+    local pkg
+    local avail=()
+    local missing=()
+    for pkg in "$@"; do
+        if dnf -q repoquery --latest-limit=1 "$pkg" 2> /dev/null | grep -q .; then
+            avail+=("$pkg")
+        else
+            missing+=("$pkg")
+        fi
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "WARNING: not available in the configured repositories, skipped: ${missing[*]}"
+    fi
+    if [ ${#avail[@]} -gt 0 ]; then
+        $PACKAGE_INSTALLER "${avail[@]}"
+        # dnf can fail (a download error, a mirror catching up) without stopping this script:
+        # check each one really installed, retry (below), and say so plainly if it still is not there
+        local notinstalled=()
+        for pkg in "${avail[@]}"; do
+            rpm -q --whatprovides "$pkg" > /dev/null 2>&1 || notinstalled+=("$pkg")
+        done
+        local attempt
+        for attempt in 1 2 3; do
+            [ ${#notinstalled[@]} -eq 0 ] && break
+            echo "Retrying ($attempt/3): ${notinstalled[*]}"
+            [ "$attempt" -gt 1 ] && sleep 60
+            dnf -y -q makecache
+            $PACKAGE_INSTALLER "${notinstalled[@]}"
+            local still=()
+            for pkg in "${notinstalled[@]}"; do
+                rpm -q --whatprovides "$pkg" > /dev/null 2>&1 || still+=("$pkg")
+            done
+            notinstalled=("${still[@]}")
+        done
+        for pkg in "${notinstalled[@]}"; do
+            echo -e "ERROR: package $pkg did not install. Run 'dnf install $pkg' to see why, then run the installer again."
+        done
+    fi
+}
+
+# Read the system timezone. Newer systems no longer
+# maintains /etc/timezone, so check /etc/localtime and timedatectl first.
+get_timezone() {
+    local t=""
+    if [ -L /etc/localtime ]; then
+        t=$(readlink -f /etc/localtime | sed 's|^/usr/share/zoneinfo/||')
+    fi
+    if [[ -z "$t" ]] && command -v timedatectl &> /dev/null; then
+        t=$(timedatectl show -p Timezone --value 2> /dev/null)
+    fi
+    if [[ -z "$t" && -f /etc/timezone ]]; then
+        t=$(cat /etc/timezone)
+    fi
+    echo "$t"
+}
+  
+# This installer only does fresh installs. Upgrading an existing Sentora or
+# ZPanel server is not supported, so stop if either is already present.
+if [ -e "/etc/sentora" ] || [ -e "/etc/zpanel" ] || [ -e "/var/sentora" ] || [ -e "/var/zpanel" ]; then
+    echo "It appears that Sentora or ZPanel is already installed on this server."
+    echo "This installer is designed to install Sentora on a clean OS installation only,"
+    echo "it does not upgrade existing installs."
+    echo -e "\nPlease re-install your OS before attempting to install using this script."
+    exit 1
+fi
+
+# *************************************************
+#--- The clock must be right: dnf refuses package lists and signatures "not yet valid" from a
+# server whose clock is behind, and certificates and TOTP codes depend on it too.
+# 1. the time servers set at the top (kept for later too), 2. a web server's time,
+# 3. asking whoever runs the installer.
+echo; ui_note "Checking the clock (this can take up to a minute when no time server answers)"
+if [ -n "$SENTORA_NTP_SERVERS" ]; then
+    ui_note "Using the time server(s): $SENTORA_NTP_SERVERS"
+    if command -v chronyc > /dev/null 2>&1; then
+        # chrony (Fedora's time service): Sentora's servers in /etc/chrony.d
+        mkdir -p /etc/chrony.d
+        : > /etc/chrony.d/sentora.sources
+        for ntp in $SENTORA_NTP_SERVERS; do echo "server $ntp iburst" >> /etc/chrony.d/sentora.sources; done
+        grep -q "^sourcedir /etc/chrony.d" /etc/chrony.conf 2> /dev/null || echo "sourcedir /etc/chrony.d" >> /etc/chrony.conf
+        chronyc reload sources > /dev/null 2>&1 || systemctl restart chronyd > /dev/null 2>&1
+    else
+        mkdir -p /etc/systemd/timesyncd.conf.d
+        printf '[Time]\nNTP=%s\n' "$SENTORA_NTP_SERVERS" > /etc/systemd/timesyncd.conf.d/sentora.conf
+        systemctl restart systemd-timesyncd > /dev/null 2>&1
+    fi
+fi
+if command -v chronyc > /dev/null 2>&1; then
+    # chrony only jumps the clock at its start; a clock that is days off is then
+    # corrected so slowly it would take weeks: jump as soon as a source answers
+    printf "   waiting for a time server"
+    for _ in $(seq 1 10); do
+        chronyc sources 2> /dev/null | grep -q '^\^[*+]' && break
+        printf "."
+        sleep 2
+    done
+    if chronyc sources 2> /dev/null | grep -q '^\^[*+]'; then
+        chronyc makestep > /dev/null 2>&1
+        echo " found one."
+    else
+        echo " none answered."
+    fi
+fi
+if command -v timedatectl > /dev/null 2>&1 && [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ]; then
+    # (a server may have no time service yet: then there is nothing to wait for, the clock is
+    # checked below and chrony is installed with the tools)
+    if timedatectl set-ntp true > /dev/null 2>&1; then
+        printf "   waiting for the clock to synchronise"
+        for _ in $(seq 1 15); do
+            [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" = "yes" ] && break
+            printf "."
+            sleep 2
+        done
+        [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" = "yes" ] && echo " done." || echo " not synchronised."
+    fi
+fi
+# If time sync can not reach a time server, take the time from a web server's Date
+# header: Fedora's repository (dnf has to reach it anyway), else the download server.
+# curl or wget when there is one; a minimal server may have neither, then bash asks an
+# http:// address itself.
+clock_from() {
+    if command -v curl > /dev/null 2>&1; then
+        curl -sSI --max-time 10 "$1" 2> /dev/null | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
+    elif command -v wget > /dev/null 2>&1; then
+        wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
+    elif [[ "$1" == http://* ]]; then
+        local host=${1#http://}; host=${host%%/*}
+        timeout 10 bash -c 'exec 5<> "/dev/tcp/$0/80" && printf "HEAD / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" "$0" >&5 && cat <&5' "$host" 2> /dev/null \
+            | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
+    fi
+}
+# The clock must be verifiably right before anything is installed (package lists,
+# certificates and two-factor codes depend on it). It is compared with a web server's time
+# (Fedora's repository first: its time decides whether dnf accepts the package lists; then the
+# download server), always, also when the system says it is synchronised (a virtual machine
+# started from an older snapshot can keep that flag with a clock days behind). When it is
+# off the installer sets it to that time and checks again; it stops only when the clock can
+# not be checked, or setting it did not work.
+CLOCK_REF=""
+CLOCK_SRC=""
+for CLOCK_SRC in "http://dl.fedoraproject.org/pub/fedora/linux/" "${SENTORA_DOWNLOAD_URL:-https://github.com}/"; do
+    echo "   checking the time at ${CLOCK_SRC%/*}/"
+    CLOCK_REF=$(clock_from "$CLOCK_SRC")
+    [ -n "$CLOCK_REF" ] && date -d "$CLOCK_REF" > /dev/null 2>&1 && break
+    CLOCK_REF=""
+done
+CLOCK_HOW="     timedatectl set-ntp false
+     timedatectl set-time 'YYYY-MM-DD HH:MM:SS'
+     timedatectl set-ntp true"
+CLOCK_KEEP="  To keep it right: set SENTORA_NTP_SERVERS at the top of this installer to a
+  time server this network can reach (NTP uses UDP port 123, which may be
+  blocked on this network)."
+if [ -z "$CLOCK_REF" ]; then
+    echo
+    ui_bar "$BG_WARN" "  Stopped: this server's clock could not be checked"
+    echo
+    echo "  Neither dl.fedoraproject.org nor the download site answered, so this"
+    echo "  server's time ($(date '+%Y-%m-%d %H:%M:%S %Z')) can not be confirmed."
+    echo "  Nothing was installed. Check the network, set the right time if needed,"
+    echo "  then run the installer again:"
+    echo "$CLOCK_HOW"
+    echo "$CLOCK_KEEP"
+    echo
+    exit 1
+fi
+CLOCK_DIFF=$(( $(date -d "$CLOCK_REF" +%s) - $(date +%s) ))
+clock_by() {
+    local abs=${1#-}
+    if [ "$abs" -ge 86400 ]; then echo "$(( abs / 86400 )) day(s) $(( abs % 86400 / 3600 )) hour(s)"
+    elif [ "$abs" -ge 3600 ]; then echo "$(( abs / 3600 )) hour(s) $(( abs % 3600 / 60 )) minute(s)"
+    else echo "$(( abs / 60 )) minute(s)"; fi
+}
+CLOCK_HOST=${CLOCK_SRC#*://}; CLOCK_HOST=${CLOCK_HOST%%/*}
+if [ "${CLOCK_DIFF#-}" -gt 120 ]; then
+    if [ "$CLOCK_DIFF" -gt 0 ]; then CLOCK_WAY="behind"; else CLOCK_WAY="ahead"; fi
+    CLOCK_WAS="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    ui_warn "This server's clock is $(clock_by "$CLOCK_DIFF") $CLOCK_WAY: setting it to $CLOCK_HOST's time"
+    # the same commands it would otherwise ask for (set-time is local time; the offset still holds)
+    CLOCK_SET=$(date -d "@$(( $(date +%s) + CLOCK_DIFF ))" '+%Y-%m-%d %H:%M:%S')
+    timedatectl set-ntp false > /dev/null 2>&1
+    timedatectl set-time "$CLOCK_SET" > /dev/null 2>&1 || date -s "$CLOCK_SET" > /dev/null 2>&1
+    timedatectl set-ntp true > /dev/null 2>&1
+    # checked again against the web server, not assumed
+    CLOCK_REF=$(clock_from "$CLOCK_SRC")
+    if [ -n "$CLOCK_REF" ] && date -d "$CLOCK_REF" > /dev/null 2>&1; then
+        CLOCK_DIFF=$(( $(date -d "$CLOCK_REF" +%s) - $(date +%s) ))
+    fi
+    if [ "${CLOCK_DIFF#-}" -le 120 ]; then
+        echo "   was $CLOCK_WAS, now $(date '+%Y-%m-%d %H:%M:%S %Z'): done."
+    else
+        CLOCK_RIGHT=$(date -d "@$(( $(date +%s) + CLOCK_DIFF ))" '+%Y-%m-%d %H:%M:%S')
+        echo
+        ui_bar "$BG_WARN" "  Stopped: this server's clock is $(clock_by "$CLOCK_DIFF") $CLOCK_WAY, and setting it did not work"
+        echo
+        printf '  %-16s %s\n' "This server:" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+        printf '  %-16s %s  (from %s)\n' "The right time:" "$CLOCK_RIGHT $(date +%Z)" "$CLOCK_HOST"
+        echo
+        echo "  Nothing was installed. Set the time, then run the installer again:"
+        echo "     timedatectl set-ntp false"
+        echo "     timedatectl set-time '$CLOCK_RIGHT'"
+        echo "     timedatectl set-ntp true"
+        echo "  (on a virtual machine the host may be setting the clock back: check the"
+        echo "  VM's time settings)"
+        echo "$CLOCK_KEEP"
+        echo
+        exit 1
+    fi
+fi
+ui_ok "Clock checked against $CLOCK_HOST: $(date '+%Y-%m-%d %H:%M %Z')"
+if ! command -v chronyc > /dev/null 2>&1 && ! systemctl cat systemd-timesyncd.service > /dev/null 2>&1; then
+    ui_note "No time service yet: chrony is installed with the tools"
+elif [ "$(timedatectl show -p NTPSynchronized --value 2> /dev/null)" != "yes" ]; then
+    ui_warn "It is not synchronised with a time server, so it may drift. Set"
+    echo "         SENTORA_NTP_SERVERS at the top of this installer to fix that."
+fi
+
+#--- Prepare or query informations required to install
+
+# Update repositories and Install wget and util used to grab server IP
+ui_note "Installing the tools the questions need (wget, dns utilities)"
+# A fresh server runs its automatic updates right after boot and holds the
+# package lock: wait for it (up to 30 minutes) instead of failing
+if pgrep -f "dnf-automatic" > /dev/null 2>&1; then
+    echo "The automatic updates are running; waiting for them to finish..."
+fi
+APT_OUT=$(dnf -y -q makecache 2>&1)   #ensure we can install
+if printf '%s' "$APT_OUT" | grep -qi "not yet valid\|in the future"; then
+    ui_err "Fedora's package lists are dated after this server's clock ($(date '+%Y-%m-%d %H:%M %Z'))."
+    echo "  The clock is behind, so nothing can be installed. Set the right time:"
+    echo "     timedatectl set-time 'YYYY-MM-DD HH:MM:SS'"
+    echo "  (or set SENTORA_NTP_SERVERS at the top of this installer), then run it again."
+    exit 1
+fi
+# (a minimal server may lack some: their output goes to a file, the screen only says if it failed)
+export DEBIAN_FRONTEND=noninteractive
+PRE_LOG=/root/sentora-install-tools.log
+{ install_available bind-utils; $PACKAGE_INSTALLER wget curl unzip iproute tar; } > "$PRE_LOG" 2>&1
+for tool in wget unzip ip; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+        ui_err "'$tool' did not install, so the installation can not continue. The end of $PRE_LOG:"
+        tail -n 15 "$PRE_LOG" | sed 's/^/     /'
+        exit 1
+    fi
+done
+rm -f "$PRE_LOG"
+
+# Public IP as seen from the internet. api.sentora.org/ip.txt (used before) no
+# longer answers, which left the IP empty and broke BIND's config. Try several
+# services and fall back to the local address when none answer.
+detect_public_ip() {
+    local svc ip
+    for svc in https://api.ipify.org https://ipv4.icanhazip.com https://checkip.amazonaws.com https://ifconfig.me/ip; do
+        ip=$(wget -4 -qO- --timeout=5 --tries=1 "$svc" 2> /dev/null | tr -d '[:space:]')
+        if is_ipv4 "$ip"; then
+            echo "$ip"
+            return
+        fi
+    done
+}
+
+# First IPv4 address on a real interface (the old command printed one per interface)
+local_ip=$(ip -4 addr show scope global 2> /dev/null | awk '$1 == "inet" { sub(/\/.*/, "", $2); print $2; exit }')
+if [[ -z "$local_ip" ]]; then
+    for local_ip in $(hostname -I 2> /dev/null) ""; do
+        [[ "$local_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && break
+    done
+fi
+extern_ip="$(detect_public_ip)"
+[[ -z "$extern_ip" ]] && extern_ip="$local_ip"
+if [[ "$PUBLIC_IP" == "local" || "$PUBLIC_IP" == "public" ]]; then
+    PUBLIC_IP_ASKED="$PUBLIC_IP"
+    if [[ "$PUBLIC_IP" == "local" ]]; then PUBLIC_IP=$local_ip; else PUBLIC_IP=$extern_ip; fi
+    if [[ -z "$PUBLIC_IP" ]]; then
+        echo "-i $PUBLIC_IP_ASKED: this server's IPv4 address could not be found. Give it with -i <address>."
+        exit 2
+    fi
+fi
+
+
+#--- Download and unpack Sentora before asking anything
+# GitHub's release API: the release's tag (for "latest") and each file's SHA-256, so
+# a download is checked against what was uploaded. Without it (no network to
+# api.github.com, or its hourly limit reached) a pinned tag still downloads, unchecked.
+REL_DIR=$(mktemp -d /tmp/sentora-release.XXXXXX)
+release_info() {   # $1 repository: its release's details, saved once
+    local repo="$1" f api
+    f="$REL_DIR/${repo//\//_}.json"
+    if [ ! -e "$f" ]; then
+        if [ "$SENTORA_RELEASE_TAG" = "latest" ]; then
+            api="https://api.github.com/repos/$repo/releases?per_page=1"
+        else
+            api="https://api.github.com/repos/$repo/releases/tags/$SENTORA_RELEASE_TAG"
+        fi
+        # one key per line, whatever the layout of the answer
+        wget -q -T 20 -O - --header="Accept: application/vnd.github+json" "$api" 2> /dev/null \
+            | sed 's/\([,{[]\) *"/\1\n"/g' > "$f" || true
+    fi
+    cat "$f"
+}
+release_tag() {    # $1 repository: the tag to download from
+    local tag
+    if [ "$SENTORA_RELEASE_TAG" != "latest" ]; then
+        echo "$SENTORA_RELEASE_TAG"
+        return
+    fi
+    tag=$(release_info "$1" | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+    if [ -z "$tag" ]; then   # no API: the release feed lists pre-releases too, newest first
+        tag=$(wget -q -T 20 -O - "$SENTORA_GITHUB/$1/releases.atom" 2> /dev/null \
+            | grep -o 'releases/tag/[^"<]*' | head -1 | sed 's|releases/tag/||')
+    fi
+    echo "${tag:-latest}"
+}
+release_digest() { # $1 repository, $2 file: its SHA-256 as GitHub lists it
+    release_info "$1" | awk -v want="$2" '
+        /^ *"name": *"/ { n = $0; sub(/^ *"name": *"/, "", n); sub(/".*/, "", n) }
+        /^ *"digest": *"sha256:/ && n == want { d = $0; sub(/^ *"digest": *"sha256:/, "", d); sub(/".*/, "", d); print d; exit }'
+}
+release_url() {    # $1 file, $2 repository
+    local tag
+    if [ -n "$SENTORA_DOWNLOAD_URL" ]; then
+        echo "$SENTORA_DOWNLOAD_URL/$1"
+        return
+    fi
+    tag=$(release_tag "$2")
+    if [ "$tag" = "latest" ]; then   # no API: GitHub's newest full release
+        echo "$SENTORA_GITHUB/$2/releases/latest/download/$1"
+    else
+        echo "$SENTORA_GITHUB/$2/releases/download/$tag/$1"
+    fi
+}
+
+# Download $1 (a file of the GitHub repository $3) to $2, retrying a few times;
+# checked against GitHub's SHA-256 when the API answered.
+download_file() {
+    local url dest="$2" repo="$3" try want="" rc
+    url=$(release_url "$1" "$repo")
+    [ -z "$SENTORA_DOWNLOAD_URL" ] && want=$(release_digest "$repo" "$1")
+    for try in 1 2 3; do
+        echo "Downloading $url (attempt $try)"
+        # (GitHub sends the file from a signed address: its long query is left out of the log)
+        wget -nv -O "$dest" "$url" > "$REL_DIR/wget.log" 2>&1
+        rc=$?
+        sed 's/?[^ ]*//' "$REL_DIR/wget.log"
+        if [ "$rc" -eq 0 ] && [ -s "$dest" ] \
+           && { unzip -tq "$dest" > /dev/null 2>&1 || tar -tzf "$dest" > /dev/null 2>&1; }; then
+            if [ -z "$want" ]; then
+                [ -z "$SENTORA_DOWNLOAD_URL" ] && echo "(not checked: GitHub's release API did not answer)"
+                return 0
+            fi
+            if [ "$(sha256sum "$dest" | cut -d' ' -f1)" = "$want" ]; then
+                echo "SHA-256 matches the release"
+                return 0
+            fi
+            echo "$1 does not match the SHA-256 GitHub lists for it."
+        else
+            echo "Download of $url failed or the file is not a valid zip or tar.gz."
+        fi
+        rm -f "$dest"
+        sleep 5
+    done
+    return 1
+}
+
+# Unpack a downloaded zip into $dest and set STAGED_DIR to the folder that contains $marker.
+stage_zip() {
+    local zip="$1" marker="$2" dest="$3" top=""
+    STAGED_DIR=""
+    mkdir -p "$dest"
+    if ! unzip -oq "$zip" -d "$dest"; then
+        echo "Install failed: could not unzip $zip"
+        return 1
+    fi
+    top=$(find "$dest" -mindepth 1 -maxdepth 2 -type d -name "$marker" -printf '%h\n' 2> /dev/null | head -1)
+    if [[ -z "$top" ]]; then
+        echo "Install failed: $zip does not contain $marker/."
+        return 1
+    fi
+    STAGED_DIR=$(cd "$top" && pwd)
+}
+
+SRC_STAGE=$(mktemp -d /tmp/sentora-src.XXXXXX)
+
+if ! download_file "$SENTORA_CORE_ZIP" "$SRC_STAGE/$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO" \
+   || ! stage_zip "$SRC_STAGE/$SENTORA_CORE_ZIP" "dryden" "$SRC_STAGE/core" \
+   || [ ! -f "$STAGED_DIR/index.php" ]; then
+    echo "Install failed: could not get the Sentora core:"
+    echo "  $(release_url "$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO")"
+    echo "Check that this server can reach it and that the release holds that file."
+    rm -rf "$SRC_STAGE"
+    exit 3
+fi
+CORE_DIR="$STAGED_DIR"
+# what sentora-update compares with later (the zip's SHA-256 and the release)
+CORE_SUM=$(sha256sum "$SRC_STAGE/$SENTORA_CORE_ZIP" | cut -d' ' -f1)
+CORE_TAG=""
+[ -z "$SENTORA_DOWNLOAD_URL" ] && CORE_TAG=$(release_tag "$SENTORA_CORE_REPO")
+[ "$CORE_TAG" = "latest" ] && CORE_TAG=""
+
+if ! download_file "$SENTORA_INSTALLERS_ZIP" "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO" \
+   || ! stage_zip "$SRC_STAGE/$SENTORA_INSTALLERS_ZIP" "preconf" "$SRC_STAGE/preconf"; then
+    echo "Install failed: could not get the Sentora configuration files:"
+    echo "  $(release_url "$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO")"
+    echo "Check that this server can reach it and that the release holds that file."
+    rm -rf "$SRC_STAGE"
+    exit 3
+fi
+PRECONF_DIR="$STAGED_DIR"
+
+if [ -n "$tz" ]; then
+    timedatectl set-timezone "$tz" > /dev/null 2>&1 || { ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime && echo "$tz" > /etc/timezone; }
+fi
+if [[ "$tz" == "" && "$PANEL_FQDN" == "" ]] ; then
+    # The time zone could not be found out: chosen here from numbered lists (the region,
+    # then the city), in the installer's own screen
+    $PACKAGE_INSTALLER tzdata > /dev/null 2>&1
+    # numbered items in columns that fit the screen: tz_columns item...
+    tz_columns() {
+        local cols w n i rows r c idx line name maxw
+        cols=$(ui_cols); n=$#
+        maxw=0; for i in "$@"; do [ ${#i} -gt $maxw ] && maxw=${#i}; done
+        # at least 3 columns on an 80-column screen (more when wider); longer names are
+        # shortened with ~ (the number still picks the whole name)
+        c=$(( (cols - 2) / 26 )); [ $c -lt 1 ] && c=1
+        w=$(( maxw + 7 )); [ $w -gt $(( (cols - 2) / c )) ] && w=$(( (cols - 2) / c ))
+        c=$(( (cols - 2) / w )); [ $c -lt 1 ] && c=1
+        rows=$(( (n + c - 1) / c ))
+        local items=("$@")
+        for (( r = 0; r < rows; r++ )); do
+            line="  "
+            for (( i = 0; i < c; i++ )); do
+                idx=$(( i * rows + r ))
+                [ $idx -lt $n ] || continue
+                name="${items[$idx]}"
+                [ ${#name} -gt $(( w - 7 )) ] && name="${name:0:$(( w - 8 ))}~"
+                line+=$(printf "%s%4d)%s %-*s" "$C_CYAN" $(( idx + 1 )) "$C_RESET" $(( w - 6 )) "$name")
+            done
+            echo "$line"
+        done
+    }
+    tz_answer=""; tz_pick=""
+    while [ -z "$tz_answer" ]; do
+        # 1. the region
+        mapfile -t TZ_REGIONS <<< "$(cd /usr/share/zoneinfo && for d in Africa America Antarctica Arctic Asia Atlantic Australia Europe Indian Pacific; do [ -d "$d" ] && echo "$d"; done)"
+        TZ_REGIONS+=("UTC")
+        ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+        ui_heading "The server's time zone: the region"
+        echo "  Used for the panel's times, the logs and scheduled tasks."
+        echo
+        tz_columns "${TZ_REGIONS[@]}"
+        ui_ask "The number of the region:" "" tz_pick
+        if [[ "$tz_pick" =~ ^[0-9]+$ ]] && [ "$tz_pick" -ge 1 ] && [ "$tz_pick" -le ${#TZ_REGIONS[@]} ]; then
+            region="${TZ_REGIONS[$(( tz_pick - 1 ))]}"
+        else
+            continue
+        fi
+        [ "$region" = UTC ] && { tz_answer=UTC; break; }
+        # 2. the city in that region (part of a name narrows the list)
+        mapfile -t TZ_ALL <<< "$(cd "/usr/share/zoneinfo/$region" && find . -type f -o -type l | sed 's|^\./||' | grep -E '^[A-Za-z0-9_/+-]+$' | sort)"
+        filter=""
+        while true; do
+            if [ -n "$filter" ]; then
+                mapfile -t TZ_CITIES <<< "$(printf '%s\n' "${TZ_ALL[@]}" | grep -i -- "$filter")"
+            else
+                TZ_CITIES=("${TZ_ALL[@]}")
+            fi
+            [ -n "${TZ_CITIES[0]:-}" ] || TZ_CITIES=()
+            ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+            ui_heading "The server's time zone: $region${filter:+ (matching \"$filter\")}"
+            [ -z "$filter" ] && [ ${#TZ_CITIES[@]} -gt 30 ] && printf '  %sA long list: type part of the city'"'"'s name below to shorten it.%s\n\n' "$C_DIM" "$C_RESET"
+            if [ ${#TZ_CITIES[@]} -gt 0 ]; then
+                tz_columns "${TZ_CITIES[@]}"
+            else
+                ui_warn "Nothing in $region matches \"$filter\"."
+            fi
+            printf '\n  %sThe number of the city, part of a name to narrow the list, or 0 to go back.%s\n' "$C_DIM" "$C_RESET"
+            ui_ask "City:" "" tz_pick
+            if [ "$tz_pick" = 0 ]; then
+                break
+            elif [[ "$tz_pick" =~ ^[0-9]+$ ]] && [ "$tz_pick" -ge 1 ] && [ "$tz_pick" -le ${#TZ_CITIES[@]} ]; then
+                tz_answer="$region/${TZ_CITIES[$(( tz_pick - 1 ))]}"
+                break
+            elif [[ "$tz_pick" =~ ^[A-Za-z_\ /+-]+$ ]]; then
+                filter="${tz_pick// /_}"
+            else
+                filter=""
+            fi
+        done
+    done
+    if command -v timedatectl > /dev/null 2>&1; then
+        timedatectl set-timezone "$tz_answer" > /dev/null 2>&1
+    else
+        ln -sf "/usr/share/zoneinfo/$tz_answer" /etc/localtime && echo "$tz_answer" > /etc/timezone
+    fi
+    tz=$(get_timezone)
+    [ -n "$tz" ] || tz="$tz_answer"
+    ui_ok "Time zone set to $tz ($(date '+%H:%M %Z'))"
+    sleep 1
+fi
+# A time zone given with -t, or none: the system's own
+[ -n "$tz" ] || tz=$(get_timezone)
+[ -n "$tz" ] || tz=UTC
+
+# A host name: letters, digits, dots and hyphens (it goes into every service's settings)
+is_hostname() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ && "$1" != *..* && "$1" != *.-* && "$1" != *-.* ]]; }
+is_email() { [[ "$1" =~ ^[^@[:space:]\'\"]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$ ]]; }
+
+# The panel's address and IP, checked against DNS; warnings are confirmed or changed
+ask_server() {
+    local confirm dns_panel_ip
+    while true; do
+        ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+        ui_heading "The panel's address"
+        echo "  The panel gets a name of its own, for example panel.example.com: a sub-domain"
+        echo "  (not your main domain) or this server's host name. Its DNS A record should"
+        echo "  already point to this server's public IP address: the panel's address and its"
+        echo "  Let's Encrypt certificate need it."
+        ui_ask "The panel's sub-domain (for example panel.example.com):" "$PANEL_FQDN" PANEL_FQDN
+        PANEL_FQDN=$(printf '%s' "$PANEL_FQDN" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        if ! is_hostname "$PANEL_FQDN"; then
+            ui_err "'$PANEL_FQDN' is not a valid name: letters, digits, dots and hyphens only."
+            PANEL_FQDN="sentora${host_domain:+.$host_domain}"
+            sleep 2; continue
+        fi
+        echo
+        if [[ "$extern_ip" != "$local_ip" ]]; then
+            printf '  %sThis server: public IP %s, local IP %s. A server on the internet uses the public one.%s\n' "$C_DIM" "${extern_ip:-unknown}" "${local_ip:-unknown}" "$C_RESET"
+        fi
+        ui_ask "This server's public IP address:" "$PUBLIC_IP" PUBLIC_IP
+        PUBLIC_IP=$(printf '%s' "$PUBLIC_IP" | tr -d '[:space:]')
+        if ! is_ipv4 "$PUBLIC_IP"; then
+            ui_err "'$PUBLIC_IP' is not a valid IPv4 address."
+            PUBLIC_IP=${extern_ip:-$local_ip}
+            sleep 2; continue
+        fi
+        echo
+
+        # Checks (dig asks DNS itself, it skips /etc/hosts where the installer's own entries go)
+        confirm=""
+        if [[ "$PANEL_FQDN" != *.*.* ]]; then
+            ui_warn "$PANEL_FQDN is not a sub-domain (like panel.example.com)."
+            confirm=1
+        fi
+        if command -v dig > /dev/null 2>&1; then
+            dns_panel_ip=$(dig +short A "$PANEL_FQDN" 2> /dev/null | grep -E '^[0-9.]+$' | tail -1)
+        else
+            dns_panel_ip=$(getent ahostsv4 "$PANEL_FQDN" | awk 'NR == 1 {print $1}')
+        fi
+        if [[ -z "$dns_panel_ip" ]]; then
+            ui_warn "$PANEL_FQDN is not in DNS yet."
+            echo "         Add an A record for it pointing to $PUBLIC_IP (and wait for it to spread)."
+            echo "         The panel can be installed now; set the DNS up as soon as you can."
+            confirm=1
+        elif [[ "$dns_panel_ip" != "$PUBLIC_IP" ]]; then
+            ui_warn "$PANEL_FQDN points to $dns_panel_ip in DNS, not to $PUBLIC_IP."
+            echo "         The panel will not be reachable at https://$PANEL_FQDN until it does."
+            confirm=1
+        else
+            ui_ok "DNS: $PANEL_FQDN points to $PUBLIC_IP"
+        fi
+        if [[ "$PUBLIC_IP" != "$extern_ip" && "$PUBLIC_IP" != "$local_ip" ]]; then
+            ui_warn "$PUBLIC_IP is not one of this server's addresses (${extern_ip:-?} or ${local_ip:-?})."
+            confirm=1
+        fi
+        [ -z "$confirm" ] && { sleep 1; return; }
+        printf '\n  %s%s%s\n' "$C_BOLD$C_YELLOW" "There are warnings above. Use these settings anyway?" "$C_RESET"
+        read -r -e -p "  (y) yes, (n) change them, (q) quit > " yn || ui_no_input "Use these settings anyway?"
+        case $yn in
+            [Yy]*) return ;;
+            [Qq]*) echo; exit 0 ;;
+        esac
+    done
+}
+
+# A question that needs an answer: ask_required "Question" VAR [check message]
+ask_required() {
+    while true; do
+        ui_ask "$1" "${!2}" "$2"
+        printf -v "$2" '%s' "$(printf '%s' "${!2}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        if [ -z "${!2}" ]; then
+            [ -t 0 ] || ui_no_input "$1"
+            ui_warn "This one is needed."
+        elif [ -n "${3:-}" ] && ! "$3" "${!2}"; then
+            [ -t 0 ] || ui_no_input "$1"
+            ui_warn "$4"
+        else
+            return
+        fi
+    done
+}
+ask_admin() {
+    ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+    ui_heading "About you (the server's administrator)"
+    echo "  Saved in zadmin's profile. Server alerts and root's mail go to the email address."
+    ask_required "Your full name:" ADMIN_NAME
+    ask_required "Your email address (for server alerts):" ADMIN_EMAIL is_email "That is not an email address (like you@example.com)."
+    ask_required "Your phone number:" ADMIN_PHONE
+    ask_required "Your street address:" ADMIN_ADDRESS
+    ask_required "Your city, state or province:" ADMIN_PROVINCE
+    ask_required "Your postal code:" ADMIN_POSTALCODE
+    ask_required "Your country:" ADMIN_COUNTRY
+}
+
+if [[ -z "$PANEL_FQDN" ]]; then
+    # The panel's name defaults to "sentora" under this server's own domain
+    host_domain="$(hostname -d 2> /dev/null)"
+    PANEL_FQDN="sentora${host_domain:+.$host_domain}"
+    PUBLIC_IP=${extern_ip:-$local_ip}
+    while true; do
+        ask_server
+        ask_admin
+        # Everything on one screen before anything is installed
+        ui_banner "Server: $(hostname)  -  $OS $VER $ARCH"
+        ui_heading "Ready to install"
+        printf '  %-18s %s%s%s\n' "Panel" "$C_BOLD" "https://$PANEL_FQDN" "$C_RESET"
+        printf '  %-18s %s\n' "Server IP" "$PUBLIC_IP"
+        printf '  %-18s %s\n' "Time zone" "$tz"
+        printf '  %-18s %s\n' "Administrator" "$ADMIN_NAME <$ADMIN_EMAIL>"
+        printf '  %-18s %s\n' "Phone" "$ADMIN_PHONE"
+        printf '  %-18s %s\n' "Address" "$ADMIN_ADDRESS, $ADMIN_PROVINCE $ADMIN_POSTALCODE, $ADMIN_COUNTRY"
+        echo
+        printf '  %sThe installation sets up the web, mail, DNS, FTP and database servers and takes a while.%s\n' "$C_DIM" "$C_RESET"
+        printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "Install Sentora now?" "$C_RESET"
+        read -r -e -p "  (y) install, (n) change something, (q) quit > " yn || ui_no_input "Install Sentora now?"
+        case $yn in
+            [Yy]*) break ;;
+            [Qq]*) echo; exit 0 ;;
+        esac
+    done
+else
+    # -d and -i given: only the administrator's details are asked (or taken from ADMIN_*)
+    ask_admin
+fi
+
+#--- Set custom logging methods so we create a log file in the current working directory.
+# From here the screen shows the steps and a progress bar (file descriptor 3); every
+# detail goes to the log file.
+logfile=$(pwd)/$(date +%Y-%m-%d_%H.%M.%S_sentora_install.log)
+touch "$logfile"
+rm -f "$logfile.warnings"
+ui_banner "Installing Sentora at https://$PANEL_FQDN ($PUBLIC_IP)"
+printf '  %sThe details of every step go to %s%s\n\n' "$C_DIM" "$logfile" "$C_RESET"
+exec 3>&1 4>&2
+exec >> "$logfile" 2>&1
+UI_INSTALL_START=$(date +%s)
+UI_INSTALLING=1
+# nothing may stop for a question nobody sees: packages take their defaults
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+
+echo "Installer version $SENTORA_INSTALLER_VERSION"
+echo "Sentora core: Sentora-$SENTORA_CORE_VERSION"
+echo ""
+echo "Installing Sentora-$SENTORA_CORE_VERSION at https://$PANEL_FQDN and ip $PUBLIC_IP"
+echo "on server under: $OS  $VER  $ARCH"
+uname -a
+
+# Function to disable a file by appending its name with _disabled
+disable_file() {
+    mv "$1" "$1_disabled_by_sentora" &> /dev/null
+}
+
+#--- SELinux stays on (enforcing, Fedora's default): Sentora's folders get their SELinux
+# labels and the services the switches (booleans) they need, further down, after each is installed.
+# Its tools are installed with the others.
+SELINUX_ON=0
+command -v getenforce > /dev/null 2>&1 && [ "$(getenforce 2> /dev/null)" != "Disabled" ] && SELINUX_ON=1
+echo "SELinux: $(getenforce 2> /dev/null || echo 'not installed')"
+
+#--- Adapt repositories and packages sources
+ui_step "Checking the package sources"
+# Fedora's own repositories have everything Sentora uses (ProFTPD, SpamAssassin, ClamAV, fail2ban,
+# ModSecurity included): they stay as they are, nothing is added.
+dnf repolist
+
+#--- List all already installed packages (may help to debug)
+ui_step "Recording the installed packages"
+rpm -qa | sort
+
+#--- Ensures that all packages are up to date
+ui_step "Updating the system (this can take a while)"
+dnf -y -q makecache 2>&1 | tee "$logfile.apt" || true
+if grep -qi "not yet valid\|in the future" "$logfile.apt" 2> /dev/null; then
+    rm -f "$logfile.apt"
+    echo "ERROR: the package lists are dated after this server's clock ($(date '+%Y-%m-%d %H:%M %Z')): the clock is behind."
+    echo "Set the right time (timedatectl set-time 'YYYY-MM-DD HH:MM:SS', or set SENTORA_NTP_SERVERS at the"
+    echo "top of the installer to a time server this network can reach), then run the installer again."
+    exit 1
+fi
+rm -f "$logfile.apt"
+dnf -y -q upgrade
+
+#--- Install utility packages required by the installer and/or Sentora.
+ui_step "Installing the tools Sentora needs"
+# (git: bin/sentora-update-check; the SELinux tools: semanage, restorecon; chrony: the clock)
+command -v sudo &> /dev/null || install_available sudo
+install_available vim-enhanced make gcc gcc-c++ zip unzip rsync sshpass at bash-completion ca-certificates e2fsprogs git curl tar \
+    openssl policycoreutils-python-utils cronie chrony acl psmisc which hostname procps-ng
+if ! systemctl is-active --quiet chronyd 2> /dev/null; then
+    if [ -n "$SENTORA_NTP_SERVERS" ]; then
+        mkdir -p /etc/chrony.d
+        : > /etc/chrony.d/sentora.sources
+        for ntp in $SENTORA_NTP_SERVERS; do echo "server $ntp iburst" >> /etc/chrony.d/sentora.sources; done
+        grep -q "^sourcedir /etc/chrony.d" /etc/chrony.conf 2> /dev/null || echo "sourcedir /etc/chrony.d" >> /etc/chrony.conf
+    fi
+    systemctl enable --now chronyd > /dev/null 2>&1
+fi
+
+#--- Automatic security updates: dnf-automatic, security fixes only, installed every day, never
+# rebooting by itself (a kernel update waits for a restart you choose)
+install_available dnf5-plugin-automatic
+if [ -f /etc/dnf/automatic.conf ]; then
+    sed -i -e 's/^upgrade_type *=.*/upgrade_type = security/' -e 's/^apply_updates *=.*/apply_updates = yes/' \
+        -e 's/^download_updates *=.*/download_updates = yes/' -e 's/^reboot *=.*/reboot = never/' /etc/dnf/automatic.conf
+    grep -q '^upgrade_type' /etc/dnf/automatic.conf || sed -i '/^\[commands\]/a upgrade_type = security' /etc/dnf/automatic.conf
+    grep -q '^apply_updates' /etc/dnf/automatic.conf || sed -i '/^\[commands\]/a apply_updates = yes' /etc/dnf/automatic.conf
+    # a mail to root when something was installed (root's mail goes to the administrator)
+    sed -i -e 's/^emit_via *=.*/emit_via = email/' -e 's/^email_to *=.*/email_to = root/' /etc/dnf/automatic.conf
+fi
+systemctl enable --now dnf5-automatic.timer > /dev/null 2>&1
+# zsudo, mcrypt and GoAccess are compiled here: without a compiler
+# the panel can not reload Apache, so stop with a clear message
+for tool in cc make unzip zip at; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+        echo -e "\nERROR: '$tool' did not install, so the installation can not continue."
+        echo "Check that 'dnf install gcc make zip unzip at' works on this server"
+        echo "(clock wrong? repositories reachable?), then run the installer again."
+        exit 1
+    fi
+done
+
+###
+# Sentora Core Install (downloaded and unpacked at the start)
+###
+ui_step "Installing the Sentora core"
+echo "from $(release_url "$SENTORA_CORE_ZIP" "$SENTORA_CORE_REPO")"
+mkdir -p $PANEL_PATH
+mkdir -p $PANEL_PATH/panel
+mkdir -p $PANEL_DATA
+chown -R root:root $PANEL_PATH
+
+
+## Copy the core into place
+# -m: use the install time, so clock differences with the download server do not cause warnings
+tar -C "$CORE_DIR" -cf - . | tar -C "$PANEL_PATH/panel" -xmf -
+# Empty working folders the bundled apps need (git keeps no empty folders, so a core
+# zip built from the repository does not have them)
+mkdir -p "$PANEL_PATH/panel/etc/apps/matomo/tmp" "$PANEL_PATH/panel/etc/apps/phpmyadmin/libraries/cache"
+
+# Remove PHPUnit module test files and files not needed on a server
+rm -rf $PANEL_PATH/panel/modules/*/tests/
+rm -f "$PANEL_PATH/panel/composer.json" "$PANEL_PATH/panel/composer.lock"
+rm -f "$PANEL_PATH/panel/LICENSE.md" "$PANEL_PATH/panel/README.md" "$PANEL_PATH/panel/.gitignore"
+rm -rf "$PANEL_PATH/_delete_me" "$PANEL_PATH/.gitignore"
+
+#--- Set-up Sentora directories and configure permissions
+PANEL_CONF="$PANEL_PATH/configs"
+
+mkdir -p $PANEL_CONF
+mkdir -p $PANEL_PATH/docs
+mkdir -p $PANEL_DATA/backups
+
+# Apache writes the panel and per-domain logs here. The ProFTPD and BIND
+# sections used to create this folder as a side effect, so create it explicitly.
+mkdir -p $PANEL_DATA/logs/domains
+chmod 755 $PANEL_DATA/logs $PANEL_DATA/logs/domains
+
+chmod -R 777 $PANEL_PATH/
+chmod -R 777 $PANEL_DATA/
+
+# Links for compatibility with zpanel access
+ln -s $PANEL_PATH /etc/zpanel
+ln -s $PANEL_DATA /var/zpanel
+
+#--- Prepare Sentora executables
+chmod +x $PANEL_PATH/panel/bin/zppy 
+ln -s $PANEL_PATH/panel/bin/zppy /usr/bin/zppy
+
+chmod +x $PANEL_PATH/panel/bin/setso
+ln -s $PANEL_PATH/panel/bin/setso /usr/bin/setso
+
+chmod +x $PANEL_PATH/panel/bin/setzadmin
+# Checks run by hand: the bundled apps against their latest releases, and the
+# whole installation (services, jails, ports, permissions, stored passwords, TLS)
+chmod 755 $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup
+ln -sf $PANEL_PATH/panel/bin/sentora-web-probe /usr/local/sbin/sentora-web-probe
+# Notices to the panel's accounts from the shell or a script (see ctrl_notices)
+ln -sf $PANEL_PATH/panel/bin/sentora-notice /usr/local/sbin/sentora-notice
+ln -sf $PANEL_PATH/panel/bin/sentora-php-install /usr/local/sbin/sentora-php-install
+ln -sf $PANEL_PATH/panel/bin/sentora-change-domain /usr/local/sbin/sentora-change-domain
+ln -sf $PANEL_PATH/panel/bin/sentora-matomo-setup /usr/local/sbin/sentora-matomo-setup
+ln -sf $PANEL_PATH/panel/bin/sentora-migrate-import /usr/local/sbin/sentora-migrate-import
+ln -sf $PANEL_PATH/panel/bin/sentora-offsite-backup /usr/local/sbin/sentora-offsite-backup
+ln -sf $PANEL_PATH/panel/bin/sentora-panel-restore /usr/local/sbin/sentora-panel-restore
+# (its nightly job is written by the daemon from Admin > Backup Config > Off-server backup)
+ln -sf $PANEL_PATH/panel/bin/sentora-restore /usr/local/sbin/sentora-restore
+ln -sf $PANEL_PATH/panel/bin/sentora-smoke-test /usr/local/sbin/sentora-smoke-test
+ln -sf $PANEL_PATH/panel/bin/sentora-update /usr/local/sbin/sentora-update
+ln -sf $PANEL_PATH/panel/bin/sentora-update-check /usr/local/sbin/sentora-update-check
+ln -sf $PANEL_PATH/panel/bin/sentora-post-install-check /usr/local/sbin/sentora-post-install-check
+ln -s $PANEL_PATH/panel/bin/setzadmin /usr/bin/setzadmin
+
+#
+#--- Install Sentora preconfig (downloaded and unpacked at the start)
+#
+ui_step "Installing the Sentora configuration files"
+echo "from $(release_url "$SENTORA_INSTALLERS_ZIP" "$SENTORA_INSTALLERS_REPO")"
+/bin/cp -rf "$PRECONF_DIR/preconf/." $PANEL_CONF
+
+# The staged copies are no longer needed
+rm -rf "$SRC_STAGE"
+
+# Fedora's web server user and group: they come with Apache's package, installed now so the
+# panel's user can join the group (it is configured further down)
+HTTP_USER="apache"
+HTTP_GROUP="apache"
+$PACKAGE_INSTALLER httpd
+getent group "$HTTP_GROUP" > /dev/null || { echo "ERROR: Apache's group $HTTP_GROUP is missing (dnf install httpd)"; exit 1; }
+
+#--- The panel's own user
+# The panel runs as "sentora" (through its own PHP-FPM pool, set up with Apache
+# below), while every hosted site's PHP runs as the web server user. So a site
+# can not read the panel's passwords, change its code, read its sessions or use
+# zsudo. "sentora" is also in the web server group, so the files it makes in
+# hosting folders stay usable by the sites and FTP.
+PANEL_USER="sentora"
+getent group "$PANEL_USER" > /dev/null || groupadd -r "$PANEL_USER"
+id -u "$PANEL_USER" > /dev/null 2>&1 || useradd -r -g "$PANEL_USER" -M -d "$PANEL_PATH/panel" -s /usr/sbin/nologin -c "Sentora control panel" "$PANEL_USER"
+usermod -a -G "$PANEL_USER,$HTTP_GROUP" "$PANEL_USER"
+mkdir -p /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/tmp/phpmyadmin /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
+chown -R "$PANEL_USER:$PANEL_USER" /var/lib/sentora
+chmod 755 /var/lib/sentora
+# sentora-update: this release is the one installed, and updates come from the same place
+echo "$CORE_SUM ${CORE_TAG:+$CORE_TAG, }$(date '+%Y-%m-%d %H:%M') by the installer" > /var/lib/sentora/last-update
+{
+    echo "# sentora-update settings (written by the installer)"
+    echo "REPO=\"$SENTORA_CORE_REPO\""
+    echo "TAG=\"$SENTORA_RELEASE_TAG\""
+    echo "URL=\"$SENTORA_DOWNLOAD_URL\""
+} > /etc/sentora/update.conf
+chmod 644 /etc/sentora/update.conf
+chmod 700 /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
+
+#--- Prepare zsudo (the panel and daemon use it to reload Apache and run root tasks)
+# zsudo only runs a fixed list of actions (see bin/zsudo.c in the core); only root and
+# the panel's user may execute it - not the hosted sites. Its source is part of the core,
+# so sentora-update builds it again when an update changes it (it remembers the source's
+# SHA-256 in /etc/sentora/zsudo.sha256)
+if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c; then
+    chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo
+    chmod 4750 $PANEL_PATH/panel/bin/zsudo
+    sha256sum $PANEL_PATH/panel/bin/zsudo.c | cut -d' ' -f1 > /etc/sentora/zsudo.sha256
+else
+    echo -e "\nERROR: zsudo did not compile. Sentora will not be able to reload Apache."
+    echo "Check $PANEL_PATH/panel/bin/zsudo.c and build-essential, then run:"
+    echo "  cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c && chown root:$PANEL_USER $PANEL_PATH/panel/bin/zsudo && chmod 4750 $PANEL_PATH/panel/bin/zsudo"
+fi
+
+#--- Resolv.conf protect
+# Skipped when it is a symlink (systemd-resolved): chattr does not work on it
+[ -L /etc/resolv.conf ] || chattr -f +i /etc/resolv.conf
+
+#--- Prepare hostname
+old_hostname=$(cat /etc/hostname)
+# In file hostname
+echo "$PANEL_FQDN" > /etc/hostname
+
+# In file hosts: the old name becomes the panel's name where it is a whole name on a
+# line (a plain text replace also changed it inside "<old name>.example.com"), and
+# a 127.0.1.1 line for the old name goes
+hosts_has() {   # is $1 a name on an active line of /etc/hosts?
+    awk -v n="$1" '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == n) f = 1 } END { exit !f }' /etc/hosts
+}
+if [ -n "$old_hostname" ] && [ "$old_hostname" != "$PANEL_FQDN" ] && [ "$old_hostname" != "localhost" ]; then
+    awk -v o="$old_hostname" -v n="$PANEL_FQDN" '
+        $1 == "127.0.1.1" && NF == 2 && $2 == o { next }
+        $1 !~ /^#/ {
+            has = 0; for (i = 2; i <= NF; i++) if ($i == n) has = 1
+            line = $1; for (i = 2; i <= NF; i++) if ($i != o) line = line " " $i; else if (!has) { line = line " " n; has = 1 }
+            print line; next
+        }
+        { print }' /etc/hosts > /etc/hosts.sentora-new && cat /etc/hosts.sentora-new > /etc/hosts
+    rm -f /etc/hosts.sentora-new
+fi
+
+# For current session
+hostname "$PANEL_FQDN"
+
+#--- Some functions used many times below
+# Random password generator function
+passwordgen() {
+    l=$1
+    [ "$l" == "" ] && l=16
+    tr -dc A-Za-z0-9 < /dev/urandom | head -c "${l}" | xargs
+}
+
+# Add first parameter in hosts file as local IP domain
+add_local_domain() {
+    hosts_has "$1" || echo "127.0.0.1 $1" >> /etc/hosts
+}
+#-----------------------------------------------------------
+# Install all softwares and dependencies required by Sentora.
+
+# Disable the DPKG prompts before we run the software install to enable fully automated install.
+export DEBIAN_FRONTEND=noninteractive
+
+##
+#--- MariaDB (Fedora's MySQL server; the panel calls it MySQL)
+##
+ui_step "Installing MariaDB"
+$PACKAGE_INSTALLER "$DB_PCKG"
+# Sentora's server settings go in a file of their own, read after Fedora's (mariadb-server.cnf)
+MY_CNF_PATH="/etc/my.cnf.d/90-sentora.cnf"
+DB_SERVICE="mariadb"
+
+systemctl enable "$DB_SERVICE"
+systemctl start "$DB_SERVICE"
+
+# The root password (mysql_native_password, MariaDB's normal method, which PHP and every mail
+# and FTP program here can use). Until now root logs in without a password, as Fedora sets it up.
+mysqlpassword=$(passwordgen)
+# (given on its input, so the password never shows in the process list)
+mysql -u root <<< "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mysqlpassword'"
+# From here root's commands read the password from a file only root can read, not from the
+# command line (where every process list shows it); the file goes when the installer ends
+MYSQL_ROOT_CNF=$(mktemp /root/.sentora-install-mysql.XXXXXX)
+printf '[client]\nuser=root\npassword="%s"\n' "$mysqlpassword" > "$MYSQL_ROOT_CNF"
+sqlroot() { mysql --defaults-extra-file="$MYSQL_ROOT_CNF" "$@"; }
+# a text for an SQL string between single quotes
+sql_str() { printf '%s' "$1" | sed -e "s/\\\\/\\\\\\\\/g" -e "s/'/''/g"; }
+
+# small cleaning of mysql access (no anonymous users or test database, checked anyway);
+# mariadb.sys and mysql are MariaDB's own locked accounts
+sqlroot -e "DELETE FROM mysql.global_priv WHERE User='root' AND Host != 'localhost'";
+sqlroot -e "DELETE FROM mysql.global_priv WHERE User=''";
+sqlroot -e "FLUSH PRIVILEGES";
+sqlroot -e "DROP DATABASE IF EXISTS test";
+
+# MariaDB listens on this server only (set explicitly, so a changed mariadb-server.cnf can not
+# open it), and SELECT ... INTO OUTFILE only writes to /var/tmp
+cat > "$MY_CNF_PATH" <<'EOF_MY'
+# Sentora: read after Fedora's mariadb-server.cnf, so these win
+[mysqld]
+bind-address = 127.0.0.1
+secure-file-priv = /var/tmp
+EOF_MY
+
+# setup sentora access and core database
+sed -i "s|YOUR_ROOT_MYSQL_PASSWORD|$mysqlpassword|" $PANEL_PATH/panel/cnf/db.php
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_core.sql
+# Snuffleupagus/Suhosin is not used, remove its settings from the panel
+sqlroot -e "DELETE FROM sentora_core.x_settings WHERE so_name_vc IN ('use_suhosin','suhosin_value')"
+systemctl restart "$DB_SERVICE"
+
+##
+#--- TLS certificate (self-signed for now, see $PANEL_CONF/ssl/README to replace it)
+##
+ui_step "Creating a self-signed TLS certificate"
+SSL_DIR="$PANEL_CONF/ssl"
+mkdir -p "$SSL_DIR"
+SSL_SAN="DNS:$PANEL_FQDN"
+[[ "$PUBLIC_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && SSL_SAN="$SSL_SAN,IP:$PUBLIC_IP"
+# The server's own addresses too, so the panel can be opened by IP
+for LOCAL_IP in $(hostname -I 2> /dev/null); do
+    [[ "$LOCAL_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$LOCAL_IP" != "$PUBLIC_IP" ] && SSL_SAN="$SSL_SAN,IP:$LOCAL_IP"
+done
+if [ ! -s "$SSL_DIR/sentora.crt" ]; then
+    openssl req -x509 -newkey rsa:3072 -sha256 -days 3650 -nodes \
+        -keyout "$SSL_DIR/sentora.key" -out "$SSL_DIR/sentora.crt" \
+        -subj "/CN=$PANEL_FQDN" -addext "subjectAltName=$SSL_SAN" \
+        -addext "basicConstraints=critical,CA:FALSE" -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+        -addext "extendedKeyUsage=serverAuth" > /dev/null 2>&1
+fi
+# ProFTPD takes intermediate certificates from a separate file. A self-signed
+# certificate has none, so it starts as a copy; Sencrypt replaces all three files.
+[ -s "$SSL_DIR/sentora-chain.crt" ] || cp "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
+chown root:root "$SSL_DIR/sentora.key" "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
+chmod 600 "$SSL_DIR/sentora.key"
+chmod 644 "$SSL_DIR/sentora.crt" "$SSL_DIR/sentora-chain.crt"
+
+# Serve the panel (and webmail) over HTTPS; the daemon adds an http:// redirect
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='443' WHERE so_name_vc='sentora_port'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='SSLEngine On\nSSLCertificateFile $SSL_DIR/sentora.crt\nSSLCertificateKeyFile $SSL_DIR/sentora.key' WHERE so_name_vc='panel_ssl_tx'"
+
+##
+#--- Postfix
+##
+ui_step "Installing Postfix"
+# Give root a mail alias before Postfix is installed, so its setup does not warn
+# "/etc/aliases exists, but does not have a root alias"
+grep -q "^postmaster:" /etc/aliases 2> /dev/null || echo "postmaster: root" >> /etc/aliases
+grep -q "^root:" /etc/aliases 2> /dev/null || echo "root: $ADMIN_EMAIL" >> /etc/aliases
+$PACKAGE_INSTALLER postfix postfix-mysql s-nail
+# (Fedora keeps Postfix's and Dovecot's helper programs in /usr/libexec)
+USR_LIB_PATH="/usr/libexec"
+
+postfixpassword=$(passwordgen);
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_postfix.sql
+
+# Add User for Postfix DB
+sqlroot -e "CREATE USER postfix@localhost IDENTIFIED BY '$postfixpassword';";
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_postfix .* TO 'postfix'@'localhost';";
+
+mkdir -p $PANEL_DATA/vmail
+useradd -r -g mail -d $PANEL_DATA/vmail -s /sbin/nologin -c "Virtual maildir" vmail
+chown -R vmail:mail $PANEL_DATA/vmail
+chmod -R 770 $PANEL_DATA/vmail
+
+add_local_domain "$PANEL_FQDN"
+
+rm -rf /etc/postfix/main.cf /etc/postfix/master.cf
+ln -s $PANEL_CONF/postfix/master.cf /etc/postfix/master.cf
+ln -s $PANEL_CONF/postfix/main.cf /etc/postfix/main.cf
+
+sed -i "s|!POSTFIX_PASSWORD!|$postfixpassword|" $PANEL_CONF/postfix/*.cf
+sed -i "s|!PANEL_FQDN!|$PANEL_FQDN|" $PANEL_CONF/postfix/main.cf
+sed -i "s|!USR_LIB!|$USR_LIB_PATH|" $PANEL_CONF/postfix/master.cf
+sed -i "s|!USR_LIB!|$USR_LIB_PATH|" $PANEL_CONF/postfix/main.cf
+sed -i "s|!SERVER_IP!|$PUBLIC_IP|" $PANEL_CONF/postfix/main.cf
+
+VMAIL_UID=$(id -u vmail)
+MAIL_GID=$(sed -nr "s/^mail:x:([0-9]+):.*/\1/p" /etc/group)
+sed -i "s|!POS_UID!|$VMAIL_UID|g" $PANEL_CONF/postfix/main.cf
+sed -i "s|!POS_GID!|$MAIL_GID|g" $PANEL_CONF/postfix/main.cf
+
+# remove unused directives that issue warnings
+sed -i '/virtual_mailbox_limit_maps/d' $PANEL_CONF/postfix/main.cf
+sed -i '/smtpd_bind_address/d' $PANEL_CONF/postfix/master.cf
+
+
+# (root's mail - cron, logwatch... - goes to the admin email: the alias was added above)
+newaliases
+systemctl enable postfix
+
+##
+#--- Dovecot 2.4 (includes Sieve): Sentora's 2.4 settings, as on Debian and Ubuntu
+##
+ui_step "Installing Dovecot"
+install_available dovecot dovecot-mysql dovecot-pigeonhole
+sed -i "s|#first_valid_uid = ?|first_valid_uid = $VMAIL_UID\nlast_valid_uid = $VMAIL_UID\n\nfirst_valid_gid = $MAIL_GID\nlast_valid_gid = $MAIL_GID|" $PANEL_CONF/dovecot2/dovecot.conf
+
+mkdir -p $PANEL_DATA/sieve
+chown -R vmail:mail $PANEL_DATA/sieve
+ln -sf $PANEL_CONF/dovecot2/globalfilter.sieve $PANEL_DATA/sieve/globalfilter.sieve
+
+rm -f /etc/dovecot/dovecot.conf
+ln -s $PANEL_CONF/dovecot2/dovecot.conf /etc/dovecot/dovecot.conf
+sed -i "s|!POSTMASTER_EMAIL!|postmaster@$PANEL_FQDN|" $PANEL_CONF/dovecot2/dovecot.conf
+sed -i "s|!POSTFIX_PASSWORD!|$postfixpassword|" $PANEL_CONF/dovecot2/dovecot-mysql.conf
+sed -i "s|!DOV_UID!|$VMAIL_UID|g" $PANEL_CONF/dovecot2/dovecot-mysql.conf
+sed -i "s|!DOV_GID!|$MAIL_GID|g" $PANEL_CONF/dovecot2/dovecot-mysql.conf
+# The SQL file holds the postfix password: root and the mail group only
+# (dovecot-lda runs as vmail:mail when Postfix delivers and must read it)
+chown root:mail $PANEL_CONF/dovecot2/dovecot-mysql.conf
+chmod 640 $PANEL_CONF/dovecot2/dovecot-mysql.conf
+
+touch /var/log/dovecot.log /var/log/dovecot-info.log /var/log/dovecot-debug.log
+chown vmail:mail /var/log/dovecot*
+chmod 660 /var/log/dovecot*
+
+if doveconf -n > /dev/null; then
+    systemctl enable dovecot
+    systemctl restart dovecot
+else
+    echo -e "\nWARNING: the Dovecot configuration did not pass doveconf, Dovecot was not started."
+fi
+systemctl restart postfix
+
+##
+#--- SpamAssassin and ClamAV (Admin > SpamAV Admin, Mail > SpamAV)
+##
+# Postfix hands each message to clamav-milter and spamass-milter; the Sentora daemon
+# writes their settings and starts what is switched on (dryden/sys/spamav.class.php).
+ui_step "Installing SpamAssassin and ClamAV"
+# (not sa-compile: compiling the rules is only a small speed-up, and its package setup
+# compiles them at once, which takes minutes and fails on a server without rules yet)
+install_available spamassassin spamass-milter spamass-milter-postfix perl-DBD-MySQL clamav clamd clamav-milter clamav-freshclam
+# SpamAssassin's children run as their own user (Fedora has none for it)
+id spamd > /dev/null 2>&1 || useradd -r -d /var/lib/spamassassin -s /sbin/nologin -c "SpamAssassin" spamd
+mkdir -p /var/lib/spamassassin; chown spamd:spamd /var/lib/spamassassin
+for u in clamilt sa-milt; do
+    id "$u" > /dev/null 2>&1 && usermod -aG postfix "$u"
+done
+# (ClamAV's socket folder, /run/clamd.scan, is for the group virusgroup)
+id clamilt > /dev/null 2>&1 && getent group virusgroup > /dev/null && usermod -aG virusgroup clamilt
+# The mail connections' sockets are where Fedora's packages and SELinux rules put them:
+# /run/spamass-milter/postfix (spamass-milter-postfix, group postfix) and /run/clamav-milter
+# (made at each boot; Sentora's daemon gives it the postfix group, so Postfix can reach the socket)
+printf 'd /run/clamav-milter 0710 clamilt postfix\n' > /etc/tmpfiles.d/clamav-milter.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/clamav-milter.conf /usr/lib/tmpfiles.d/spamass-milter.conf \
+    /usr/lib/tmpfiles.d/spamass-milter-postfix.conf > /dev/null 2>&1
+mkdir -p $PANEL_DATA/sieve/spamav /var/log/clamav
+chown vmail:mail $PANEL_DATA/sieve/spamav; chmod 750 $PANEL_DATA/sieve/spamav
+chown clamscan:clamscan /var/log/clamav 2> /dev/null; chmod 775 /var/log/clamav
+# The packages start with their own settings: stopped until the daemon has written Sentora's
+systemctl stop clamav-milter clamd@scan spamass-milter spamassassin > /dev/null 2>&1
+MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
+if [ "${MEM_MB:-0}" -lt 1900 ]; then
+    echo " ClamAV left off: it needs about 1.5 GB of memory for its signatures, this server has ${MEM_MB} MB."
+    echo " Switch it on in Admin > SpamAV Admin when the server has more memory."
+    systemctl disable --now clamav-freshclam > /dev/null 2>&1
+else
+    # the first virus signatures, in the background (scanning starts when they are in)
+    systemctl enable --now clamav-freshclam > /dev/null 2>&1
+fi
+
+##
+#--- Apache server
+##
+ui_step "Installing and configuring Apache"
+$PACKAGE_INSTALLER httpd mod_ssl mod_http2 mod_lua openssl
+HTTP_CONF_PATH="/etc/httpd/conf/httpd.conf"
+HTTP_SERVICE="httpd"
+# (mod_rewrite, headers, lua, ssl, status, proxy_fcgi: installed and on with the packages above)
+# ModSecurity (Apache's web application firewall, from Fedora's repositories): installed
+# switched off; the Web Hardening add-on (Repo Browser) switches it on with Sentora's copy of the OWASP
+# rules. Its own settings files stay empty (a package update keeps an emptied file).
+$PACKAGE_INSTALLER mod_security > /dev/null 2>&1 \
+    || echo "WARNING: ModSecurity did not install (dnf install mod_security); the Web Hardening add-on needs it"
+MODSEC_OFF='for f in /etc/httpd/conf.modules.d/*mod_security*.conf /etc/httpd/conf.d/mod_security.conf; do if [ -s "$f" ]; then mv "$f" "$f.disabled-by-sentora"; : > "$f"; fi; done; true'
+sh -c "$MODSEC_OFF"
+mkdir -p "$PANEL_CONF/apache/modsecurity.d"
+
+if ! grep -q "Include $PANEL_CONF/apache/httpd.conf" "$HTTP_CONF_PATH"; then
+    echo "Include $PANEL_CONF/apache/httpd.conf" >> "$HTTP_CONF_PATH";
+fi
+add_local_domain "$(hostname)"
+
+# Create root directory for public HTTP docs
+mkdir -p $PANEL_DATA/hostdata/zadmin/public_html
+chown -R $HTTP_USER:$HTTP_GROUP $PANEL_DATA/hostdata/
+chmod -R 770 $PANEL_DATA/hostdata/
+
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='httpd_exe'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$HTTP_SERVICE' WHERE so_name_vc='apache_sn'"
+
+#Set keepalive on (default is off)
+sed -i "s|^KeepAlive Off|KeepAlive On|" "$HTTP_CONF_PATH"
+
+# Sentora's vhosts file says which ports Apache listens on: Fedora's own Listen goes, and so do
+# its stock pages (a welcome page, the test SSL site on 443 with a made-up certificate, user
+# folders) and its PHP handler for every site (each site has its own PHP pool here)
+sed -i "s|^Listen 80|# Listen 80   (Sentora: the ports are set in Sentora's vhosts file)|" "$HTTP_CONF_PATH"
+for f in welcome.conf ssl.conf userdir.conf autoindex.conf php.conf; do
+    [ -f "/etc/httpd/conf.d/$f" ] && mv "/etc/httpd/conf.d/$f" "/etc/httpd/conf.d/$f.disabled-by-sentora"
+    # (an empty file in its place: a package update would bring the stock one back otherwise)
+    : > "/etc/httpd/conf.d/$f"
+done
+# the SSL module's own settings that ssl.conf held (session cache, entropy)
+cat > /etc/httpd/conf.d/00-sentora-ssl.conf <<'EOF_SSL'
+# Sentora: the parts of Fedora's ssl.conf that are not a site (the test site on 443 is gone)
+SSLPassPhraseDialog exec:/usr/libexec/httpd-ssl-pass-dialog
+SSLSessionCache         shmcb:/run/httpd/sslcache(512000)
+SSLSessionCacheTimeout  300
+SSLCryptoDevice builtin
+EOF_SSL
+# the event engine (no mod_php here: PHP runs in PHP-FPM)
+if [ -f /etc/httpd/conf.modules.d/00-mpm.conf ]; then
+    sed -i -e 's|^LoadModule mpm_prefork_module|#LoadModule mpm_prefork_module|' -e 's|^LoadModule mpm_worker_module|#LoadModule mpm_worker_module|'         -e 's|^#LoadModule mpm_event_module|LoadModule mpm_event_module|' /etc/httpd/conf.modules.d/00-mpm.conf
+fi
+
+# adjustments for apache 2.4
+# Order deny,allow / Deny from all   ->  Require all denied
+sed -i 's|Order deny,allow|Require all denied|I'  $PANEL_CONF/apache/httpd.conf
+sed -i '/Deny from all/d' $PANEL_CONF/apache/httpd.conf
+
+# Order allow,deny / Allow from all  ->  Require all granted
+sed -i 's|Order allow,deny|Require all granted|I' $PANEL_CONF/apache/httpd-vhosts.conf
+sed -i '/Allow from all/d' $PANEL_CONF/apache/httpd-vhosts.conf
+
+sed -i 's|Order allow,deny|Require all granted|I'  $PANEL_PATH/panel/modules/apache_admin/hooks/OnDaemonRun.hook.php
+sed -i '/Allow from all/d' $PANEL_PATH/panel/modules/apache_admin/hooks/OnDaemonRun.hook.php
+
+# Remove NameVirtualHost that is now without effect and generate warning.
+sed -i '/^NameVirtualHost/d' $PANEL_CONF/apache/httpd-vhosts.conf
+sed -i '/# NameVirtualHost is/ {N;N;N;N;N;d}' $PANEL_PATH/panel/modules/apache_admin/hooks/OnDaemonRun.hook.php
+
+# Options must have ALL (or none) +/- prefix, disable listing directories
+sed -i 's| FollowSymLinks [-]Indexes| +FollowSymLinks -Indexes|' $PANEL_PATH/panel/modules/apache_admin/hooks/OnDaemonRun.hook.php
+
+##
+#--- PHP (Fedora's own version, 8.3: the panel's, and the default for hosted sites)
+##
+ui_step "Installing PHP"
+# (php-ldap: sites that log users in against Active Directory, such as Snipe-IT; php-process: posix)
+install_available php php-fpm php-common php-bcmath php-cli php-mysqlnd php-gd php-pear php-pecl-imagick php-xml php-intl \
+    php-mbstring php-devel php-pecl-zip php-ldap php-process php-opcache php-soap php-sodium php-gmp
+PHPVER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')
+echo "Detected PHP: $PHPVER"
+if [[ "$PHPVER" != 8.* ]]; then
+    echo "ERROR: PHP 8 did not install (found: '${PHPVER:-none}'), so the installation can not continue."
+    exit 1
+fi
+PHP_INI_PATH="/etc/php.ini"
+
+# mcrypt (old sites still call it) from PECL, when the system still has libmcrypt
+# (Fedora has no libmcrypt: then this is skipped quietly)
+dnf -q repoquery --latest-limit=1 libmcrypt-devel 2> /dev/null | grep -q . && install_available libmcrypt-devel
+mkdir -p /tmp/pear/cache
+if inst libmcrypt-devel; then
+    pecl channel-update pecl.php.net
+    echo "Building PHP-mcrypt"
+    echo | pecl install mcrypt
+else
+    echo "libmcrypt-devel is not available: no PHP-mcrypt"
+fi
+PHP_EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
+if [ -f "$PHP_EXT_DIR/mcrypt.so" ]; then
+    echo 'extension=mcrypt.so' > /etc/php.d/40-mcrypt.ini
+else
+    echo "PHP-mcrypt was not built for PHP $PHPVER, it is not switched on."
+fi
+
+ui_step "Configuring PHP"
+sed -i "s|memory_limit = .*|memory_limit = 256M|g" $PHP_INI_PATH
+
+# Setup php upload dir
+mkdir -p $PANEL_DATA/temp
+chmod 1777 $PANEL_DATA/temp/
+chown -R $HTTP_USER:$HTTP_GROUP $PANEL_DATA/temp/
+
+# Setup php session save directory
+mkdir "$PANEL_DATA/sessions"
+chown $HTTP_USER:$HTTP_GROUP "$PANEL_DATA/sessions"
+chmod 733 "$PANEL_DATA/sessions"
+chmod +t "$PANEL_DATA/sessions"
+
+sed -i "s|;session.save_path = .*|session.save_path = \"$PANEL_DATA/sessions\"|g" $PHP_INI_PATH
+
+sed -i "/php_value/d" $PHP_INI_PATH
+echo "session.save_path = $PANEL_DATA/sessions;" >> $PHP_INI_PATH
+
+# setup timezone and upload temp dir
+sed -i "s|;date.timezone =|date.timezone = $tz|g" $PHP_INI_PATH
+sed -i "s|;upload_tmp_dir =|upload_tmp_dir = $PANEL_DATA/temp/|g" $PHP_INI_PATH
+
+# Disable php signature in headers to hide it from hackers
+sed -i 's|expose_php = On|expose_php = Off|g' $PHP_INI_PATH
+
+# PCRE's JIT compiler is off, as on Ubuntu (where Apache's sandbox blocks it): the same
+# behaviour for the sites on every system.
+if grep -q "^;*pcre.jit" $PHP_INI_PATH; then
+    sed -i "s|^;*pcre.jit *=.*|pcre.jit = 0|" $PHP_INI_PATH
+else
+    echo "pcre.jit = 0" >> $PHP_INI_PATH
+fi
+
+# The panel lives in /etc/sentora and writes its template cache and settings there, and reads
+# /proc for uptime and system info: kept so should a package sandbox Apache later; and the umask
+# the sites need (files they make are group-writable, so the panel's File Manager can edit them)
+mkdir -p /etc/systemd/system/httpd.service.d
+cat > /etc/systemd/system/httpd.service.d/sentora.conf <<EOF_UNIT
+[Service]
+ReadWritePaths=$PANEL_PATH
+ProtectProc=default
+ProcSubset=all
+UMask=0002
+EOF_UNIT
+systemctl daemon-reload
+
+#--- Every hosted account runs its PHP as its own Linux user (web<account id>), in
+# its own PHP-FPM pool that the daemon creates; Apache does not run PHP itself
+mkdir -p /var/lib/sentora/accounts
+chmod 700 /var/lib/sentora/accounts
+
+#--- The panel's PHP-FPM pool (PHP $PHPVER, runs as $PANEL_USER)
+ui_step "Setting up the panel's own PHP-FPM pool"
+# Only the panel's pool: no general-purpose pool for the web server user
+[ -f /etc/php-fpm.d/www.conf ] && mv /etc/php-fpm.d/www.conf /etc/php-fpm.d/www.conf.disabled
+: > /etc/php-fpm.d/www.conf   # (empty: a package update would bring the stock one back otherwise)
+mkdir -p /run/php-fpm
+cat > /etc/php-fpm.d/sentora.conf <<EOF_POOL
+; The Sentora control panel (and phpMyAdmin, webmail) - never the hosted sites
+[sentora]
+user = $PANEL_USER
+group = $HTTP_GROUP
+listen = /run/php-fpm/sentora-panel.sock
+listen.owner = $HTTP_USER
+listen.group = $HTTP_GROUP
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 30
+pm.process_idle_timeout = 60s
+pm.max_requests = 500
+request_terminate_timeout = 3600
+security.limit_extensions = .php .phtml
+; Sessions and uploads in folders only the panel can read
+php_admin_value[session.save_path] = /var/lib/sentora/sessions
+php_admin_value[upload_tmp_dir] = /var/lib/sentora/tmp
+php_admin_value[sys_temp_dir] = /var/lib/sentora/tmp
+php_admin_value[error_log] = $PANEL_DATA/logs/sentora-php.log
+; Only the panel's own scripts may run in this pool (a hosted site's .htaccess could point at it)
+php_admin_value[auto_prepend_file] = $PANEL_PATH/panel/inc/fpm_guard.php
+EOF_POOL
+touch "$PANEL_DATA/logs/sentora-php.log"; chown "$PANEL_USER" "$PANEL_DATA/logs/sentora-php.log"
+mkdir -p /etc/systemd/system/php-fpm.service.d
+cat > /etc/systemd/system/php-fpm.service.d/sentora.conf <<EOF_UNIT
+[Service]
+# Files the panel makes in hosting folders are group-writable for the sites and FTP
+UMask=0002
+EOF_UNIT
+systemctl daemon-reload
+systemctl enable php-fpm
+systemctl restart php-fpm || echo -e "WARNING: php-fpm (the panel's PHP) did not start."
+
+# Register apache(+php) services for autostart and start it
+systemctl enable "$HTTP_SERVICE"
+systemctl start "$HTTP_SERVICE"
+
+##
+#--- Extra PHP versions for hosted domains (PHP-FPM)
+##
+# The panel and every domain without a choice keep using Fedora's PHP 8.3
+# (PHP-FPM). These versions are built for Fedora and hosted next
+# to the other installer files; each runs as its own PHP-FPM service and is
+# enabled or disabled in the panel's PHP Versions module.
+PHP_EXTRA_VERSIONS="8.2 8.3 8.4"
+# Only for moving websites from an old Sentora 2.0.2 server: installed switched OFF (no security
+# fixes since 2019), switched on in PHP Versions for a move. Its bundle carries its own OpenSSL 1.1.
+PHP_MIGRATION_VERSIONS="7.1"
+ui_step "Installing extra PHP versions: $PHP_EXTRA_VERSIONS (and $PHP_MIGRATION_VERSIONS, switched off)"
+# Libraries the builds link against (all part of Fedora)
+PHP_BUNDLE_LIBS="libxml2 libcurl oniguruma libzip libicu libsodium libargon2 libxslt libwebp libjpeg-turbo freetype libpng gmp sqlite-libs openssl-libs openldap gnutls"
+install_available $PHP_BUNDLE_LIBS
+PHP_STAGE=$(mktemp -d /tmp/sentora-php.XXXXXX)
+PHP_INSTALLED=""
+PHP_MIGRATION_INSTALLED=""
+for PV in $PHP_EXTRA_VERSIONS $PHP_MIGRATION_VERSIONS; do
+    PHP_TAR="sentora-php-$PV-fedora45-amd64.tar.gz"
+    if ! download_file "$PHP_TAR" "$PHP_STAGE/$PHP_TAR" "$SENTORA_INSTALLERS_REPO"; then
+        echo "WARNING: PHP $PV skipped: $PHP_TAR could not be downloaded"
+        continue
+    fi
+    # The archive holds opt/sentora-php/<version>/
+    # -m: use the install time, the build machine clock may differ from this server
+    tar -xzmf "$PHP_STAGE/$PHP_TAR" -C /
+    PP="/opt/sentora-php/$PV"
+    if ! "$PP/sbin/php-fpm" -v > /dev/null 2>&1; then
+        echo -e "WARNING: PHP $PV does not run on this server, skipped."
+        "$PP/sbin/php-fpm" -v 2>&1 | head -3
+        continue
+    fi
+
+    # php.ini: PHP's production defaults with the same changes as the system PHP
+    mkdir -p "$PP/etc/conf.d" "$PP/etc/php-fpm.d"
+    cp "$PP/lib/php.ini-production" "$PP/etc/php.ini"
+    sed -i "s|^memory_limit = .*|memory_limit = 256M|" "$PP/etc/php.ini"
+    sed -i "s|^expose_php = .*|expose_php = Off|" "$PP/etc/php.ini"
+    sed -i "s|^;date.timezone =.*|date.timezone = $tz|" "$PP/etc/php.ini"
+    sed -i "s|^;upload_tmp_dir =.*|upload_tmp_dir = $PANEL_DATA/temp/|" "$PP/etc/php.ini"
+    # These builds do not know Fedora's MariaDB socket path, so tell them
+    sed -i "s|^mysqli.default_socket =.*|mysqli.default_socket = /var/lib/mysql/mysql.sock|" "$PP/etc/php.ini"
+    sed -i "s|^pdo_mysql.default_socket *=.*|pdo_mysql.default_socket = /var/lib/mysql/mysql.sock|" "$PP/etc/php.ini"
+    # (from PHP 8.5 opcache is part of PHP itself, with no opcache.so to load)
+    if [ -f "$("$PP/bin/php-config" --extension-dir)/opcache.so" ]; then echo "zend_extension=opcache.so" > "$PP/etc/conf.d/10-opcache.ini"; else rm -f "$PP/etc/conf.d/10-opcache.ini"; fi
+    # add-on extensions the bundle brings (PHP 7.1: apcu, redis, memcached, imagick, imap): only those that load
+    [ -x "$PP/bin/sentora-php-addons" ] && "$PP/bin/sentora-php-addons"
+
+    cat > "$PP/etc/php-fpm.conf" <<EOF_FPM
+[global]
+pid = /run/sentora-php/php$PV-fpm.pid
+error_log = $PANEL_DATA/logs/php$PV-fpm.log
+include = $PP/etc/php-fpm.d/*.conf
+EOF_FPM
+    # Accounts get their own pools here (web<id>.conf, written by the daemon).
+    # PHP-FPM needs at least one pool to start, so a version nobody uses yet keeps
+    # this idle one: no one can connect to it (root-only socket), and with
+    # processes started on demand it costs only the small master process.
+    cat > "$PP/etc/php-fpm.d/00-idle.conf" <<EOF_POOL
+[sentora-idle]
+user = nobody
+group = nobody
+listen = /run/sentora-php/php$PV-idle.sock
+listen.owner = root
+listen.group = root
+listen.mode = 0600
+pm = ondemand
+pm.max_children = 1
+EOF_POOL
+
+    cat > "/etc/systemd/system/sentora-php$PV-fpm.service" <<EOF_UNIT
+[Unit]
+Description=PHP $PV FastCGI Process Manager for Sentora hosted domains
+After=network.target
+
+[Service]
+Type=simple
+RuntimeDirectory=sentora-php
+RuntimeDirectoryPreserve=yes
+ExecStartPre=$PP/sbin/php-fpm --test --fpm-config $PP/etc/php-fpm.conf
+ExecStart=$PP/sbin/php-fpm --nodaemonize --fpm-config $PP/etc/php-fpm.conf
+ExecReload=/bin/kill -USR2 \$MAINPID
+Restart=on-failure
+PrivateTmp=true
+# as the system PHP: files the sites make are group-writable for the panel's File Manager
+UMask=0002
+
+[Install]
+WantedBy=multi-user.target
+EOF_UNIT
+    touch "$PANEL_DATA/logs/php$PV-fpm.log"
+    case " $PHP_MIGRATION_VERSIONS " in
+        *" $PV "*) PHP_MIGRATION_INSTALLED="$PHP_MIGRATION_INSTALLED $PV" ;;   # stays off and stopped
+        *) PHP_INSTALLED="$PHP_INSTALLED,$PV" ;;
+    esac
+done
+rm -rf "$PHP_STAGE" "$REL_DIR"
+systemctl daemon-reload
+PHP_INSTALLED="${PHP_INSTALLED#,}"
+for PV in ${PHP_INSTALLED//,/ }; do
+    systemctl enable --now "sentora-php$PV-fpm" > /dev/null 2>&1 || echo -e "WARNING: sentora-php$PV-fpm did not start."
+done
+# All installed versions start enabled; the PHP Versions module can switch them off
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$PHP_INSTALLED' WHERE so_name_vc='php_versions_enabled'"
+# The web service API key: this server's own random one (the one in the database template
+# is public, and with it alone the API resets passwords and creates clients)
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$(openssl rand -hex 16)' WHERE so_name_vc='apikey'"
+echo "Extra PHP versions installed: ${PHP_INSTALLED:-none}${PHP_MIGRATION_INSTALLED:+ (and, switched off, for moving old sites:$PHP_MIGRATION_INSTALLED)}"
+
+##
+#--- ProFTPd
+##
+ui_step "Installing ProFTPD"
+# (Fedora's ProFTPD has mod_tls built in; proftpd-mysql: its MySQL login)
+install_available proftpd proftpd-mysql proftpd-utils
+FTP_CONF_PATH='/etc/proftpd.conf'
+sed -i "s|^Group\(\s\+\)nogroup|Group\1nobody|" $PANEL_CONF/proftpd/proftpd-mysql.conf
+
+# Create and init proftpd database
+sqlroot < $PANEL_CONF/sentora-install/sql/sentora_proftpd.sql
+
+# Create and configure mysql password for proftpd
+proftpdpassword=$(passwordgen);
+sed -i "s|!SQL_PASSWORD!|$proftpdpassword|" $PANEL_CONF/proftpd/proftpd-mysql.conf
+
+# Add User for Proftpd DB
+sqlroot -e "CREATE USER proftpd@localhost IDENTIFIED BY '$proftpdpassword';";
+# Grant ALL PRIVILEGES to Proftpd User
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_proftpd .* TO 'proftpd'@'localhost';";
+
+# Assign httpd user and group to all users that will be created
+HTTP_UID=$(id -u "$HTTP_USER")
+HTTP_GID=$(sed -nr "s/^$HTTP_GROUP:x:([0-9]+):.*/\1/p" /etc/group)
+sqlroot -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN uid SET DEFAULT $HTTP_UID"
+sqlroot -e "ALTER TABLE sentora_proftpd.ftpuser ALTER COLUMN gid SET DEFAULT $HTTP_GID"
+sed -i "s|!SQL_MIN_ID!|$HTTP_UID|" $PANEL_CONF/proftpd/proftpd-mysql.conf
+
+# Setup proftpd base file to call sentora config
+rm -f "$FTP_CONF_PATH"
+ln -s "$PANEL_CONF/proftpd/proftpd-mysql.conf" "$FTP_CONF_PATH"
+
+# Setup proftpd log dir (the folder needs execute permission to be usable)
+mkdir -p $PANEL_DATA/logs/proftpd
+chmod 755 $PANEL_DATA/logs/proftpd
+
+# Register proftpd for autostart and (re)start it with the Sentora config
+systemctl enable proftpd
+systemctl restart proftpd
+
+##
+#--- BIND
+##
+ui_step "Installing and configuring BIND"
+install_available bind bind-utils
+BIND_SERVICE="named"
+if ! command -v named-checkconf > /dev/null 2>&1; then
+    echo -e "\nERROR: BIND (bind, bind-utils) did not install, so DNS will not work."
+    echo "Run 'dnf install bind bind-utils' to see why, then run the installer again."
+fi
+# Fedora keeps BIND's main file at /etc/named.conf (and rndc's at /etc/rndc.*)
+BIND_PATH="/etc/"
+BIND_FILES="/etc"
+BIND_USER="named"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='/var/sentora/logs/bind/bind.log' WHERE so_name_vc='bind_log'"
+
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_PATH' WHERE so_name_vc='bind_dir'"
+sqlroot -e "UPDATE sentora_core.x_settings SET so_value_tx='$BIND_SERVICE' WHERE so_name_vc='bind_service'"
+
+# Setup logging directory
+mkdir -p $PANEL_DATA/logs/bind
+touch $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+# BIND owns and writes the logs; the panel (in the bind group, see below) reads them.
+# 640 keeps them unreadable to anyone else - the old "Set Permissions" button in
+# DNS Admin used to chmod these 0777, which is why it is gone.
+chown "$BIND_USER":"$BIND_USER" $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+chmod 640 $PANEL_DATA/logs/bind/bind.log $PANEL_DATA/logs/bind/debug.log
+usermod -a -G "$BIND_USER" "$PANEL_USER"
+
+mkdir -p /var/named/dynamic /var/named/data
+touch /var/named/dynamic/managed-keys.bind
+chown -R bind:bind /var/named/
+
+# The check tools are in /usr/bin or /usr/sbin depending on the release,
+# Sentora calls them by name, so make sure both locations work
+for tool in named-checkconf named-checkzone named-compilezone; do
+    [ -e /usr/bin/$tool ] || [ ! -e /usr/sbin/$tool ] || ln -s /usr/sbin/$tool /usr/bin/$tool
+done
+
+# Setup acl IP to forbid zone transfer
+sed -i "s|!SERVER_IP!|$PUBLIC_IP|" $PANEL_CONF/bind/named.conf
+
+# Build key and conf files
+rm -rf $BIND_FILES/named.conf $BIND_FILES/rndc.conf $BIND_FILES/rndc.key
+rndc-confgen -a -A hmac-sha256
+cat $BIND_FILES/rndc.key $PANEL_CONF/bind/named.conf > $BIND_FILES/named.conf
+cat $BIND_FILES/rndc.key $PANEL_CONF/bind/rndc.conf > $BIND_FILES/rndc.conf
+rm -f $BIND_FILES/rndc.key
+
+# (SELinux: Sentora's zone and log folders get BIND's labels further down)
+chown root:"$BIND_USER" $BIND_FILES/named.conf $BIND_FILES/rndc.conf 2> /dev/null; chmod 640 $BIND_FILES/named.conf $BIND_FILES/rndc.conf 2> /dev/null
+
+if named-checkconf $BIND_FILES/named.conf; then
+    systemctl enable "$BIND_SERVICE"
+    systemctl restart "$BIND_SERVICE"
+else
+    echo -e "\nWARNING: $BIND_FILES/named.conf did not pass named-checkconf, BIND was not started."
+fi
+
+##
+#--- CRON and ATD
+##
+ui_step "Installing and configuring cron tasks"
+$PACKAGE_INSTALLER cronie at
+CRON_SERVICE="crond"
+
+
+# prepare daemon crontab
+# sed -i "s|!USER!|$CRON_USER|" "$PANEL_CONF/cron/zdaemon" #it screw update search!#
+sed -i "s|!USER!|root|" "$PANEL_CONF/cron/zdaemon"
+cp "$PANEL_CONF/cron/zdaemon" /etc/cron.d/zdaemon
+chmod 644 /etc/cron.d/zdaemon
+
+# Account jobs (Cron Manager) are written by the daemon to /etc/cron.d/sentora-accounts,
+# each running as its account's own user; the crontab folder stays as Fedora has it
+# (root:crontab), and the web server user has no crontab.
+# Register cron and atd services for autostart and start them
+systemctl enable crond atd
+systemctl start crond
+systemctl start atd
+
+##
+#--- phpMyAdmin
+##
+ui_step "Configuring phpMyAdmin"
+phpmyadminsecret=$(passwordgen 32);
+chown root:"$PANEL_USER" $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 640 $PANEL_CONF/phpmyadmin/config.inc.php
+# Its compiled templates are PHP: keep them where the sites can not write
+sed -i "s|^\$cfg\['TempDir'\] = .*|\$cfg['TempDir'] = '/var/lib/sentora/tmp/phpmyadmin/';|" $PANEL_CONF/phpmyadmin/config.inc.php
+sed -i "s|\$cfg\['blowfish_secret'\] = 'SENTORA';|\$cfg\['blowfish_secret'\] = '$phpmyadminsecret';|" $PANEL_CONF/phpmyadmin/config.inc.php
+ln -sf $PANEL_CONF/phpmyadmin/config.inc.php $PANEL_PATH/panel/etc/apps/phpmyadmin/config.inc.php
+# Remove phpMyAdmin's setup folder, it is not needed and should not be reachable
+rm -rf $PANEL_PATH/panel/etc/apps/phpmyadmin/setup
+
+##
+#--- Roundcube 1.7 (webmail)
+##
+ui_step "Configuring Roundcube"
+RC_PATH="$PANEL_PATH/panel/etc/apps/webmail"
+
+# Create the database from the schema shipped with this Roundcube version
+sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+sqlroot sentora_roundcube < "$RC_PATH/SQL/mysql.initial.sql"
+
+roundcubepassword=$(passwordgen);
+sqlroot -e "CREATE USER roundcube@localhost IDENTIFIED BY '$roundcubepassword';";
+sqlroot -e "GRANT ALL PRIVILEGES ON sentora_roundcube .* TO 'roundcube'@'localhost';";
+sed -i "s|!ROUNDCUBE_PASSWORD!|$roundcubepassword|" $PANEL_CONF/roundcube/roundcube_config.inc.php
+
+roundcube_des_key=$(passwordgen 24);
+sed -i "s|!ROUNDCUBE_DESKEY!|$roundcube_des_key|" $PANEL_CONF/roundcube/roundcube_config.inc.php
+
+# The password plugin updates mailbox passwords in the Postfix database
+sed -i "s|!POSTFIX_PASSWORD!|$postfixpassword|" $PANEL_CONF/roundcube/password_config.inc.php
+
+# The schema is imported, the setup files are not needed on a live server
+rm -rf "$RC_PATH/SQL" "$RC_PATH/installer" "$RC_PATH/public_html/installer.php"
+
+# Logs and temporary files live outside the application folder
+mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/temp/roundcube"
+chown "$PANEL_USER:$HTTP_GROUP" "$PANEL_DATA/logs/roundcube"
+# Attachments being written go to the panel's private folder, not the shared temp
+sed -i "s|\$config\['temp_dir'\] = .*|\$config['temp_dir'] = '/var/lib/sentora/roundcube/';|" $PANEL_CONF/roundcube/roundcube_config.inc.php
+
+# Config files hold database passwords: readable by root and Apache only
+chown root:"$PANEL_USER" $PANEL_CONF/roundcube/*.inc.php
+chmod 640 $PANEL_CONF/roundcube/*.inc.php
+
+ln -sf $PANEL_CONF/roundcube/roundcube_config.inc.php "$RC_PATH/config/config.inc.php"
+ln -sf $PANEL_CONF/roundcube/sieve_config.inc.php "$RC_PATH/plugins/managesieve/config.inc.php"
+ln -sf $PANEL_CONF/roundcube/password_config.inc.php "$RC_PATH/plugins/password/config.inc.php"
+
+##
+#--- SOGo groupware: webmail, calendars and contacts, with ActiveSync for phones and Outlook
+##
+# Fedora does not package SOGo (and SOGo's own packages for Red Hat systems need a support
+# subscription): Sentora builds it from SOGo's free sources on GitHub (Actions > SOGo bundle,
+# preconf/sogo-build) into /opt/sentora-sogo, and puts sentora-sogo-fedora45-amd64.tar.gz on the release.
+# It is downloaded here and checked against its SHA-256; nothing is compiled on this server. Without
+# it (not built yet, or not downloadable) webmail is Roundcube alone and Mail Config shows SOGo as not
+# installed.
+ui_step "Installing SOGo groupware with ActiveSync"
+sogopassword=""
+SOGO_PREFIX=/opt/sentora-sogo
+SOGO_TAR=sentora-sogo-fedora45-amd64.tar.gz
+SOGO_STAGE=$(mktemp -d /tmp/sentora-sogo.XXXXXX)
+REL_DIR="$SOGO_STAGE"   # (download_file keeps its notes here: the release folder is gone by now)
+if [ "$(uname -m)" != "x86_64" ]; then
+    echo "SOGo is built for x86_64 only: this server gets Roundcube alone."
+elif ! download_file "$SOGO_TAR" "$SOGO_STAGE/$SOGO_TAR" "$SENTORA_INSTALLERS_REPO"; then
+    echo "WARNING: SOGo skipped: $SOGO_TAR could not be downloaded (webmail is Roundcube)."
+elif ! tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -qx 'opt/sentora-sogo/sbin/sogod' \
+        || tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -vq '^opt/sentora-sogo/'; then
+    echo "WARNING: SOGo skipped: $SOGO_TAR is not a Sentora SOGo bundle."
+else
+    rm -rf "$SOGO_PREFIX"
+    tar -xzf "$SOGO_STAGE/$SOGO_TAR" -C /
+    chown -R root:root "$SOGO_PREFIX"
+    echo "SOGo: $(grep -E '^(sogo|built)=' "$SOGO_PREFIX/BUILD-INFO" | tr '\n' ' ')"
+    # memcached (SOGo's cache), and the system libraries the build links to that this server is missing
+    # (listed by the build, one file each: dnf installs the package that has it)
+    SOGO_LIBS=""
+    while IFS= read -r lib; do
+        [[ "$lib" =~ ^/usr/lib64/[A-Za-z0-9._+-]+$ ]] && [ ! -e "$lib" ] && SOGO_LIBS="$SOGO_LIBS $lib"
+    done < "$SOGO_PREFIX/RUNTIME-LIBS"
+    $PACKAGE_INSTALLER memcached $SOGO_LIBS
+    id sogo > /dev/null 2>&1 || useradd -r -d /var/lib/sogo -m -s /sbin/nologin -c "SOGo groupware" sogo
+    mkdir -p /etc/sogo /var/log/sogo /var/spool/sogo /var/backups/sogo $PANEL_CONF/sogo
+    chown sogo:sogo /var/log/sogo /var/spool/sogo /var/backups/sogo
+    chmod 750 /var/log/sogo /var/spool/sogo /var/backups/sogo
+    # SOGo's tools, with the library path they need (the panel runs them from here: sogo_tool_dir)
+    for t in sogo-tool sogo-ealarms-notify sogo-slapd-sockd sogo-backup; do
+        [ -x "$SOGO_PREFIX/sbin/$t" ] || continue
+        printf '#!/bin/bash\n# SOGo (Sentora build in %s)\nexport LD_LIBRARY_PATH=%s/lib64:%s/lib\nexport PATH=%s/sbin:%s/bin:$PATH\nexec %s/sbin/%s "$@"\n' \
+            "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$t" > "/usr/local/sbin/$t"
+        chmod 755 "/usr/local/sbin/$t"
+    done
+    # the service: sogod as the user sogo, only its library path set, listening on 127.0.0.1:20000
+    cat > /etc/systemd/system/sogo.service <<SOGOUNIT
+# Sentora: SOGo groupware (built by Sentora into $SOGO_PREFIX; settings in /etc/sogo/sogo.conf)
+[Unit]
+Description=SOGo groupware (Sentora)
+After=network.target mariadb.service memcached.service
+Wants=memcached.service
+
+[Service]
+Type=simple
+User=sogo
+Group=sogo
+Environment=LD_LIBRARY_PATH=$SOGO_PREFIX/lib64:$SOGO_PREFIX/lib
+RuntimeDirectory=sogo
+ExecStart=$SOGO_PREFIX/sbin/sogod -WONoDetach YES -WOPidFile /run/sogo/sogo.pid -WOLogFile /var/log/sogo/sogo.log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+SOGOUNIT
+    systemctl daemon-reload
+    # memcached (SOGo's cache): this server only
+    [ -f /etc/sysconfig/memcached ] && sed -i 's|^OPTIONS=.*|OPTIONS="-l 127.0.0.1 -U 0"|' /etc/sysconfig/memcached
+    sogopassword=$(passwordgen)
+    sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_sogo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        sqlroot -e "CREATE USER IF NOT EXISTS 'sogo'@'$SOGO_HOST' IDENTIFIED BY '$sogopassword'; GRANT ALL PRIVILEGES ON sentora_sogo.* TO 'sogo'@'$SOGO_HOST'"
+    done
+    # SOGo logs in with the panel's mailboxes: a read-only view of them (as on Debian and Ubuntu)
+    sqlroot -e "CREATE OR REPLACE SQL SECURITY DEFINER VIEW sentora_postfix.sogo_users AS SELECT username AS c_uid, username AS c_name, CASE WHEN password LIKE '{PLAIN-MD5}%' THEN SUBSTRING(password, 12) ELSE password END AS c_password, COALESCE(NULLIF(name, ''), username) AS c_cn, username AS mail, domain AS c_domain FROM sentora_postfix.mailbox WHERE active = '1'"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        sqlroot -e "GRANT SELECT ON sentora_postfix.sogo_users TO 'sogo'@'$SOGO_HOST'"
+    done
+    sed -e "s|!SOGO_PASSWORD!|$sogopassword|g" -e "s|!MYSQL_PORT!|3306|g" -e "s|!PANEL_FQDN!|$PANEL_FQDN|" -e "s|!TIMEZONE!|${tz:-UTC}|" \
+        $PANEL_CONF/sogo/sogo.conf > /etc/sogo/sogo.conf
+    chown root:sogo /etc/sogo/sogo.conf
+    chmod 640 /etc/sogo/sogo.conf
+    $PANEL_PATH/panel/bin/setso --set sogo_timezone "${tz:-UTC}" > /dev/null
+    # Apache serves /SOGo (web, CalDAV, CardDAV) and /Microsoft-Server-ActiveSync; its web files are here
+    sed "s|/usr/lib/x86_64-linux-gnu/GNUstep/SOGo/|$SOGO_PREFIX/lib64/GNUstep/SOGo/|g" $PANEL_CONF/sogo/sogo-apache.conf > /etc/httpd/conf.d/sogo.conf
+    systemctl enable memcached sogo
+    systemctl restart memcached sogo || echo "WARNING: SOGo did not start (systemctl status sogo)."
+fi
+rm -rf "$SOGO_STAGE"
+
+#--- Webalizer Stats and Visitor Stats are add-on modules now (Repo Browser, the
+#    sentora-repo folder of RusTus/sentora-installers-2027): their packages build the programs
+# Statistics reports live outside the web root (GoAccess, and the add-on modules)
+mkdir -p $PANEL_DATA/stats
+chmod 755 $PANEL_DATA/stats
+
+#--- GoAccess (Server Admin > GoAccess), built from the bundled source
+install_available ncurses-devel
+if ! bash $PANEL_CONF/goaccess/build-goaccess.sh $PANEL_CONF/goaccess; then
+	echo -e "\nWARNING: GoAccess did not build, the GoAccess module will stay empty."
+fi
+# GoAccess runs as its own user, which can read nothing else (the hourly job hands it
+# the new log lines); the panel may read the reports
+id sentora-stats > /dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sentora-stats
+mkdir -p $PANEL_DATA/stats/goaccess
+chown sentora-stats:$PANEL_USER $PANEL_DATA/stats/goaccess
+chmod 750 $PANEL_DATA/stats/goaccess
+
+#--- Apache status page (Apache Status module): mod_status (on in Fedora's Apache), reachable from
+# this server only
+
+#--- Set some Sentora database entries using. setso and setzadmin (require PHP)
+ui_step "Configuring Sentora"
+# Fedora's commands, paths, services and users (the panel reads them from these settings: see
+# dryden/sys/platform.class.php; setso adds a missing one before it sets it)
+so() { $PANEL_PATH/panel/bin/setso --set "$1" "$2" > /dev/null; }
+so web_user "$HTTP_USER"; so web_group "$HTTP_GROUP"; so nobody_group nobody
+so apache_ctl apachectl; so apache_modules_cmd "httpd -M"; so apache_bin /usr/sbin/httpd; so apache_server_root /etc/httpd; so apache_envvars ""
+so apache_module_includes "Include conf.modules.d/*.conf"; so apache_enable_module ""; so apache_log_dir /var/log/httpd
+so php_fpm_pool_dir /etc/php-fpm.d/; so php_fpm_service php-fpm; so php_fpm_socket_dir /run/php-fpm/; so php_fpm_process php-fpm
+so db_service "$DB_SERVICE"; so db_conf_file "$MY_CNF_PATH"; so db_socket /var/lib/mysql/mysql.sock
+so bind_group "$BIND_USER"
+so dovecot_conf /etc/dovecot/dovecot.conf; so dovecot_service dovecot
+so spamd_bin /usr/bin/spamd; so clamd_bin /usr/sbin/clamd; so sogo_bin /opt/sentora-sogo/sbin/sogod; so sogo_tool_dir /usr/local/sbin; so sogo_user sogo
+so clamav_user clamscan; so clamd_conf /etc/clamd.d/scan.conf; so clamd_socket /run/clamd.scan/clamd.sock; so clamd_service clamd@scan
+so clamav_milter_conf /etc/mail/clamav-milter.conf; so clamav_milter_pid /run/clamav-milter/clamav-milter.pid
+so clamav_milter_service clamav-milter; so clamav_milter_user clamilt
+so clamav_milter_socket /run/clamav-milter/clamav-milter.socket; so clamav_log_dir /var/log/clamav
+so freshclam_conf /etc/freshclam.conf; so freshclam_service clamav-freshclam; so freshclam_user clamupdate
+so spamd_user spamd; so spamassassin_dir /etc/mail/spamassassin; so spamd_defaults_file /etc/sysconfig/spamassassin
+so spamd_defaults_template 'SPAMDOPTIONS="{options}"'; so spamd_service spamassassin; so spamd_maintenance_timer ""
+so spamass_milter_socket /run/spamass-milter/postfix/sock
+so spamass_milter_skip_auth_flag -a; so spamass_milter_user sa-milt; so spamass_milter_defaults_file /etc/sysconfig/spamass-milter; so spamass_milter_service spamass-milter
+so spamass_milter_defaults_template 'EXTRA_FLAGS="{options}"
+SOCKET="{socket}"
+SOCKET_OPTIONS="-g postfix"'
+so crontab_dir /var/spool/cron; so cron_service crond
+so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
+so php_bundle_tag fedora45; so php_bundle_libs "$PHP_BUNDLE_LIBS"
+# ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
+# httpd.conf includes, and the command that keeps the system's own settings off
+so modsec_package mod_security; so modsec_module /usr/lib64/httpd/modules/mod_security2.so
+so modsec_unique_id_module /usr/lib64/httpd/modules/mod_unique_id.so; so modsec_data_dir /var/lib/mod_security
+so modsec_conf_dir "$PANEL_CONF/apache/modsecurity.d"; so modsec_off_cmd "$MODSEC_OFF"
+so ftp_config_file "$FTP_CONF_PATH"; so ftp_service proftpd
+zadminpassword=$(passwordgen);
+setzadmin --set "$zadminpassword";
+$PANEL_PATH/panel/bin/setso --set sentora_domain "$PANEL_FQDN"
+$PANEL_PATH/panel/bin/setso --set server_ip "$PUBLIC_IP"
+
+# the release this server runs (shown as Sentora-<version>)
+$PANEL_PATH/panel/bin/setso --set dbversion "$SENTORA_CORE_VERSION"
+
+# Make the daemon to run/build vhosts file.
+$PANEL_PATH/panel/bin/setso --set apache_changed "true"
+# Server alerts wait until the installer is done (services are still being set up)
+touch /etc/sentora/.installing
+# (its report goes where the scheduled runs put theirs, for sentora-post-install-check)
+# Repo Browser lists the add-on modules from GitHub (not fatal without network)
+php -q $PANEL_PATH/panel/bin/zppy update > /dev/null 2>&1 || true
+php -q $PANEL_PATH/panel/bin/daemon.php > "$PANEL_DATA/logs/daemon-last-run.log" 2>&1
+cat "$PANEL_DATA/logs/daemon-last-run.log"
+
+##
+#--- Logrotate
+##
+ui_step "Installing Logrotate"
+$PACKAGE_INSTALLER logrotate
+
+#	Link the configfiles 
+ln -s $PANEL_CONF/logrotate/Sentora-apache /etc/logrotate.d/Sentora-apache
+ln -s $PANEL_CONF/logrotate/Sentora-proftpd /etc/logrotate.d/Sentora-proftpd
+ln -s $PANEL_CONF/logrotate/Sentora-dovecot /etc/logrotate.d/Sentora-dovecot
+
+#	(the template already reloads httpd, Fedora's Apache service)
+
+#--- Resolv.conf deprotect
+[ -L /etc/resolv.conf ] || chattr -f -i /etc/resolv.conf
+
+##
+#--- fail2ban: block addresses that keep guessing passwords
+##
+ui_step "Installing fail2ban"
+install_available fail2ban-server fail2ban-sendmail python3-systemd nftables
+# The log files the jails read must exist before fail2ban starts
+mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/logs/proftpd" /var/lib/sentora
+touch /var/log/dovecot.log /var/log/dovecot-info.log "$PANEL_DATA/logs/roundcube/errors.log" "$PANEL_DATA/logs/proftpd/auth.log" /var/lib/sentora/sentora-auth.log
+[ -d /var/log/sogo ] && touch /var/log/sogo/sogo.log && chown sogo:sogo /var/log/sogo/sogo.log
+chown "$PANEL_USER:$HTTP_GROUP" "$PANEL_DATA/logs/roundcube/errors.log"
+chown "$PANEL_USER:$PANEL_USER" /var/lib/sentora/sentora-auth.log
+# Logs fail2ban acts on must not be writable by the sites (a forged line could
+# get any address blocked): root's own, the panel's own, or root-only folders
+chown root:root "$PANEL_DATA/logs/proftpd"; chmod 755 "$PANEL_DATA/logs/proftpd"
+# phpMyAdmin's failed logins (written by the panel user, not writable by the sites)
+touch /var/lib/sentora/phpmyadmin-auth.log
+chown "$PANEL_USER":"$PANEL_USER" /var/lib/sentora/phpmyadmin-auth.log
+chmod 640 /var/lib/sentora/phpmyadmin-auth.log
+# The panel's other logs there, made now: the folder itself is root's (below), so the panel can write
+# these but can not make, rename or link anything at its top level, where root jobs write their state
+# (a link planted there would have root write through it; the daemon keeps this so: sys_statedir)
+for f in twofactor.log password-reveal.log shadowing.log panel-update.log; do
+    touch "/var/lib/sentora/$f"; chown "$PANEL_USER":"$PANEL_USER" "/var/lib/sentora/$f"; chmod 640 "/var/lib/sentora/$f"
+done
+chown root:root /var/lib/sentora
+chmod 755 /var/lib/sentora
+cp $PANEL_CONF/fail2ban/filter.d/*.conf /etc/fail2ban/filter.d/
+sed -e "s|!SERVER_IP!|$PUBLIC_IP|" -e "s|_SYSTEMD_UNIT=postfix@-.service|_SYSTEMD_UNIT=postfix.service|" $PANEL_CONF/fail2ban/sentora.conf > /etc/fail2ban/jail.d/sentora.conf
+# bans with nftables (firewalld's own rules when firewalld is running)
+if systemctl is-active --quiet firewalld 2> /dev/null; then
+    printf '[DEFAULT]\nbanaction = firewallcmd-rich-rules\nbanaction_allports = firewallcmd-rich-rules\n' > /etc/fail2ban/jail.d/00-sentora-ban.conf
+else
+    printf '[DEFAULT]\nbanaction = nftables-multiport\nbanaction_allports = nftables-allports\n' > /etc/fail2ban/jail.d/00-sentora-ban.conf
+fi
+if [ -f /var/log/sogo/sogo.log ]; then
+    # SOGo's failed logins (web, CalDAV/CardDAV and ActiveSync), with fail2ban's own filter
+    printf '[sogo-auth]\nenabled = true\nbackend = auto\nport = http,https\nlogpath = /var/log/sogo/sogo.log\n' > /etc/fail2ban/jail.d/sentora-sogo.conf
+fi
+if fail2ban-client -t > /dev/null 2>&1; then
+    systemctl enable fail2ban
+    systemctl restart fail2ban
+else
+    echo -e "WARNING: the fail2ban configuration did not pass its test, fail2ban was not started."
+    fail2ban-client -t 2>&1 | tail -5
+fi
+
+#--- Lock down files that hold passwords
+# Everything under $PANEL_PATH was made world-writable earlier (chmod -R 777),
+# which included the MySQL root password and the service database passwords.
+# Hosting folders: each account folder is set up by the daemon (owner web<id>,
+# access lists for the panel and Apache, nothing for anyone else); the parent
+# only lets users pass through to their own
+chown root:root "$PANEL_DATA/hostdata"
+chmod 711 "$PANEL_DATA/hostdata"
+# The rest of the shared data folders: root's, never writable by the sites (the
+# daemon keeps them this way too, sys_accountphp::LockSharedFolders)
+chown root:root "$PANEL_DATA" "$PANEL_DATA/logs"
+chmod 755 "$PANEL_DATA" "$PANEL_DATA/logs"
+chmod 1777 "$PANEL_DATA/temp"
+[ -d "$PANEL_DATA/sessions" ] && { chown root:root "$PANEL_DATA/sessions"; chmod 1733 "$PANEL_DATA/sessions"; }
+# backups (whole accounts, databases included): root only
+chown root:root "$PANEL_DATA/backups"; chmod 700 "$PANEL_DATA/backups"
+# (the same modes the daemon keeps, sys_accountphp::LockSharedFolders)
+mkdir -p "$PANEL_DATA/logs/domains"
+chown root:"$PANEL_USER" "$PANEL_DATA/logs/domains"
+chmod 750 "$PANEL_DATA/logs/domains"
+
+# The panel's code belongs to root and can not be changed by the panel or the sites
+chown -R root:root $PANEL_PATH/panel
+find $PANEL_PATH/panel -type d -exec chmod 755 {} +
+find $PANEL_PATH/panel -type f -exec chmod 644 {} +
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup 2> /dev/null
+chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
+# What the panel itself writes: its template cache. Modules and Repo Browser's
+# package cache belong to root: the panel queues module changes and the root
+# daemon makes them, so a break-in to the panel can not plant code root would run
+chown -R "$PANEL_USER:$HTTP_GROUP" $PANEL_PATH/panel/etc/tmp
+# The panel's working folders: the panel and Apache (group) only, not the sites (the
+# daemon keeps them so; set here too, so a check right after the install finds them closed)
+for d in $PANEL_PATH/panel/etc/tmp $PANEL_PATH/panel/etc/apps/matomo/tmp $PANEL_PATH/panel/etc/apps/matomo/config; do
+    [ -d "$d" ] && chmod o-rwx,g+s "$d"
+done
+# The database password and the encryption key: the panel and root only
+chown root:"$PANEL_USER" $PANEL_PATH/panel/cnf/db.php $PANEL_PATH/panel/cnf/security.php
+chmod 640 $PANEL_PATH/panel/cnf/db.php $PANEL_PATH/panel/cnf/security.php
+# Service configuration: written by root (the daemon), read by the services
+chown -R root:root $PANEL_CONF
+# (earlier chmod -R 777 left every file world-writable: nobody but root may write now)
+chmod -R u+rwX,go-w,go+rX $PANEL_CONF
+chown root:mail $PANEL_CONF/dovecot2/dovecot-mysql.conf; chmod 640 $PANEL_CONF/dovecot2/dovecot-mysql.conf
+chown root:"$PANEL_USER" $PANEL_CONF/roundcube/*.inc.php $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 640 $PANEL_CONF/roundcube/*.inc.php $PANEL_CONF/phpmyadmin/config.inc.php
+chmod 600 $PANEL_CONF/ssl/sentora.key
+chown root:root $PANEL_CONF/proftpd/proftpd-mysql.conf
+chmod 600 $PANEL_CONF/proftpd/proftpd-mysql.conf
+chown root:postfix $PANEL_CONF/postfix/mysql-*.cf
+chmod 640 $PANEL_CONF/postfix/mysql-*.cf
+chmod 644 $PANEL_CONF/postfix/main.cf $PANEL_CONF/postfix/master.cf
+chown root:root $PANEL_CONF/bind/rndc.conf 2> /dev/null; chmod 600 $PANEL_CONF/bind/rndc.conf 2> /dev/null
+chmod 640 $BIND_FILES/rndc.conf 2> /dev/null
+# BIND's main file holds the rndc key (whoever has it can stop or reconfigure BIND): root and BIND only
+chown root:"$BIND_USER" $BIND_FILES/named.conf; chmod 640 $BIND_FILES/named.conf
+# The File Manager's own program files must not be writable by the web server
+# (it edits users' files, never itself)
+chown -R root:root $PANEL_PATH/panel/modules/file_manager
+chmod -R u=rwX,go=rX $PANEL_PATH/panel/modules/file_manager
+# Same for Apache Status: its settings are fixed files, nothing in it should be writable
+chown -R root:root $PANEL_PATH/panel/modules/apache_status
+chmod -R u=rwX,go=rX $PANEL_PATH/panel/modules/apache_status
+# Nothing else may stay writable by everyone (the chmod -R 777 earlier in this installer
+# also opened /etc/sentora itself and its docs folder: a site could rename and replace
+# the configuration). Left alone: hosting folders and mail (their own rules), and the two
+# shared scratch folders. The daemon repeats this every run (sys_accountphp::LockWorldWritable).
+chown root:root $PANEL_PATH; chmod 755 $PANEL_PATH
+find $PANEL_PATH $PANEL_DATA -xdev \( -path "$PANEL_DATA/hostdata" -o -path "$PANEL_DATA/vmail" -o -path "$PANEL_DATA/temp" -o -path "$PANEL_DATA/sessions" \) -prune \
+    -o -perm -o+w ! -type l -print0 2> /dev/null | xargs -0 -r chmod o-w
+[ -f "$PANEL_DATA/logs/sentora.log" ] && { chown root:"$PANEL_USER" "$PANEL_DATA/logs/sentora.log"; chmod 660 "$PANEL_DATA/logs/sentora.log"; }
+
+# Set admin contact info to zadmin profile
+
+echo -e "\n--- Updating Admin contact Info..."
+# (quoted: a name like O'Brien would otherwise end the SQL text and nothing would be saved)
+sqlroot -e "UPDATE sentora_core.x_accounts SET ac_email_vc='$(sql_str "$ADMIN_EMAIL")' WHERE ac_id_pk = 1"
+sqlroot -e "UPDATE sentora_core.x_profiles SET ud_fullname_vc='$(sql_str "$ADMIN_NAME")', ud_phone_vc='$(sql_str "$ADMIN_PHONE")', ud_address_tx=CONCAT('$(sql_str "$ADMIN_ADDRESS")', '\r\n', '$(sql_str "$ADMIN_PROVINCE $ADMIN_POSTALCODE")', '\r\n', '$(sql_str "$ADMIN_COUNTRY")'), ud_postcode_vc='$(sql_str "$ADMIN_POSTALCODE")' WHERE ud_id_pk = 1" \
+    || echo "WARNING: the administrator's contact details were not saved in zadmin's profile (fill them in under My Account)."
+
+echo -e "\n--- Done Updating admin contact info.\n"
+
+echo -e "# -------------------------------------------------------------------------------"
+
+#--- SELinux (enforcing): Sentora's folders get the labels of what uses them, and the services the
+# switches they need; nothing is switched off. A denial is logged in /var/log/audit/audit.log
+# (ausearch -m avc -ts recent) and sentora-post-install-check counts them.
+if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
+    ui_step "SELinux: labels and switches for Sentora"
+    fc() { semanage fcontext -a -t "$1" "$2" 2> /dev/null || semanage fcontext -m -t "$1" "$2"; }
+    # the panel's code (read by Apache and PHP-FPM) and the folders the panel writes
+    fc httpd_sys_content_t "$PANEL_PATH/panel(/.*)?"
+    fc httpd_sys_rw_content_t "$PANEL_PATH/panel/etc/tmp(/.*)?"
+    fc httpd_sys_rw_content_t "$PANEL_PATH/panel/etc/apps/matomo/(tmp|config)(/.*)?"
+    fc httpd_sys_rw_content_t "/var/lib/sentora(/.*)?"
+    fc httpd_sys_content_t "$PANEL_CONF/apache(/.*)?"
+    fc httpd_config_t "$PANEL_CONF/apache/.*\.conf"
+    fc cert_t "$PANEL_CONF/ssl(/.*)?"
+    # the hosted websites (their PHP writes to them) and the shared scratch folders
+    fc httpd_sys_rw_content_t "$PANEL_DATA/hostdata(/.*)?"
+    fc httpd_sys_rw_content_t "$PANEL_DATA/(temp|sessions|stats)(/.*)?"
+    fc httpd_log_t "$PANEL_DATA/logs(/.*)?"
+    fc httpd_sys_rw_content_t "$PANEL_DATA/backups(/.*)?"
+    # mail
+    fc mail_home_rw_t "$PANEL_DATA/vmail(/.*)?"
+    fc dovecot_etc_t "$PANEL_CONF/dovecot2(/.*)?"
+    fc postfix_etc_t "$PANEL_CONF/postfix(/.*)?"
+    fc mail_home_rw_t "$PANEL_DATA/sieve(/.*)?"
+    # DNS and FTP
+    fc named_conf_t "$PANEL_CONF/bind(/.*)?"
+    fc named_zone_t "$PANEL_CONF/bind/zones(/.*)?"
+    fc named_log_t "$PANEL_DATA/logs/bind(/.*)?"
+    fc etc_t "$PANEL_CONF/proftpd(/.*)?"
+    fc xferlog_t "$PANEL_DATA/logs/proftpd(/.*)?"
+    # fail2ban reads the panel's two login logs (it may enter the folder, not the panel's other files)
+    fc httpd_sys_content_t "/var/lib/sentora"
+    fc httpd_log_t "/var/lib/sentora/(sentora|phpmyadmin)-auth\.log"
+    # Dovecot's other logs (Fedora labels only dovecot.log for it)
+    fc dovecot_var_log_t "/var/log/dovecot-(info|debug)\.log"
+    restorecon -RF "$PANEL_PATH" "$PANEL_DATA" /var/lib/sentora > /dev/null 2>&1
+    # files made by this installer before here, which got the label of their folder, not their own
+    restorecon -RF /var/log/dovecot.log /var/log/dovecot-info.log /var/log/dovecot-debug.log /var/log/clamav \
+        /run/clamav-milter /run/spamass-milter > /dev/null 2>&1
+    # Apache and PHP-FPM may reach the database, send mail, and fetch (Matomo, updates, Let's
+    # Encrypt); FTP users reach their own folders; BIND writes its own zones
+    for b in httpd_can_network_connect_db httpd_can_network_connect httpd_can_sendmail httpd_setrlimit \
+        httpd_unified ftpd_full_access named_write_master_zones antivirus_can_scan_system spamd_update_can_network \
+        domain_can_mmap_files; do
+        setsebool -P "$b" on > /dev/null 2>&1 && echo "SELinux: $b on" || echo "SELinux: $b not set (not known here)"
+    done
+    echo "SELinux: labels set for $PANEL_PATH, $PANEL_DATA and /var/lib/sentora"
+    # Sentora's own rules, for what labels can not fix (each one explained in the file)
+    if [ -f "$PANEL_CONF/selinux/sentora.cil" ]; then
+        semodule -i "$PANEL_CONF/selinux/sentora.cil" && echo "SELinux: Sentora's rules loaded (semodule -l: sentora)" \
+            || echo "WARNING: SELinux: Sentora's rules ($PANEL_CONF/selinux/sentora.cil) could not be loaded."
+    fi
+    # what started before its files had their labels starts again now
+    for u in dovecot fail2ban clamav-freshclam named; do
+        systemctl is-enabled --quiet "$u" 2> /dev/null && systemctl restart "$u" > /dev/null 2>&1
+    done
+fi
+
+#--- The firewall (firewalld, when it runs): the ports Sentora serves
+if systemctl is-active --quiet firewalld 2> /dev/null; then
+    ui_step "Opening the firewall for Sentora's services"
+    for svc in http https smtp smtps smtp-submission imap imaps pop3 pop3s ftp dns managesieve; do
+        firewall-cmd --permanent --add-service="$svc" > /dev/null 2>&1 || echo "firewalld: no service $svc"
+    done
+    # FTP's passive data ports (proftpd: PassivePorts)
+    firewall-cmd --permanent --add-port=60000-65535/tcp > /dev/null 2>&1
+    firewall-cmd --reload > /dev/null 2>&1
+    echo "firewalld: $(firewall-cmd --list-services 2> /dev/null)"
+fi
+
+echo -e "\n--- Restarting Services"
+echo -e "Restarting $DB_SERVICE..."
+systemctl restart "$DB_SERVICE"
+echo -e "Restarting $HTTP_SERVICE..."
+systemctl restart "$HTTP_SERVICE"
+echo -e "Restarting Postfix..."
+systemctl restart postfix
+echo -e "Restarting Dovecot..."
+systemctl restart dovecot
+echo -e "Restarting BIND..."
+systemctl restart "$BIND_SERVICE"
+echo -e "Restarting Proftpd..."
+systemctl restart proftpd
+echo -e "Restarting CRON..."
+systemctl restart "$CRON_SERVICE"
+echo -e "Restarting ATD..."
+systemctl restart atd
+
+echo -e "\n--- Finished Restarting Services...\n"
+
+##
+#--- Matomo web analytics (etc/apps/matomo, in the panel's own PHP pool)
+##
+# Set up with Matomo's own installer pages (driven here, the same steps as in a
+# browser); the Sentora daemon then creates a Matomo site per domain and a
+# view-only Matomo user per account, and imports the access logs every hour.
+MATOMO="$PANEL_PATH/panel/etc/apps/matomo"
+matomopassword=""
+matomoadminpassword=""
+if [ -f "$MATOMO/index.php" ]; then
+    ui_step "Setting up Matomo"
+    install_available python3
+    matomopassword=$(passwordgen)
+    matomoadminpassword=$(passwordgen)
+    sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    for MH in localhost 127.0.0.1; do
+        sqlroot -e "CREATE USER IF NOT EXISTS 'matomo'@'$MH' IDENTIFIED BY '$matomopassword'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$MH'"
+    done
+    chown -R "$PANEL_USER:$HTTP_GROUP" "$MATOMO/tmp" "$MATOMO/config"
+    hosts_has "$PANEL_FQDN" || echo "127.0.0.1 $PANEL_FQDN" >> /etc/hosts
+    mkdir -p /var/lib/sentora/matomo; chown root:"$PANEL_USER" /var/lib/sentora/matomo; chmod 750 /var/lib/sentora/matomo
+    MI="https://127.0.0.1/etc/apps/matomo/index.php"
+    MC=$(mktemp)
+    # (each page's answer goes to the log: a setup that does not finish shows where it stopped)
+    mstep() { echo "Matomo setup page: $(curl -sk -o /dev/null -w "%{http_code}" -c "$MC" -b "$MC" -H "Host: $PANEL_FQDN" --max-time 300 "$@") ${*: -1}" | sed 's|https://127.0.0.1/etc/apps/matomo/index.php||'; }
+    mstep "$MI"
+    mstep "$MI?action=systemCheck"
+    mstep --data-urlencode "password=$matomopassword" -d "host=127.0.0.1&username=matomo&dbname=sentora_matomo&tables_prefix=matomo_&adapter=PDO\MYSQL&schema=Mysql&submit=Next" "$MI?action=databaseSetup"
+    mstep "$MI?action=tablesCreation&module=Installation"
+    mstep --data-urlencode "password=$matomoadminpassword" --data-urlencode "password_bis=$matomoadminpassword" -d "login=sentora_admin&email=postmaster@$PANEL_FQDN&subscribe_newsletter_piwikorg=0&subscribe_newsletter_professionalservices=0&submit=Next" "$MI?action=setupSuperUser&module=Installation"
+    mstep -d "siteName=$PANEL_FQDN&url=https://$PANEL_FQDN&timezone=${tz:-UTC}&ecommerce=0&submit=Next" "$MI?action=firstWebsiteSetup&module=Installation"
+    mstep "$MI?action=trackingCode&module=Installation&site_idSite=1&site_name=$PANEL_FQDN"
+    mstep -d "do_not_track=1&anonymise_ip=1&submit=Continue" "$MI?action=finished&module=Installation&site_idSite=1&site_name=$PANEL_FQDN"
+    rm -f "$MC"
+    if [ -f "$MATOMO/config/config.ini.php" ]; then
+        mconsole() { (cd "$MATOMO" && setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --init-groups --reset-env /usr/bin/php"$PHPVER" console "$@" > /dev/null 2>&1); }
+        mconsole plugin:activate SentoraSync
+        # The panel opens Matomo in a frame; reports are built by the hourly job, not by visitors
+        mconsole config:set --section=General --key=enable_framed_pages --value=1
+        mconsole config:set --section=General --key=enable_browser_archiving_triggering --value=0
+        mconsole config:set --section=General --key=enable_load_data_infile --value=0
+        # No calls home: no marketplace, news feed, update checks, adverts or "what's new" tours
+        mconsole config:set --section=General --key=enable_internet_features --value=0
+        mconsole plugin:deactivate ProfessionalServices Marketplace Tour Feedback
+        chown root:"$PANEL_USER" "$MATOMO/config/config.ini.php"
+        chmod 660 "$MATOMO/config/config.ini.php"
+        echo "Matomo is set up (super user sentora_admin)."
+    else
+        # A second try with the panel's own tool, from an empty Matomo database (it writes its own
+        # passwords to /root/passwords.txt and logs each page's answer)
+        echo "Matomo's setup did not finish: trying again with sentora-matomo-setup --reset"
+        sleep 5
+        if bash "$PANEL_PATH/panel/bin/sentora-matomo-setup" --reset && [ -f "$MATOMO/config/config.ini.php" ]; then
+            matomopassword="(in /root/passwords.txt)"; matomoadminpassword="(in /root/passwords.txt)"
+        else
+            echo -e "WARNING: Matomo setup did not finish (the pages' answers are above); after the restart run: sentora-matomo-setup --reset"
+        fi
+    fi
+fi
+
+#--- Store the passwords for user reference
+{
+    echo "Server IP address : $PUBLIC_IP"
+    echo "Panel URL         : https://$PANEL_FQDN"
+    echo "zadmin Password   : $zadminpassword"
+    echo ""
+    echo "MySQL Root Password      : $mysqlpassword"
+    echo "MySQL Postfix Password   : $postfixpassword"
+    echo "MySQL Roundcube Password : $roundcubepassword"
+    echo "MySQL SOGo Password      : $sogopassword"
+    echo "MySQL Matomo Password    : $matomopassword"
+    echo "Matomo super user        : sentora_admin / $matomoadminpassword"
+    echo "MySQL ProFTPd Password   : $proftpdpassword"
+} >> /root/passwords.txt
+chmod 600 /root/passwords.txt
+
+#--- Advise the admin that Sentora is now installed and accessible.
+ui_done
+rm -f /etc/sentora/.installing
+UI_INSTALLING=""
+# back to the screen for the summary and the last question
+exec 1>&3 2>&4
+UI_WARN_COUNT=$( [ -f "$logfile.warnings" ] && wc -l < "$logfile.warnings" || echo 0 )
+UI_WARN_LIST=$( [ -f "$logfile.warnings" ] && cat "$logfile.warnings" )
+rm -f "$logfile.warnings"
+sleep 1
+ui_banner "Installed on $(hostname) in $(( ($(date +%s) - UI_INSTALL_START) / 60 )) minutes"
+ui_bar "$BG_OK" "  Sentora is installed"
+echo
+printf '  %-26s %shttps://%s%s\n' "Panel" "$C_BOLD" "$PANEL_FQDN" "$C_RESET"
+printf '  %-26s %s%s%s\n' "Username" "$C_BOLD" "zadmin" "$C_RESET"
+printf '  %-26s %s%s%s\n' "Password" "$C_BOLD$C_YELLOW" "$zadminpassword" "$C_RESET"
+echo
+printf '  %s%s%s\n' "$C_BOLD" "The other passwords this installation made:" "$C_RESET"
+printf '  %-26s %s\n' "MySQL root" "$mysqlpassword"
+printf '  %-26s %s\n' "MySQL Postfix" "$postfixpassword"
+printf '  %-26s %s\n' "MySQL ProFTPD" "$proftpdpassword"
+printf '  %-26s %s\n' "MySQL Roundcube" "$roundcubepassword"
+[ -n "${sogopassword:-}" ] && printf '  %-26s %s\n' "MySQL SOGo" "$sogopassword"
+[ -n "${matomopassword:-}" ] && printf '  %-26s %s\n' "MySQL Matomo" "$matomopassword"
+[ -n "${matomoadminpassword:-}" ] && printf '  %-26s sentora_admin / %s\n' "Matomo super user" "$matomoadminpassword"
+echo
+printf '  %s%s%s\n' "$C_BOLD$C_YELLOW" "All of these are saved in /root/passwords.txt (readable by root only)" "$C_RESET"
+printf '  %s%s%s\n' "$C_DIM" "(phpMyAdmin's and Roundcube's encryption keys stay in their settings files," "$C_RESET"
+printf '  %s%s%s\n' "$C_DIM" " and SpamAV makes its database password itself)" "$C_RESET"
+echo
+if [ "${UI_WARN_COUNT:-0}" -gt 0 ]; then
+    ui_warn "$UI_WARN_COUNT warning(s) during the installation (details in the log):"
+    while IFS= read -r w; do
+        printf '      %s%s%s\n' "$C_YELLOW" "${w:0:$(( $(ui_cols) - 8 ))}" "$C_RESET"
+    done <<< "$UI_WARN_LIST"
+else
+    ui_ok "No warnings during the installation."
+fi
+printf '  %-26s %s\n' "Installation log" "$logfile"
+ui_heading "Next"
+echo "  1. Restart the server (below), then wait 5 minutes for the first daemon run."
+echo "  2. Check it:    sentora-post-install-check   then   sentora-smoke-test"
+echo "  3. Add-on modules (QuickFig, Apps, Payment Plans, Webalizer Stats and more):"
+echo "     Admin > Repo Browser lists them; install the ones you want"
+echo "  4. Later: sentora-update-check (bundled apps) and sentora-update (the panel;"
+echo "     --rollback undoes it); the off-server backup is in Admin > Backup Config."
+echo
+echo "  Customer feedback is on: once a day the panel sends the Sentora-2027 project a"
+echo "  short report about this server (versions, hardware, IP address, how busy it is,"
+echo "  counts of accounts and domains; never a name, email, password or file). What it"
+echo "  sent: /var/lib/sentora/feedback-last.json. To stop it:"
+echo "     setso --set customer_feedback false   (or Admin > Sentora Config)"
+
+# Wait until the user have read before restarts the server...
+if [[ "$INSTALL" != "auto" ]] ; then
+    while true; do
+        ui_yesno "Restart the server now to complete the installation?"
+        case $yn in
+            [Yy]* ) break;;
+            [Nn]* ) echo; echo "  Restart it yourself later: shutdown -r now"; echo; exit;
+        esac
+    done
+    shutdown -r now
+fi

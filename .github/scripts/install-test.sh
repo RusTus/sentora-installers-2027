@@ -4,7 +4,7 @@
 # (modsec-test.sh). Exit 0 only when the install worked, the check has no FAIL and both tests passed.
 #
 #   install-test.sh <system> <core checkout> <installers checkout> <results folder>
-#     system: ub26.04 | deb13 | alma10
+#     system: ub26.04 | deb13 | alma10 | fedora45
 #
 # Used by .github/workflows/install-test.yml (every release waits for it), and on a test machine.
 # Needs docker that can run privileged containers with cgroup v2. The files the installer downloads
@@ -22,7 +22,9 @@ case "$SYS" in
         PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata && apt-get clean' ;;
     alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; INSTALLER=sentora2027-alma10; TAG=alma10
         PREP='RUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all' ;;
-    *) echo "unknown system $SYS (ub26.04, deb13, alma10)"; exit 2 ;;
+    fedora45) IMAGE=quay.io/fedora/fedora:45; INSTALLER=sentora2027-fedora; TAG=fedora45
+        PREP='RUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all' ;;
+    *) echo "unknown system $SYS (ub26.04, deb13, alma10, fedora45)"; exit 2 ;;
 esac
 NAME=sentora-test-$SYS
 PORT=${TEST_PORT:-8088}
@@ -40,7 +42,7 @@ else
     echo "PHP bundles: none (the installer warns and goes on)"
 fi
 # SOGo, for the systems that get it from Sentora's own build (AlmaLinux)
-if [ "$SYS" = alma10 ]; then
+if [ "$SYS" = alma10 ] || [ "$SYS" = fedora45 ]; then
     if [ -n "${TEST_SOGO:-}" ] && [ -f "$TEST_SOGO" ]; then cp "$TEST_SOGO" "$DL/sentora-sogo-$TAG-amd64.tar.gz"
     elif command -v gh > /dev/null; then gh release download current --repo RusTus/sentora-installers-2027 -p "sentora-sogo-$TAG-amd64.tar.gz" -D "$DL" 2> /dev/null || true; fi
     ls "$DL"/sentora-sogo-* > /dev/null 2>&1 && echo "SOGo bundle: $(cd "$DL" && ls sentora-sogo-*)" || echo "SOGo bundle: none (SOGo is skipped)"
@@ -58,7 +60,7 @@ say "A fresh $IMAGE with systemd"
 CA=''
 if [ -n "${TEST_CA:-}" ]; then
     cp "$TEST_CA" "$OUT/test-ca.crt"
-    if [ "$SYS" = alma10 ]; then CA='COPY test-ca.crt /etc/pki/ca-trust/source/anchors/test-ca.crt
+    if [ "$SYS" = alma10 ] || [ "$SYS" = fedora45 ]; then CA='COPY test-ca.crt /etc/pki/ca-trust/source/anchors/test-ca.crt
 RUN update-ca-trust'
     else CA='COPY test-ca.crt /usr/local/share/ca-certificates/test-ca.crt
 RUN apt-get update -qq && apt-get install -yqq ca-certificates > /dev/null && update-ca-certificates > /dev/null'; fi
