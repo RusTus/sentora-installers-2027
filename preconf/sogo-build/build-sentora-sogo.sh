@@ -20,6 +20,8 @@ SOGO="${1:-}"
 LIBOBJC2="${LIBOBJC2:-v2.3}"
 GNUSTEP_MAKE="${GNUSTEP_MAKE:-make-2_9_3}"
 GNUSTEP_BASE="${GNUSTEP_BASE:-base-1_31_1}"
+# (Fedora's newer clang needs GNUstep base's development branch: base 1.31.1 does not build with it)
+[[ "$(. /etc/os-release; echo "$ID")" == fedora && -z "${GNUSTEP_BASE_SET:-}" ]] && GNUSTEP_BASE=master
 LIBWBXML="${LIBWBXML:-libwbxml-0.11.10}"
 YTNEF="${YTNEF:-v2.1.2}"
 PREFIX=/opt/sentora-sogo
@@ -54,6 +56,10 @@ dnf -y -q install clang lld cmake make git tar gzip xz which findutils patch dif
     openssl-devel zlib-devel expat-devel libuuid-devel python3 autoconf automake libtool > /dev/null
 
 export CC=clang CXX=clang++
+# GNUstep, SOPE and SOGo are older C/Objective-C: what newer clang turns into errors stays a warning
+# for them (newer Fedora clang refuses even GNUstep base's own configure check otherwise)
+RELAX="-Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=return-type"
+export CFLAGS="-g -O2 $RELAX" OBJCFLAGS="-g -O2 $RELAX"
 export PATH="$PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$PREFIX/lib64:$PREFIX/lib"
 export PKG_CONFIG_PATH="$PREFIX/lib64/pkgconfig:$PREFIX/lib/pkgconfig"
@@ -90,8 +96,6 @@ cmake -S libwbxml -B libwbxml/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_P
 cmake --build libwbxml/build -j"$JOBS" > /dev/null
 cmake --install libwbxml/build > /dev/null
 
-# SOPE and SOGo are older C/Objective-C: what newer clang turns into errors stays a warning for them
-RELAX="-Wno-error=incompatible-function-pointer-types -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=implicit-int -Wno-error=return-type"
 step "ytnef ($YTNEF)"
 fetch Yeraze/ytnef "$YTNEF" ytnef
 ( cd ytnef && autoreconf -fi > /dev/null 2>&1 && ./configure --prefix="$PREFIX" --libdir="$PREFIX/lib64" > /dev/null \
@@ -103,6 +107,11 @@ fetch Alinto/sope "SOPE-$SOGO" sope
 
 step "SOGo $SOGO (with ActiveSync)"
 fetch Alinto/sogo "SOGo-$SOGO" sogo
+# OpenSSL 4 (Fedora) no longer lets programs read inside ASN1_STRING: its own accessors do the same and
+# exist in OpenSSL 3 too, so every system builds the same code
+sed -i -e 's|p = cap->value.sequence->data;|p = ASN1_STRING_get0_data(cap->value.sequence);|' \
+       -e 's|ASN1_item_d2i(NULL, &p, cap->value.sequence->length,|ASN1_item_d2i(NULL, \&p, ASN1_STRING_length(cap->value.sequence),|' \
+    sogo/SoObjects/Mailer/NSData+SMIME.m
 ( cd sogo && LDFLAGS="-L$PREFIX/lib64" CPPFLAGS="-I$PREFIX/include" ./configure --enable-mfa --enable-sodium --enable-strip > /dev/null \
     && make CC="clang $RELAX" > /dev/null && make install CC="clang $RELAX" > /dev/null \
     && make -C ActiveSync -j"$JOBS" CC="clang $RELAX -L$PREFIX/lib64" > /dev/null \

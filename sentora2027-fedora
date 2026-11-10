@@ -1066,6 +1066,10 @@ fi
 #--- Automatic security updates: dnf-automatic, security fixes only, installed every day, never
 # rebooting by itself (a kernel update waits for a restart you choose)
 install_available dnf5-plugin-automatic
+# (dnf5 reads /etc/dnf/automatic.conf over its own defaults, but does not make it: Sentora's, from them)
+if [ ! -s /etc/dnf/automatic.conf ] && [ -f /usr/share/dnf5/dnf5-plugins/automatic.conf ]; then
+    cp /usr/share/dnf5/dnf5-plugins/automatic.conf /etc/dnf/automatic.conf
+fi
 if [ -f /etc/dnf/automatic.conf ]; then
     sed -i -e 's/^upgrade_type *=.*/upgrade_type = security/' -e 's/^apply_updates *=.*/apply_updates = yes/' \
         -e 's/^download_updates *=.*/download_updates = yes/' -e 's/^reboot *=.*/reboot = never/' /etc/dnf/automatic.conf
@@ -1431,7 +1435,7 @@ systemctl restart postfix
 ui_step "Installing SpamAssassin and ClamAV"
 # (not sa-compile: compiling the rules is only a small speed-up, and its package setup
 # compiles them at once, which takes minutes and fails on a server without rules yet)
-install_available spamassassin spamass-milter spamass-milter-postfix perl-DBD-MySQL clamav clamd clamav-milter clamav-freshclam
+install_available spamassassin spamass-milter spamass-milter-postfix perl-DBD-MariaDB clamav clamd clamav-milter clamav-freshclam
 # SpamAssassin's children run as their own user (Fedora has none for it)
 id spamd > /dev/null 2>&1 || useradd -r -d /var/lib/spamassassin -s /sbin/nologin -c "SpamAssassin" spamd
 mkdir -p /var/lib/spamassassin; chown spamd:spamd /var/lib/spamassassin
@@ -2092,6 +2096,9 @@ SOCKET="{socket}"
 SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
 so dnf_automatic_package dnf5-plugin-automatic; so dnf_automatic_timer dnf5-automatic.timer
+# (Fedora's DBD::mysql is built for MySQL 9, which can not log in to MariaDB's accounts: SpamAssassin
+# reads its per-mailbox settings with DBD::MariaDB; and "mysql" is only an old name of MariaDB's client)
+so spamassassin_dbi_driver MariaDB; so db_client mariadb
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
 so php_bundle_tag fedora45; so php_bundle_libs "$PHP_BUNDLE_LIBS"
 # ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
