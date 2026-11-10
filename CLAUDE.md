@@ -58,12 +58,16 @@ SELinux enforcing, no SOGo). What differs between systems lives in hidden x_sett
 installer sets its values in its "Configuring Sentora" step. Keep the core free of distribution
 names (see the standing rule above).
 
-**Tested:** Debian 13 on the owner's VM (post-install check 0 FAIL, smoke test 26/26). Debian and
-AlmaLinux in Docker containers with systemd (post-install check 0 FAIL, smoke test passes).
-**Not yet tested on a real server:** AlmaLinux 10 with SELinux enforcing (containers have no
-SELinux). The owner will install it on a VM; collect denials with
-`ausearch -m avc -ts boot | audit2why` and turn them into a small Sentora SELinux policy module
-(never switch SELinux off: "less secure, not done").
+**Tested:** Debian 13 on the owner's VM (post-install check 0 FAIL, smoke test 26/26). AlmaLinux 10.2
+on the owner's VM with SELinux enforcing (release 2027.65: post-install check 81 OK / 0 FAIL, smoke
+test 25/26 with SOGo skipped, no SELinux denials since boot). Debian and AlmaLinux also in Docker
+containers with systemd. **SELinux:** labels are set in the AlmaLinux installer's SELinux step
+(semanage fcontext, restorecon, booleans); what labels can not fix goes in
+`preconf/selinux/sentora.cil` (installers repo, loaded with `semodule -i`; one rule so far: BIND may
+enter /var/sentora/logs). Some refusals are not logged (dontaudit): when a service fails with
+"permission denied" and `ausearch` shows nothing, check its rules with `sesearch` (an AlmaLinux 10
+container with selinux-policy-targeted, -targeted-extra from CRB, and setools-console). Never
+switch SELinux off ("less secure, not done").
 
 **PHP bundles:** built on GitHub by Actions > PHP bundles (system ubuntu26.04, debian13 or alma10;
 versions empty = usual set, `8.4` = newest from php.net, or exact; `list_only` rewrites the list).
@@ -76,8 +80,8 @@ Versions when a newer build is ready; nothing is ever compiled on a server (owne
    and AlmaLinux 10 (containers with systemd), run sentora-post-install-check and
    sentora-smoke-test, and only publish when they pass. (Containers need `--privileged`, cgroup2
    and systemd as PID 1; see how the sessions tested: a Dockerfile with systemd, `CMD /sbin/init`.)
-2. When the owner sends AlmaLinux VM results: fix what SELinux blocks (policy module), then
-   `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62/63 core.
+2. `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62-65 core
+   (the milter sockets and ClamAV paths became settings in 2027.64; Debian keeps the old values).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
@@ -91,8 +95,7 @@ PayPal/Stripe test modes; no webhooks yet, so a refund or chargeback after payme
 `tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
 before publishing a change; `run.sh <unzipped module folder>` tests a working copy, without it the .zpp).
 
-**Ideas the owner is still thinking about (do not start without asking):** a SELinux policy module
-(after the VM test), a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each
+**Ideas the owner is still thinking about (do not start without asking):** a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each
 panel's system on the feedback server's stats page, one install command that picks the right
 installer. Hosting for the add-on repository and the feedback server was deferred by the owner.
 
