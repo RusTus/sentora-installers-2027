@@ -113,6 +113,8 @@ PayPal/Stripe test modes; no webhooks yet, so a refund or chargeback after payme
 `tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
 before publishing a change; `run.sh <unzipped module folder>` tests a working copy, without it the .zpp).
 
+**PHP Hardening (add-on, sentora-repo/php_hardening.zpp, 100, administrators):** switches on Snuffleupagus (Suhosin's successor). The PHP bundles carry it switched off; Actions > PHP bundles also builds it for each system's own PHP (`sentora-snuffleupagus-<ver>-php<MM>-<system>-amd64.so` on the release, listed in php-bundles.json under `snuffleupagus`). Per PHP: off, watch only (simulation: logged, not blocked) or on; rules in `ph::Catalog()`; the daemon writes 90-sentora-php-hardening.ini and the rules into that PHP's own scan dir, tries PHP with them first, reloads, puts back on failure; what it caught comes from `journalctl -t snuffleupagus`. Not used: read-only-exec (sites own their files) and anything needing a secret key (the rules file is world-readable). Not yet tried on a real server (needs the PHP bundles workflow run for each system first). Tests: `tests/php_hardening/run.sh` (real extension, fake PHP-FPMs).
+
 **Ideas the owner is still thinking about (do not start without asking):** Hosting for the add-on repository and the feedback server was deferred by the owner.
 
 **Working with the owner:** plain words, short; test before saying something works; commit and
