@@ -586,7 +586,7 @@ if printf '%s' "$APT_OUT" | grep -qi "not valid yet\|is in the future"; then
     exit 1
 fi
 install_available bind9-dnsutils
-$PACKAGE_INSTALLER wget unzip iproute2
+$PACKAGE_INSTALLER wget curl unzip iproute2
 
 # Public IP as seen from the internet. api.sentora.org/ip.txt (used before) no
 # longer answers, which left the IP empty and broke BIND's config. Try several
