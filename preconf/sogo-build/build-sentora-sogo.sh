@@ -28,8 +28,12 @@ WORK="${WORK:-/tmp/sogo-build}"
 JOBS=$(nproc)
 
 . /etc/os-release
-if [[ ! "${ID:-}" =~ ^(almalinux|rocky)$ || "${VERSION_ID%%.*}" != "10" ]]; then
-    echo "This builds SOGo for AlmaLinux 10 / Rocky 10 (this is ${PRETTY_NAME:-unknown})."; exit 2
+if [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
+    OS_TAG=alma10
+elif [[ "${ID:-}" == "fedora" ]]; then
+    OS_TAG="fedora${VERSION_ID:-}"
+else
+    echo "This builds SOGo for AlmaLinux 10 / Rocky 10 or Fedora (this is ${PRETTY_NAME:-unknown})."; exit 2
 fi
 if [ -z "$SOGO" ]; then
     SOGO=$(git ls-remote --tags https://github.com/Alinto/sogo | grep -oE 'SOGo-[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/SOGo-//' | sort -V | tail -1)
@@ -39,9 +43,11 @@ echo "== SOGo $SOGO (SOPE $SOGO), libobjc2 $LIBOBJC2, $GNUSTEP_MAKE, $GNUSTEP_BA
 
 step() { printf '\n==== %s  (%s)\n' "$1" "$(date '+%H:%M:%S')"; }
 
-step "Build tools and libraries (AlmaLinux, EPEL, CRB)"
-dnf -y -q install epel-release dnf-plugins-core > /dev/null
-dnf config-manager --set-enabled crb
+step "Build tools and libraries ($OS_TAG)"
+if [ "$OS_TAG" = alma10 ]; then
+    dnf -y -q install epel-release dnf-plugins-core > /dev/null
+    dnf config-manager --set-enabled crb
+fi
 dnf -y -q install clang lld cmake make git tar gzip xz which findutils patch diffutils pkgconf-pkg-config \
     gnutls-devel libffi-devel libxml2-devel libxslt-devel libicu-devel libcurl-devel openldap-devel \
     mariadb-connector-c-devel libmemcached-awesome-devel libzip-devel libsodium-devel liboath-devel \
@@ -125,7 +131,7 @@ done
     | awk '$2 == "=>" && $3 ~ /^\// {print $3}' | grep -v "^$PREFIX/" | sed 's|^/lib64/|/usr/lib64/|' | sort -u > "$PREFIX/RUNTIME-LIBS"
 echo "System libraries it needs: $(wc -l < "$PREFIX/RUNTIME-LIBS")"
 cat > "$PREFIX/BUILD-INFO" <<EOF
-system=alma10
+system=$OS_TAG
 sogo=$SOGO
 libobjc2=$LIBOBJC2
 gnustep-make=$GNUSTEP_MAKE
@@ -134,7 +140,7 @@ libwbxml=$LIBWBXML
 ytnef=$YTNEF
 built=$(date -u '+%Y-%m-%d %H:%M UTC')
 EOF
-TAR="$OUT/sentora-sogo-alma10-amd64.tar.gz"
+TAR="$OUT/sentora-sogo-$OS_TAG-amd64.tar.gz"
 tar -C / -czf "$TAR" "${PREFIX#/}"
 sha256sum "$TAR" | tee "$TAR.sha256"
 cat "$PREFIX/BUILD-INFO"

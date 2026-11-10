@@ -1,6 +1,6 @@
-# SOGo for AlmaLinux 10 / Rocky 10 (they have no SOGo package): builds SOGo with everything it needs
+# SOGo for AlmaLinux 10 / Rocky 10 / RHEL 10 and Fedora (they have no SOGo package): builds SOGo with everything it needs
 # into /opt/sentora-sogo (preconf/sogo-build/build-sentora-sogo.sh) in an AlmaLinux 10 container, and
-# puts sentora-sogo-alma10-amd64.tar.gz on the "current" release, where sentora2027-alma10 takes it
+# puts sentora-sogo-<system>-amd64.tar.gz on the "current" release, where sentora2027-alma10 (or -fedora) takes it
 # (checked against the SHA-256 GitHub lists for it). Nothing is compiled on a customer's server.
 # Run it from Actions > SOGo bundle > Run workflow (version empty: SOGo's newest release).
 name: SOGo bundle
@@ -11,6 +11,11 @@ on:
       version:
         description: SOGo version (e.g. 5.12.13; empty = the newest)
         default: ''
+      system:
+        description: The system to build for
+        type: choice
+        options: [alma10, fedora45]
+        default: alma10
 
 permissions:
   contents: write
@@ -23,7 +28,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    container: quay.io/almalinuxorg/almalinux:10
+    container: ${{ inputs.system == 'fedora45' && 'quay.io/fedora/fedora:45' || 'quay.io/almalinuxorg/almalinux:10' }}
     steps:
       - name: Tools
         run: dnf -y -q install git tar gzip > /dev/null
@@ -42,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sogo-bundle
-          path: out/sentora-sogo-alma10-amd64.tar.gz
+          path: out/sentora-sogo-${{ inputs.system }}-amd64.tar.gz
           retention-days: 3
 
   publish:
@@ -57,10 +62,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tar -xzOf sentora-sogo-alma10-amd64.tar.gz opt/sentora-sogo/BUILD-INFO
-          sha256sum sentora-sogo-alma10-amd64.tar.gz
+          tar -xzOf sentora-sogo-${{ inputs.system }}-amd64.tar.gz opt/sentora-sogo/BUILD-INFO
+          sha256sum sentora-sogo-${{ inputs.system }}-amd64.tar.gz
           for try in 1 2 3 4 5; do
-            gh release upload current sentora-sogo-alma10-amd64.tar.gz --clobber --repo "$GITHUB_REPOSITORY" && exit 0
+            gh release upload current sentora-sogo-${{ inputs.system }}-amd64.tar.gz --clobber --repo "$GITHUB_REPOSITORY" && exit 0
             echo "Upload failed (try $try)"; sleep $(( try * 15 ))
           done
           exit 1

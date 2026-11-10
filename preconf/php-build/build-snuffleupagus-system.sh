@@ -19,6 +19,8 @@ elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
     OS_TAG="debian13"
 elif [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
     OS_TAG="alma10"
+elif [[ "${ID:-}" == "fedora" ]]; then
+    OS_TAG="fedora${VERSION_ID:-}"
 else
     OS_TAG=""
 fi
@@ -29,7 +31,9 @@ fi
 
 # The system's PHP and its development files (phpize, php-config, headers)
 if [ "${SKIP_APT:-0}" != "1" ]; then
-    if [ "$OS_TAG" = alma10 ]; then
+    if [[ "$OS_TAG" == fedora* ]]; then
+        dnf -y -q install php-cli php-devel gcc make git
+    elif [ "$OS_TAG" = alma10 ]; then
         dnf -y -q install dnf-plugins-core
         dnf config-manager --set-enabled crb
         dnf -y -q install php-cli php-devel gcc make git

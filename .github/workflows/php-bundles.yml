@@ -1,12 +1,12 @@
 # Builds the extra PHP versions (Sentora's own builds, beside the system's PHP) for one system:
-#   ubuntu26.04 (Ubuntu 26.04), debian13 (Debian 13), alma10 (AlmaLinux 10 and Rocky Linux 10)
+#   ubuntu26.04 (Ubuntu 26.04), debian13 (Debian 13), alma10 (AlmaLinux, Rocky, RHEL 10), fedora45 (Fedora 45)
 # in a container of that system, with the build scripts in preconf/php-build, and puts them on the
 # release tagged "current" (replacing files of the same names): sentora-php-<major.minor>-<system>-amd64.tar.gz.
 # The installers and sentora-php-install download them from there. A bundle runs only on the system
 # it was built on.
 #
 # Run it from Actions > PHP bundles > Run workflow. Versions:
-#   empty        the system's usual set: Ubuntu 8.2 8.3 8.4, Debian 8.2 8.3 8.5, AlmaLinux 8.2 8.4 8.5
+#   empty        the system's usual set: Ubuntu 8.2 8.3 8.4, Debian 8.2 8.3 8.5, AlmaLinux 8.2 8.4 8.5, Fedora 8.2 8.3 8.4
 #   8.4          the newest 8.4 release, asked from php.net
 #   8.4.28       exactly that release
 #   7.1, 7.4     the steps for old apps (7.4: Ubuntu only); 8.1 the same as any 8.x (no more releases)
@@ -30,7 +30,7 @@ on:
       system:
         description: The system to build for
         type: choice
-        options: [ubuntu26.04, debian13, alma10]
+        options: [ubuntu26.04, debian13, alma10, fedora45]
         default: ubuntu26.04
       versions:
         description: "PHP versions (empty: the system's usual set; 8.4 = the newest 8.4; or exact, such as 8.4.28; 7.1, 7.4)"
@@ -63,7 +63,7 @@ jobs:
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os, re, sys, urllib.request
           system = os.environ['SYSTEM']
-          usual = {'ubuntu26.04': '8.2 8.3 8.4', 'debian13': '8.2 8.3 8.5', 'alma10': '8.2 8.4 8.5'}[system]
+          usual = {'ubuntu26.04': '8.2 8.3 8.4', 'debian13': '8.2 8.3 8.5', 'alma10': '8.2 8.4 8.5', 'fedora45': '8.2 8.3 8.4'}[system]
           asked = os.environ.get('VERSIONS', '').split() or usual.split()
           out = []
           for v in asked:
@@ -90,7 +90,7 @@ jobs:
   build:
     needs: list
     runs-on: ubuntu-latest
-    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04') }}
+    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'fedora45' && 'quay.io/fedora/fedora:45' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +129,7 @@ jobs:
   snuffleupagus:
     if: ${{ !inputs.list_only }}
     runs-on: ubuntu-latest
-    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04') }}
+    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'fedora45' && 'quay.io/fedora/fedora:45' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04')) }}
     steps:
       - name: Tools
         run: |

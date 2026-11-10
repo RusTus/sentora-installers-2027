@@ -44,6 +44,8 @@ elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
     OS_TAG="debian13"; OS_NAME="Debian 13"
 elif [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
     OS_TAG="alma10"; OS_NAME="AlmaLinux 10"
+elif [[ "${ID:-}" == "fedora" ]]; then
+    OS_TAG="fedora${VERSION_ID:-}"; OS_NAME="Fedora ${VERSION_ID:-}"
 else
     OS_TAG=""
 fi
@@ -58,12 +60,14 @@ ADDONS="apcu redis memcached imagick"
 # where PHP 7.1's configure looks for libraries (--with-libdir), and the compiled-in OpenSSL's
 # folder of CA certificates
 LIBDIR=lib/x86_64-linux-gnu; SSLDIR=/usr/lib/ssl
-[ "$OS_TAG" = alma10 ] && { LIBDIR=lib64; SSLDIR=/etc/pki/tls; }
+[[ "$OS_TAG" == alma10 || "$OS_TAG" == fedora* ]] && { LIBDIR=lib64; SSLDIR=/etc/pki/tls; }
 
-if [ "$OS_TAG" = alma10 ]; then
+if [[ "$OS_TAG" == alma10 || "$OS_TAG" == fedora* ]]; then
     if [ "${SKIP_APT:-0}" != "1" ]; then
-        dnf -y -q install epel-release dnf-plugins-core
-        dnf config-manager --set-enabled crb
+        if [ "$OS_TAG" = alma10 ]; then
+            dnf -y -q install epel-release dnf-plugins-core
+            dnf config-manager --set-enabled crb
+        fi
         dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz perl tar openssl \
             libpng-devel libjpeg-turbo-devel freetype-devel libwebp-devel gmp-devel zlib-devel gnutls-devel \
             openssl-devel libmemcached-awesome-devel cyrus-sasl-devel ImageMagick-devel krb5-devel

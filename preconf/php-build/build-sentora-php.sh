@@ -39,23 +39,27 @@ elif [[ "${ID:-} ${VERSION_ID:-}" == "debian 13" ]]; then
     OS_TAG="debian13"; OS_NAME="Debian 13"
 elif [[ "${ID:-}" =~ ^(almalinux|rocky)$ && "${VERSION_ID%%.*}" == "10" ]]; then
     OS_TAG="alma10"; OS_NAME="AlmaLinux 10"
+elif [[ "${ID:-}" == "fedora" ]]; then
+    OS_TAG="fedora${VERSION_ID:-}"; OS_NAME="Fedora ${VERSION_ID:-}"
 else
     OS_TAG=""
 fi
 if [ -z "$OS_TAG" ] || [ "$(uname -m)" != "x86_64" ]; then
-    echo "This builds for Ubuntu 26.04, Debian 13 or AlmaLinux 10 amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
+    echo "This builds for Ubuntu 26.04, Debian 13, AlmaLinux 10 or Fedora amd64 only (this is ${PRETTY_NAME:-unknown} $(uname -m))."
     exit 1
 fi
 OUT="$(pwd)/sentora-php-$MM-$OS_TAG-amd64.tar.gz"
 
 # Build tools and the -dev packages of the libraries PHP links against
 LIBDIR=lib
-if [ "$OS_TAG" = alma10 ]; then
+if [[ "$OS_TAG" == alma10 || "$OS_TAG" == fedora* ]]; then
     # AlmaLinux keeps its libraries in lib64; the -devel packages are in AppStream, CRB and EPEL
     LIBDIR=lib64
     if [ "${SKIP_APT:-0}" != "1" ]; then
-        dnf -y -q install epel-release dnf-plugins-core
-        dnf config-manager --set-enabled crb
+        if [ "$OS_TAG" = alma10 ]; then
+            dnf -y -q install epel-release dnf-plugins-core
+            dnf config-manager --set-enabled crb
+        fi
         dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar openssl git \
             libxml2-devel libcurl-devel oniguruma-devel libzip-devel libicu-devel libsodium-devel \
             libargon2-devel libxslt-devel libpng-devel libjpeg-turbo-devel libwebp-devel freetype-devel \
