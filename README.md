@@ -22,6 +22,8 @@ The installer downloads from the GitHub releases of both repositories with the t
 | [sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027/releases) | `sentora2027-ub26.04` | The installer for Ubuntu 26.04 |
 | | `sentora2027-deb13` | The installer for Debian 13 |
 | | `sentora2027-alma10` | The installer for AlmaLinux 10 (and Rocky Linux 10) |
+| | `sentora2027-install` | One install command for all of them: picks the right installer |
+| | `sentora-sogo-alma10-amd64.tar.gz` | SOGo for AlmaLinux 10 (built by **Actions > SOGo bundle**) |
 | | `sentora-installers-2027.zip` | This repository |
 | | `sentora-php-8.2-ubuntu26.04-amd64.tar.gz` to `8.4` | Optional extra PHP versions for Ubuntu 26.04 (a missing file means that version is not installed) |
 | | `sentora-php-8.2-debian13-amd64.tar.gz`, `8.3`, `8.5`, `7.1` | The same for Debian 13 (built by **Actions > PHP bundles**) |
@@ -40,7 +42,16 @@ To publish a new version, push to `master2027` and run **Actions > Release > Run
 
 ## Installing
 
-On a clean Ubuntu 26.04 server, as root:
+The same command on every supported system (Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10), on a
+clean server, as root. It finds out which system this is, downloads that system's installer below
+(checked against its SHA-256) and runs it; `--check` only downloads and checks it.
+
+```bash
+wget -O sentora2027-install https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-install
+bash sentora2027-install
+```
+
+Or each system's own installer. On a clean Ubuntu 26.04 server, as root:
 
 ```bash
 wget -O sentora2027-ub26.04 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-ub26.04
@@ -71,7 +82,7 @@ wget -O sentora2027-alma10 https://github.com/RusTus/sentora-installers-2027/rel
 bash sentora2027-alma10
 ```
 
-On AlmaLinux everything comes from AlmaLinux's own packages and EPEL (PHP 8.3, MariaDB 10.11, Apache, Postfix, Dovecot 2.3, BIND 9.18, ProFTPD, SpamAssassin, ClamAV, fail2ban), kept current by `dnf upgrade` and dnf-automatic's daily security updates. SELinux stays on (enforcing): the installer labels Sentora's folders and switches on what the services need; firewalld, when it runs, gets Sentora's ports. SOGo (groupware and ActiveSync) is not available for AlmaLinux: webmail is Roundcube.
+On AlmaLinux everything comes from AlmaLinux's own packages and EPEL (PHP 8.3, MariaDB 10.11, Apache, Postfix, Dovecot 2.3, BIND 9.18, ProFTPD, SpamAssassin, ClamAV, fail2ban), kept current by `dnf upgrade` and dnf-automatic's daily security updates. SELinux stays on (enforcing): the installer labels Sentora's folders and switches on what the services need; firewalld, when it runs, gets Sentora's ports. SOGo (groupware and ActiveSync) comes from Sentora's own build (AlmaLinux has no SOGo package): **Actions > SOGo bundle** builds it from SOGo's free sources into `/opt/sentora-sogo` (see `preconf/sogo-build/README`), and the installer downloads it, checked against its SHA-256.
 
 Or without questions:
 

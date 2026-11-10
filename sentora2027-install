@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Sentora-2027: one install command for every supported system. It reads which Linux this is,
+# downloads that system's installer from the same release, checks it against the SHA-256 GitHub lists
+# for it, and runs it with the same options (-d, -i, -t ...).
+#
+#   wget -O sentora2027-install https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-install
+#   bash sentora2027-install
+#   bash sentora2027-install --check   (only download and check this system's installer, run nothing)
+#
+# Supported: Ubuntu 26.04 (sentora2027-ub26.04), Debian 13 (sentora2027-deb13), AlmaLinux 10 and
+# Rocky Linux 10 (sentora2027-alma10).
+set -u
+REPO="RusTus/sentora-installers-2027"
+TAG="current"
+
+[ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
+[ -r /etc/os-release ] || { echo "This system does not say what it is (/etc/os-release): Sentora can not be installed here."; exit 1; }
+. /etc/os-release
+case "${ID:-} ${VERSION_ID:-}" in
+    "ubuntu 26.04")              INSTALLER=sentora2027-ub26.04 ;;
+    "debian 13"*)                INSTALLER=sentora2027-deb13 ;;
+    "almalinux 10"*|"rocky 10"*) INSTALLER=sentora2027-alma10 ;;
+    *)
+        echo "Sentora-2027 does not support ${PRETTY_NAME:-this system} yet."
+        echo "Supported: Ubuntu 26.04, Debian 13, AlmaLinux 10 and Rocky Linux 10 (fresh servers)."
+        exit 1 ;;
+esac
+echo "${PRETTY_NAME:-$ID $VERSION_ID}: the installer is $INSTALLER"
+
+# a download tool (a minimal system may have only one of them)
+fetch() { # url file
+    if command -v wget > /dev/null 2>&1; then wget -q -O "$2" "$1"
+    elif command -v curl > /dev/null 2>&1; then curl -fsSL -o "$2" "$1"
+    else return 1; fi
+}
+if ! command -v wget > /dev/null 2>&1 && ! command -v curl > /dev/null 2>&1; then
+    echo "Installing wget to download the installer"
+    if command -v apt-get > /dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get -qq update > /dev/null && apt-get -qq -y install wget ca-certificates > /dev/null
+    else dnf -y -q install wget ca-certificates > /dev/null; fi
+fi
+
+DIR=$(mktemp -d /tmp/sentora-install.XXXXXX)
+trap 'rm -rf "$DIR"' EXIT
+fetch "https://github.com/$REPO/releases/download/$TAG/$INSTALLER" "$DIR/$INSTALLER" && [ -s "$DIR/$INSTALLER" ] \
+    || { echo "The installer could not be downloaded (https://github.com/$REPO/releases/tag/$TAG)."; exit 1; }
+# its SHA-256 as GitHub lists it on the release
+WANT=""
+if fetch "https://api.github.com/repos/$REPO/releases/tags/$TAG" "$DIR/release.json"; then
+    WANT=$(awk -v want="$INSTALLER" '
+        /^ *"name": *"/ { n = $0; sub(/^ *"name": *"/, "", n); sub(/".*/, "", n) }
+        /^ *"digest": *"sha256:/ && n == want { d = $0; sub(/^ *"digest": *"sha256:/, "", d); sub(/".*/, "", d); print d; exit }' "$DIR/release.json")
+fi
+if [ -n "$WANT" ]; then
+    [ "$(sha256sum "$DIR/$INSTALLER" | cut -d' ' -f1)" = "$WANT" ] || { echo "$INSTALLER does not match the SHA-256 GitHub lists for it: not run."; exit 1; }
+    echo "SHA-256 matches the release"
+else
+    echo "(not checked: GitHub's release API did not answer)"
+fi
+head -c 2 "$DIR/$INSTALLER" | grep -q '#!' || { echo "$INSTALLER is not an installer script: not run."; exit 1; }
+cp "$DIR/$INSTALLER" "./$INSTALLER" && chmod 700 "./$INSTALLER" || { echo "Could not write ./$INSTALLER here: run this from a folder root can write to."; exit 1; }
+echo "(saved here: ./$INSTALLER)"
+if [ "${1:-}" = "--check" ]; then
+    echo "--check: $INSTALLER is ready, nothing was run."
+    exit 0
+fi
+echo
+exec bash "./$INSTALLER" "$@"
