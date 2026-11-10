@@ -10,7 +10,7 @@
 # Needs docker that can run privileged containers with cgroup v2. The files the installer downloads
 # are served from this machine (SENTORA_DOWNLOAD_URL): the core and installers zips made from the two
 # checkouts, and the system's PHP bundles from the current release (when gh can fetch them).
-# On a test machine: CGROUP_DIR (a cgroup2 mount, default /sys/fs/cgroup) and TEST_CA (a certificate
+# On a test machine: TEST_SOGO (a SOGo bundle file to use instead of the release's), CGROUP_DIR (a cgroup2 mount, default /sys/fs/cgroup) and TEST_CA (a certificate
 # file the containers must trust, e.g. a proxy's) when that machine needs them.
 set -uo pipefail
 SYS=${1:?system}; CORE=$(cd "${2:?core checkout}" && pwd); INST=$(cd "${3:?installers checkout}" && pwd); OUT=${4:?results folder}
@@ -38,6 +38,12 @@ if command -v gh > /dev/null && gh release download current --repo RusTus/sentor
     echo "PHP bundles: $(cd "$DL" && ls sentora-php-* 2> /dev/null | tr '\n' ' ')"
 else
     echo "PHP bundles: none (the installer warns and goes on)"
+fi
+# SOGo, for the systems that get it from Sentora's own build (AlmaLinux)
+if [ "$SYS" = alma10 ]; then
+    if [ -n "${TEST_SOGO:-}" ] && [ -f "$TEST_SOGO" ]; then cp "$TEST_SOGO" "$DL/sentora-sogo-$TAG-amd64.tar.gz"
+    elif command -v gh > /dev/null; then gh release download current --repo RusTus/sentora-installers-2027 -p "sentora-sogo-$TAG-amd64.tar.gz" -D "$DL" 2> /dev/null || true; fi
+    ls "$DL"/sentora-sogo-* > /dev/null 2>&1 && echo "SOGo bundle: $(cd "$DL" && ls sentora-sogo-*)" || echo "SOGo bundle: none (SOGo is skipped)"
 fi
 ls -la "$DL"
 

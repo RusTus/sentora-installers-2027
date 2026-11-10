@@ -1947,10 +1947,89 @@ ln -sf $PANEL_CONF/roundcube/password_config.inc.php "$RC_PATH/plugins/password/
 ##
 #--- SOGo groupware: webmail, calendars and contacts, with ActiveSync for phones and Outlook
 ##
-# (SOGo groupware: neither AlmaLinux nor EPEL packages it, and SOGo's own packages for Red Hat
-# systems need a support subscription. Webmail is Roundcube; Mail Config shows SOGo as not installed.)
-echo "SOGo is not available for AlmaLinux: webmail is Roundcube (calendars and ActiveSync are not installed)."
+# Neither AlmaLinux nor EPEL packages SOGo (and SOGo's own packages for Red Hat systems need a support
+# subscription): Sentora builds it from SOGo's free sources on GitHub (Actions > SOGo bundle,
+# preconf/sogo-build) into /opt/sentora-sogo, and puts sentora-sogo-alma10-amd64.tar.gz on the release.
+# It is downloaded here and checked against its SHA-256; nothing is compiled on this server. Without
+# it (not built yet, or not downloadable) webmail is Roundcube alone and Mail Config shows SOGo as not
+# installed.
+ui_step "Installing SOGo groupware with ActiveSync"
 sogopassword=""
+SOGO_PREFIX=/opt/sentora-sogo
+SOGO_TAR=sentora-sogo-alma10-amd64.tar.gz
+SOGO_STAGE=$(mktemp -d /tmp/sentora-sogo.XXXXXX)
+if [ "$(uname -m)" != "x86_64" ]; then
+    echo "SOGo is built for x86_64 only: this server gets Roundcube alone."
+elif ! download_file "$SOGO_TAR" "$SOGO_STAGE/$SOGO_TAR" "$SENTORA_INSTALLERS_REPO"; then
+    ui_warn "SOGo skipped: $SOGO_TAR could not be downloaded (webmail is Roundcube)."
+elif ! tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -qx 'opt/sentora-sogo/sbin/sogod' \
+        || tar -tzf "$SOGO_STAGE/$SOGO_TAR" | grep -vq '^opt/sentora-sogo/'; then
+    ui_warn "SOGo skipped: $SOGO_TAR is not a Sentora SOGo bundle."
+else
+    rm -rf "$SOGO_PREFIX"
+    tar -xzf "$SOGO_STAGE/$SOGO_TAR" -C /
+    chown -R root:root "$SOGO_PREFIX"
+    echo "SOGo: $(grep -E '^(sogo|built)=' "$SOGO_PREFIX/BUILD-INFO" | tr '\n' ' ')"
+    $PACKAGE_INSTALLER memcached
+    id sogo > /dev/null 2>&1 || useradd -r -d /var/lib/sogo -m -s /sbin/nologin -c "SOGo groupware" sogo
+    mkdir -p /etc/sogo /var/log/sogo /var/spool/sogo /var/backups/sogo $PANEL_CONF/sogo
+    chown sogo:sogo /var/log/sogo /var/spool/sogo /var/backups/sogo
+    chmod 750 /var/log/sogo /var/spool/sogo /var/backups/sogo
+    # SOGo's tools, with the library path they need (the panel runs them from here: sogo_tool_dir)
+    for t in sogo-tool sogo-ealarms-notify sogo-slapd-sockd sogo-backup; do
+        [ -x "$SOGO_PREFIX/sbin/$t" ] || continue
+        printf '#!/bin/bash\n# SOGo (Sentora build in %s)\nexport LD_LIBRARY_PATH=%s/lib64:%s/lib\nexport PATH=%s/sbin:%s/bin:$PATH\nexec %s/sbin/%s "$@"\n' \
+            "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$SOGO_PREFIX" "$t" > "/usr/local/sbin/$t"
+        chmod 755 "/usr/local/sbin/$t"
+    done
+    # the service: sogod as the user sogo, only its library path set, listening on 127.0.0.1:20000
+    cat > /etc/systemd/system/sogo.service <<SOGOUNIT
+# Sentora: SOGo groupware (built by Sentora into $SOGO_PREFIX; settings in /etc/sogo/sogo.conf)
+[Unit]
+Description=SOGo groupware (Sentora)
+After=network.target mariadb.service memcached.service
+Wants=memcached.service
+
+[Service]
+Type=simple
+User=sogo
+Group=sogo
+Environment=LD_LIBRARY_PATH=$SOGO_PREFIX/lib64:$SOGO_PREFIX/lib
+RuntimeDirectory=sogo
+ExecStart=$SOGO_PREFIX/sbin/sogod -WONoDetach YES -WOPidFile /run/sogo/sogo.pid -WOLogFile /var/log/sogo/sogo.log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+SOGOUNIT
+    systemctl daemon-reload
+    # memcached (SOGo's cache): this server only
+    [ -f /etc/sysconfig/memcached ] && sed -i 's|^OPTIONS=.*|OPTIONS="-l 127.0.0.1 -U 0"|' /etc/sysconfig/memcached
+    sogopassword=$(passwordgen)
+    sqlroot -e "CREATE DATABASE IF NOT EXISTS sentora_sogo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        sqlroot -e "CREATE USER IF NOT EXISTS 'sogo'@'$SOGO_HOST' IDENTIFIED BY '$sogopassword'; GRANT ALL PRIVILEGES ON sentora_sogo.* TO 'sogo'@'$SOGO_HOST'"
+    done
+    # SOGo logs in with the panel's mailboxes: a read-only view of them (as on Debian and Ubuntu)
+    sqlroot -e "CREATE OR REPLACE SQL SECURITY DEFINER VIEW sentora_postfix.sogo_users AS SELECT username AS c_uid, username AS c_name, CASE WHEN password LIKE '{PLAIN-MD5}%' THEN SUBSTRING(password, 12) ELSE password END AS c_password, COALESCE(NULLIF(name, ''), username) AS c_cn, username AS mail, domain AS c_domain FROM sentora_postfix.mailbox WHERE active = '1'"
+    for SOGO_HOST in localhost 127.0.0.1; do
+        sqlroot -e "GRANT SELECT ON sentora_postfix.sogo_users TO 'sogo'@'$SOGO_HOST'"
+    done
+    sed -e "s|!SOGO_PASSWORD!|$sogopassword|g" -e "s|!MYSQL_PORT!|3306|g" -e "s|!PANEL_FQDN!|$PANEL_FQDN|" -e "s|!TIMEZONE!|${tz:-UTC}|" \
+        $PANEL_CONF/sogo/sogo.conf > /etc/sogo/sogo.conf
+    chown root:sogo /etc/sogo/sogo.conf
+    chmod 640 /etc/sogo/sogo.conf
+    $PANEL_PATH/panel/bin/setso --set sogo_timezone "${tz:-UTC}" > /dev/null
+    # Apache serves /SOGo (web, CalDAV, CardDAV) and /Microsoft-Server-ActiveSync; its web files are here
+    sed "s|/usr/lib/x86_64-linux-gnu/GNUstep/SOGo/|$SOGO_PREFIX/lib64/GNUstep/SOGo/|g" $PANEL_CONF/sogo/sogo-apache.conf > /etc/httpd/conf.d/sogo.conf
+    systemctl enable memcached sogo
+    systemctl restart memcached sogo || ui_warn "SOGo did not start (systemctl status sogo)."
+fi
+rm -rf "$SOGO_STAGE"
 
 #--- Webalizer Stats and Visitor Stats are add-on modules now (Repo Browser, the
 #    sentora-repo folder of RusTus/sentora-installers-2027): their packages build the programs
@@ -1988,7 +2067,7 @@ so dovecot_conf /etc/dovecot/dovecot.conf; so dovecot_service dovecot
 so dovecot_spamav_block "plugin {
   sieve_before = {dir}%Lu.sieve
 }"
-so spamd_bin /usr/bin/spamd; so clamd_bin /usr/sbin/clamd; so sogo_bin /usr/sbin/sogod
+so spamd_bin /usr/bin/spamd; so clamd_bin /usr/sbin/clamd; so sogo_bin /opt/sentora-sogo/sbin/sogod; so sogo_tool_dir /usr/local/sbin; so sogo_user sogo
 so clamav_user clamscan; so clamd_conf /etc/clamd.d/scan.conf; so clamd_socket /run/clamd.scan/clamd.sock; so clamd_service clamd@scan
 so clamav_milter_conf /etc/mail/clamav-milter.conf; so clamav_milter_pid /run/clamav-milter/clamav-milter.pid
 so clamav_milter_service clamav-milter; so clamav_milter_user clamilt
