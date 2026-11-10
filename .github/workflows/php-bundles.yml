@@ -13,8 +13,13 @@
 # Each PHP source is checked against the SHA-256 php.net publishes for it (7.1 and 7.4 and their
 # libraries against theirs: see their build scripts).
 #
+# It also builds Snuffleupagus (the PHP hardening extension; every bundle has its own copy, switched
+# off) for the system's own PHP: sentora-snuffleupagus-<version>-php<major.minor>-<system>-amd64.so on
+# the same release, an older one of that system and PHP replaced. The PHP Hardening add-on downloads it.
+#
 # After the builds it writes php-bundles.json on the release: for every bundle there, its system,
-# major.minor, exact version and SHA-256. Servers read it to see whether a newer build is ready
+# major.minor, exact version, SHA-256 and the Snuffleupagus version inside it; and under
+# "snuffleupagus", each system's own-PHP build with its SHA-256. Servers read it to see whether a newer build is ready
 # (PHP Versions shows a notice with an Update button) and sentora-php-install checks a download
 # against it when GitHub's API does not answer. "list only" rewrites it without building anything.
 name: PHP bundles
@@ -121,8 +126,36 @@ jobs:
           path: out/sentora-php-*-${{ inputs.system }}-amd64.tar.gz
           if-no-files-found: error
 
+  snuffleupagus:
+    if: ${{ !inputs.list_only }}
+    runs-on: ubuntu-latest
+    container: ${{ inputs.system == 'alma10' && 'quay.io/almalinuxorg/almalinux:10' || (inputs.system == 'debian13' && 'debian:13' || 'ubuntu:26.04') }}
+    steps:
+      - name: Tools
+        run: |
+          if command -v apt-get > /dev/null; then
+            apt-get -qq update
+            DEBIAN_FRONTEND=noninteractive apt-get -yqq install git ca-certificates wget > /dev/null
+          else
+            dnf -y -q install git ca-certificates wget tar gzip > /dev/null
+          fi
+      - name: Check out master2027
+        uses: actions/checkout@v5
+        with:
+          ref: master2027
+      - name: Build Snuffleupagus for the system's own PHP
+        run: |
+          mkdir -p out && cd out
+          bash ../preconf/php-build/build-snuffleupagus-system.sh
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snuffleupagus-system
+          path: out/sentora-snuffleupagus-*-${{ inputs.system }}-amd64.so
+          if-no-files-found: error
+
   publish:
-    needs: [list, build]
+    needs: [list, build, snuffleupagus]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -139,6 +172,15 @@ jobs:
           ls -la bundles
           set -- bundles/sentora-php-*-${{ inputs.system }}-amd64.tar.gz
           [ -e "$1" ] || { echo "Nothing was built."; exit 1; }
+          # Snuffleupagus for the system's own PHP: an older build of the same system and PHP goes
+          for f in bundles/sentora-snuffleupagus-*-${{ inputs.system }}-amd64.so; do
+            [ -e "$f" ] || continue
+            set -- "$@" "$f"
+            tail=$(basename "$f" | sed -E 's/^sentora-snuffleupagus-[0-9.]+-//')
+            gh release view current --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' \
+              | grep -E "^sentora-snuffleupagus-[0-9.]+-${tail//./\\.}$" | grep -vx "$(basename "$f")" \
+              | while read -r old; do gh release delete-asset current "$old" -y --repo "$GITHUB_REPOSITORY" || true; done || true
+          done
           sha256sum "$@"
           for try in 1 2 3 4 5; do
             gh release upload current "$@" --clobber --repo "$GITHUB_REPOSITORY" && exit 0
@@ -151,11 +193,21 @@ jobs:
         run: |
           mkdir -p all
           gh release download current --repo "$GITHUB_REPOSITORY" -p 'sentora-php-*-amd64.tar.gz' -D all --clobber
+          gh release download current --repo "$GITHUB_REPOSITORY" -p 'sentora-snuffleupagus-*-amd64.so' -D all --clobber || true
           python3 - all > php-bundles.json <<'EOF'
           import hashlib, json, os, re, sys, tarfile, time
           d = sys.argv[1]
-          out = {'updated': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()), 'bundles': {}}
+          out = {'updated': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()), 'bundles': {}, 'snuffleupagus': {}}
           for f in sorted(os.listdir(d)):
+              s = re.fullmatch(r'sentora-snuffleupagus-(\d+\.\d+\.\d+)-php(\d+\.\d+)-(.+)-amd64\.so', f)
+              if s:
+                  spv, mm, system = s.group(1), s.group(2), s.group(3)
+                  have = out['snuffleupagus'].setdefault(system, {}).get(mm)
+                  if have is None or tuple(map(int, spv.split('.'))) > tuple(map(int, have['version'].split('.'))):
+                      sha = hashlib.sha256(open(os.path.join(d, f), 'rb').read()).hexdigest()
+                      out['snuffleupagus'][system][mm] = {'version': spv, 'file': f, 'sha256': sha}
+                      print('%s system PHP %s: Snuffleupagus %s' % (system, mm, spv), file=sys.stderr)
+                  continue
               m = re.fullmatch(r'sentora-php-(\d+\.\d+)-(.+)-amd64\.tar\.gz', f)
               if not m:
                   continue
@@ -163,16 +215,19 @@ jobs:
               p = os.path.join(d, f)
               sha = hashlib.sha256(open(p, 'rb').read()).hexdigest()
               version = ''
+              spv = ''
               with tarfile.open(p) as t:
                   for name in ('opt/sentora-php/%s/BUILD-INFO' % mm, './opt/sentora-php/%s/BUILD-INFO' % mm):
                       try:
-                          first = t.extractfile(name).readline().decode('utf-8', 'replace')
-                          v = re.search(r'PHP (\d+\.\d+\.\d+)', first)
+                          info = t.extractfile(name).read().decode('utf-8', 'replace')
+                          v = re.search(r'PHP (\d+\.\d+\.\d+)', info.split('\n')[0])
                           version = v.group(1) if v else ''
+                          v = re.search(r'Snuffleupagus (\d+\.\d+\.\d+)', info)
+                          spv = v.group(1) if v else ''
                           break
                       except KeyError:
                           continue
-              out['bundles'].setdefault(system, {})[mm] = {'version': version, 'file': f, 'sha256': sha}
+              out['bundles'].setdefault(system, {})[mm] = {'version': version, 'file': f, 'sha256': sha, 'snuffleupagus': spv}
               print('%s %s: %s' % (system, mm, version or '(no BUILD-INFO)'), file=sys.stderr)
           json.dump(out, sys.stdout, indent=1, sort_keys=True)
           EOF

@@ -17,7 +17,11 @@
 # have, each its own file in lib/php/extensions and switched on by bin/sentora-php-addons only when it
 # loads: apcu, redis, memcached, imagick, imap. ADDONS=1 builds them for another version too (imap is
 # part of PHP up to 8.3 only).
+#
+# Every bundle also has Snuffleupagus (the PHP hardening extension, snuffleupagus.sh), switched off:
+# the PHP Hardening add-on switches it on, with its rules.
 set -euo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 V="${1:-}"
 SRC_FILE="${2:-}"
@@ -52,14 +56,14 @@ if [ "$OS_TAG" = alma10 ]; then
     if [ "${SKIP_APT:-0}" != "1" ]; then
         dnf -y -q install epel-release dnf-plugins-core
         dnf config-manager --set-enabled crb
-        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar openssl \
+        dnf -y -q install gcc gcc-c++ make pkgconf-pkg-config autoconf bison re2c wget xz python3 tar openssl git \
             libxml2-devel libcurl-devel oniguruma-devel libzip-devel libicu-devel libsodium-devel \
             libargon2-devel libxslt-devel libpng-devel libjpeg-turbo-devel libwebp-devel freetype-devel \
             openssl-devel sqlite-devel zlib-devel gmp-devel openldap-devel \
             libmemcached-awesome-devel cyrus-sasl-devel ImageMagick-devel krb5-devel
     fi
 elif [ "${SKIP_APT:-0}" != "1" ]; then
-    apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils python3 \
+    apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils python3 git \
         libxml2-dev libcurl4-openssl-dev libonig-dev libzip-dev libicu-dev libsodium-dev \
         libargon2-dev libxslt1-dev libpng-dev libjpeg-dev libwebp-dev libfreetype-dev \
         libssl-dev libsqlite3-dev zlib1g-dev libgmp-dev libldap-dev \
@@ -118,6 +122,13 @@ make install INSTALL_ROOT="$STAGE" > "$WORK/install.log" 2>&1 || { tail -25 "$WO
 P="$STAGE$PREFIX"
 cp php.ini-production "$P/lib/php.ini-production"
 rm -rf "$P/php/man"
+
+# --- Snuffleupagus (every bundle; off until the PHP Hardening add-on switches it on) --------------
+. "$HERE/snuffleupagus.sh"
+SPT="$WORK/sp-tools"; mkdir -p "$SPT"
+for t in phpize php-config; do sed "s|$PREFIX|$P|g" "$P/bin/$t" > "$SPT/$t"; chmod 755 "$SPT/$t"; done
+sp_build "$WORK" "$SPT/phpize" "$SPT/php-config" || exit 1
+cd "$SRC"
 
 # --- add-ons (PHP 8.1, or ADDONS=1): PECL extensions and imap on the system's own libraries --------
 ADDONS="${ADDONS:-$([ "$MM" = 8.1 ] && echo 1 || echo 0)}"
@@ -186,6 +197,7 @@ cat > "$P/BUILD-INFO" <<EOI
 PHP $V for Sentora on $OS_NAME (amd64)
 Built $(date -u +%Y-%m-%d) with build-sentora-php.sh from php-$V.${ADDON_LIST:+
 Add-ons (bin/sentora-php-addons switches them on):$ADDON_LIST}
+Snuffleupagus $SP_VERSION: lib/php/extensions, off (the PHP Hardening add-on switches it on).
 Configure options: see bin/php-config --configure-options
 EOI
 
@@ -204,6 +216,8 @@ for e in $ADDON_LIST; do
         || { echo "The $e add-on does not load. Stopping."; exit 1; }
 done
 [ -z "$ADDON_LIST" ] || echo "Add-ons load:$ADDON_LIST"
+sp_check "$P/bin/php" "$("$SPT/php-config" --extension-dir)" || { echo "Snuffleupagus does not load. Stopping."; exit 1; }
+echo "Snuffleupagus $SP_VERSION loads (off)."
 
 tar -czf "$OUT" -C "$STAGE" opt
 echo "Done: $OUT"

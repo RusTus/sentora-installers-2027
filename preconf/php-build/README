@@ -14,6 +14,12 @@ them in a Debian 13 container and puts them on the "current" release; give it th
 build, such as "8.5.12 8.3.36 8.2.35 7.1". sentora-php-install on a Debian server downloads the
 debian13 bundle. The rest of this file applies to both, with "debian13" for "ubuntu26.04".)
 
+(Snuffleupagus, the PHP hardening extension: every bundle has it, switched off, built by
+snuffleupagus.sh, which pins the release tag and its commit. build-snuffleupagus-system.sh builds it
+for the system's own PHP, sentora-snuffleupagus-<version>-php<x.y>-<system>-amd64.so; the workflow
+does that too and lists it in php-bundles.json. The PHP Hardening add-on switches it on. A new
+Snuffleupagus release: SP_VERSION and SP_COMMIT in snuffleupagus.sh, then run the workflow.)
+
 The installer downloads sentora-php-<version>-ubuntu26.04-amd64.tar.gz from the
 GitHub release of RusTus/sentora-installers-2027 and installs each in /opt/sentora-php/<version>/ as the service
 sentora-php<version>-fpm. These builds are not updated by apt: when PHP
