@@ -37,7 +37,7 @@ if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "26.04" || "$(uname -m)" != 
 fi
 
 if [ "${SKIP_APT:-0}" != "1" ]; then
-    apt-get -yqq install build-essential pkg-config autoconf bison re2c wget xz-utils perl \
+    apt-get -yqq install build-essential git pkg-config autoconf bison re2c wget xz-utils perl \
         libpng-dev libjpeg-dev libfreetype-dev libwebp-dev libgmp-dev zlib1g-dev libgnutls28-dev \
         libssl-dev libmemcached-dev libsasl2-dev libmagickwand-dev libc-client2007e-dev libkrb5-dev \
         libonig-dev libzip-dev libsodium-dev libargon2-dev libsqlite3-dev
@@ -171,6 +171,10 @@ addon apcu apcu-5.1.21 --enable-apcu
 addon redis redis-5.3.7 --enable-redis
 addon memcached memcached-3.2.0 --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
 addon imagick imagick-3.7.0 --with-imagick=/usr
+# Snuffleupagus (the PHP hardening extension), switched off: the Web Hardening add-on switches it on
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/snuffleupagus.sh"
+sp_fetch "$WORK" || fail snuffleupagus
+addon snuffleupagus "$WORK/snuffleupagus/src" --enable-snuffleupagus
 # (c-client is in /usr/lib; OpenSSL, found through pkg-config, in /usr/lib/x86_64-linux-gnu)
 addon imap "php-$V/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
 cd "$WORK/src/php-$V"
@@ -206,6 +210,7 @@ PHP $V for Sentora (amd64) - a step for moving old websites on to PHP 8. No secu
 Built $(date -u +%Y-%m-%d) on $PRETTY_NAME with build-sentora-php74.sh from php-$V.
 Compiled in: OpenSSL 1.1.1w, curl 7.88.1, libxml2 2.9.14, OpenLDAP 2.6.10 (GnuTLS), ICU 64.2, libxslt 1.1.34.
 Add-ons (bin/sentora-php-addons switches them on): apcu 5.1.21, redis 5.3.7, memcached 3.2.0, imagick 3.7.0, imap (Ubuntu's c-client).
+Snuffleupagus $SP_VERSION: lib/php/extensions, off (the Web Hardening add-on switches it on).
 Configure options: see bin/php-config --configure-options
 EOI
 
@@ -238,5 +243,7 @@ for e in apcu redis memcached imagick imap; do
 done
 echo "Add-ons load: apcu redis memcached imagick imap"
 
+sp_check "$P/bin/php" "$EXT_DIR" || { echo "Snuffleupagus does not load. Stopping."; exit 1; }
+echo "Snuffleupagus $SP_VERSION loads (switched off)"
 tar -czf "$OUT" -C "$STAGE" opt
 echo "Done: $OUT"
