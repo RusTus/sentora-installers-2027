@@ -55,6 +55,12 @@ jobs:
           ref: master2027
           path: core
 
+      # The runner's own AppArmor profiles (for its programs, e.g. ProFTPD) would also confine the same
+      # programs inside the test containers ("Permission denied" for root); a real server has none of
+      # them, so they are unloaded on this throw-away runner only
+      - name: Runner's AppArmor profiles off
+        run: sudo aa-teardown > /dev/null 2>&1 || sudo systemctl stop apparmor || true
+
       - name: Install, restart, check and smoke test (${{ matrix.system }})
         env:
           GH_TOKEN: ${{ github.token }}

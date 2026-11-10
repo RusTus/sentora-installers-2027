@@ -486,8 +486,10 @@ clock_from() {
     elif command -v wget > /dev/null 2>&1; then
         wget -qS --spider --timeout=10 "$1" 2>&1 | sed -n 's/^ *[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     elif [[ "$1" == http://* ]]; then
-        local host=${1#http://}; host=${host%%/*}
-        timeout 10 bash -c 'exec 5<> "/dev/tcp/$0/80" && printf "HEAD / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" "$0" >&5 && cat <&5' "$host" 2> /dev/null \
+        # a minimal system without curl or wget: bash itself asks the web server (plain http only)
+        local host=${1#http://}; host=${host%%/*}; local port=80
+        [[ "$host" == *:* ]] && { port=${host##*:}; host=${host%:*}; }
+        timeout 10 bash -c 'exec 5<> "/dev/tcp/$0/$1" && printf "HEAD / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n" "$0" >&5 && cat <&5' "$host" "$port" 2> /dev/null \
             | sed -n 's/^[Dd][Aa][Tt][Ee]: *//p' | tr -d '\r' | head -1
     fi
 }
