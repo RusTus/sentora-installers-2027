@@ -2,3 +2,5 @@
 # One key per line (the run's summary shows each finding's key), then # and a short note.
 # A listed finding still shows on the summary page, but no longer makes the run fail.
 # Take a line out once it is handled (or leave it: it does no harm).
+CVE-2026-123158  # SSHole (OpenSSH): only musl without PAM (Alpine); Sentora's systems use glibc with PAM, not affected (checked 2026-11-10)
+CVE-2026-119977  # WordPress core: the hosted sites' own software, not the server; clients update their sites (noted 2026-11-10)
