@@ -99,6 +99,20 @@ server_monitor daemon hook) writes /var/lib/sentora/monitor/procs.json; the page
 CodeReady Builder via subscription-manager, and EPEL's release rpm from Fedora checked with its key.
 Tested on UBI 10 only (detection, refusal, signature); a full install needs a registered RHEL server.
 
+**Fedora 45:** `sentora2027-fedora` (copy of the AlmaLinux installer: no EPEL, Dovecot 2.4 with the
+Debian/Ubuntu settings, dnf5-plugin-automatic with /etc/dnf/automatic.conf made from dnf5's template,
+BIND's real unit is bind.service, LLMNR off, DBD::MariaDB for SpamAssassin, mariadb client). Builds:
+php-bundles and sogo-bundle take system fedora45 (SOGo on Fedora uses GNUstep base's master branch and
+the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer lists the tested
+releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
+Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26.
+
+**Open (2026-11-10):** the other session's ModSecurity test (`.github/scripts/modsec-test.sh`) fails on
+every system: it sends its attacks over http to a host with no site (`modsec-test.example`), so the
+panel's own vhost answers with its http-to-https redirect (302) before ModSecurity's request checks run.
+It needs a real hosted domain (or https to a site vhost). Until it passes, the release workflows publish
+nothing; Fedora is on master2027 waiting for that release.
+
 **Next (the owner's list):** a WSL version for Windows. Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
