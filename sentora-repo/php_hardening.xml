@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>100</latestversion>
+    <latestversion>101</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/php_hardening.zpp</downloadurl>
-    <name>PHP Hardening</name>
-    <desc>Snuffleupagus (the successor of Suhosin) for every PHP on the server: off, watch only or on for each version, rules you choose, accounts left alone, and a list of what it caught.</desc>
+    <name>Web Hardening</name>
+    <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught, the domains, accounts and rules left alone.</desc>
     <ostype>lin</ostype>
     <authorname>Sentora for Ubuntu 26.04</authorname>
     <authoremail></authoremail>

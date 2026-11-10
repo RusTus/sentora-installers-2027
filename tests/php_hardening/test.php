@@ -34,6 +34,7 @@ chdir(__DIR__ . '/root');
 require __DIR__ . '/root/dryden/loader.inc.php';
 require $MOD . '/code/ph.php';
 require $MOD . '/code/daemon.php';
+require $MOD . '/code/modsec.php';
 require $MOD . '/code/controller.ext.php';
 $v83 = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
 
@@ -59,10 +60,24 @@ $sysExt = "$W/usr/lib/php/ext";
 $GLOBALS['calls'] = array();
 $GLOBALS['active'] = 0;
 $GLOBALS['journal'] = '';
+$GLOBALS['refuse'] = '';
+$GLOBALS['sysmodsec'] = false;
 ph_daemon::$run = function ($cmd) {
     if (strpos($cmd, 'systemctl ') === 0) {
         $GLOBALS['calls'][] = $cmd;
         return array(strpos($cmd, 'is-active') !== false ? $GLOBALS['active'] : 0, '');
+    }
+    if (strpos($cmd, 'apache2ctl ') === 0) {
+        $GLOBALS['calls'][] = $cmd;
+        if ($cmd === 'apache2ctl configtest') {
+            // what Apache would say: the test can make it refuse a file containing a word
+            $f = getenv('PH_W') . '/apache/modsecurity.d/' . ph_modsec::FILE;
+            if ($GLOBALS['refuse'] !== '' && is_file($f) && strpos(file_get_contents($f), $GLOBALS['refuse']) !== false) {
+                return array(1, "AH00526: Syntax error on line 12 of $f:\nInvalid command '" . $GLOBALS['refuse'] . "'");
+            }
+            return array(0, 'Syntax OK');
+        }
+        return array(0, " core_module (static)\n" . (is_file(getenv('PH_W') . '/apache/modsecurity.d/' . ph_modsec::FILE) || $GLOBALS['sysmodsec'] ? " security2_module (shared)\n" : ''));
     }
     if (strpos($cmd, 'journalctl ') === 0) {
         $GLOBALS['calls'][] = $cmd;
@@ -383,6 +398,144 @@ $GLOBALS['journal'] = jline('[snuffleupagus][1.2.3.4][disabled_function][drop] <
     . jline("[snuffleupagus][1.2.3.4][disabled_function][simulation] watched in $W/hosted/bob/a.php on line 1");
 run_daemon();
 
+
+// ---------------------------------------------------------------------------------------------
+section('ModSecurity: the settings file');
+foreach (array('modsec', 'modsec/data', 'apache/modsecurity.d', 'log', 'panel/etc/modsecurity/coreruleset/rules') as $d) {
+    @mkdir("$W/$d", 0755, true);
+}
+touch("$W/modsec/mod_security2.so");
+touch("$W/modsec/mod_unique_id.so");
+file_put_contents("$W/panel/etc/modsecurity/coreruleset/VERSION", "OWASP CRS 4.25.2 (git commit b9818c3718bc75b99403aed6c4b23773004c5412), from https://github.com/coreruleset/coreruleset\n");
+file_put_contents("$W/apache/httpd.conf", "ServerName localhost\nIncludeOptional $W/apache/modsecurity.d/*.conf\nInclude $W/apache/httpd-vhosts.conf\n");
+$msFile = "$W/apache/modsecurity.d/" . ph_modsec::FILE;
+check(ph_modsec::Mode() === 'off' && ph_modsec::Level() === 1 && ph_modsec::Threshold() === 5, 'starts off, level 1, score 5');
+check(ph_modsec::CrsVersion() === 'OWASP CRS 4.25.2', 'the rules\' version is read');
+$c = ph_modsec::Conf('watch', 2, 10, array('bob.example'), array('942100', '920350'));
+check(strpos($c, 'SecRuleEngine DetectionOnly') !== false && strpos($c, 'SecRuleEngine On') === false, 'watch only: DetectionOnly');
+check(strpos(ph_modsec::Conf('on', 1, 5, array(), array()), "SecRuleEngine On\n") !== false, 'on: On');
+check(strpos($c, "LoadModule security2_module \"$W/modsec/mod_security2.so\"") !== false && strpos($c, "LoadModule unique_id_module \"$W/modsec/mod_unique_id.so\"") !== false, 'the modules come from the settings (modsec_module, modsec_unique_id_module)');
+check(strpos($c, "<IfModule !security2_module>") !== false, '(loaded only when nothing loaded it already)');
+check(strpos($c, "SecDataDir \"$W/modsec/data\"") !== false && strpos($c, "SecAuditLog \"$W/log/modsec_audit.log\"") !== false, 'data folder and audit log from the settings (modsec_data_dir, apache_log_dir)');
+check(strpos($c, 'SecAuditLogParts AHZ') !== false, 'the audit log keeps no headers or bodies (parts A, H, Z)');
+check(strpos($c, 'tx.blocking_paranoia_level=2') !== false && strpos($c, 'tx.inbound_anomaly_score_threshold=10') !== false, 'level and score');
+check(strpos($c, 'SecRule SERVER_NAME "@rx ^(?:www\\.)?(?:panel\\.example)$" "id:99100,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleEngine=DetectionOnly"') !== false, 'the panel itself: watched only (never blocked: no lock-out)', $c);
+check(strpos($c, 'SecRule SERVER_NAME "@rx ^(?:www\\.)?(?:bob\\.example)$" "id:99101,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleEngine=Off"') !== false, 'the chosen domains: left alone (with or without www.)', $c);
+check(strpos(ph_modsec::Conf('on', 1, 5, array(), array()), 'ruleEngine=Off') === false, 'no domains chosen: nothing is left alone');
+check(strpos($c, 'SecRuleRemoveById 942100 920350') !== false, 'rules switched off');
+$pIdx = strpos($c, 'crs-setup.conf.example'); $sIdx = strpos($c, 'SecRule SERVER_NAME'); $rIdx = strpos($c, '/rules/*.conf'); $xIdx = strpos($c, 'SecRuleRemoveById');
+check($pIdx < $sIdx && $sIdx < $rIdx && $rIdx < $xIdx, 'in order: setup, domains left alone, the rules, rules switched off');
+check(strpos(ph_modsec::Conf('on', 1, 5, array(), array()), 'SecRuleRemoveById') === false, 'nothing switched off: no SecRuleRemoveById line');
+
+section('ModSecurity: the daemon');
+$GLOBALS['calls'] = array();
+check(ph_modsec::Apply() === '' && !is_file($msFile) && !$GLOBALS['calls'], 'off: nothing written, Apache not touched');
+ph::Set('ms:mode', 'watch');
+$line = ph_modsec::Apply();
+check(is_file($msFile) && strpos(file_get_contents($msFile), 'DetectionOnly') !== false, 'watch only: its file written', $line);
+check(in_array('apache2ctl configtest', $GLOBALS['calls'], true) && in_array("systemctl reload 'apache2'", $GLOBALS['calls'], true), 'Apache tested, then reloaded', implode("\n", $GLOBALS['calls']));
+$st = ph::Status('modsec');
+check($st['st_state_vc'] === 'watch' && $st['st_sp_vc'] === 'OWASP CRS 4.25.2', 'state: watching, with the rules\' version', json_encode($st));
+check(substr(sprintf('%o', fileperms($msFile)), -4) === '0644' && !glob("$W/apache/modsecurity.d/.*.new"), 'readable, nothing half-written');
+$GLOBALS['calls'] = array();
+check(ph_modsec::Apply() === '' && !$GLOBALS['calls'], 'the next run: nothing to do (Apache not even tested)');
+ph::Set('ms:mode', 'on');
+$GLOBALS['calls'] = array();
+ph_modsec::Apply();
+check(strpos(file_get_contents($msFile), "SecRuleEngine On\n") !== false && ph::Status('modsec')['st_state_vc'] === 'on', 'on: written, state on');
+// Apache refuses: the old file stays
+$before = file_get_contents($msFile);
+ph::Set('ms:skiprules', '942100');
+$GLOBALS['calls'] = array();
+$GLOBALS['refuse'] = 'SecRuleRemoveById';
+$line = ph_modsec::Apply();
+$GLOBALS['refuse'] = '';
+check(file_get_contents($msFile) === $before && ph::Status('modsec')['st_state_vc'] === 'problem' && strpos(ph::Status('modsec')['st_note_tx'], "Invalid command 'SecRuleRemoveById'") !== false, 'Apache refuses the new file: the old one stays, Apache\'s complaint shown', $line);
+check(!in_array("systemctl reload 'apache2'", $GLOBALS['calls'], true), '(and Apache is not reloaded)');
+ph_modsec::Apply();
+check(strpos(file_get_contents($msFile), 'SecRuleRemoveById 942100') !== false && ph::Status('modsec')['st_state_vc'] === 'on', 'accepted next run: in');
+// Apache does not come back after the reload
+$before = file_get_contents($msFile);
+ph::Set('ms:level', '2');
+$GLOBALS['active'] = 3;
+$GLOBALS['calls'] = array();
+ph_modsec::Apply();
+$GLOBALS['active'] = 0;
+check(file_get_contents($msFile) === $before && ph::Status('modsec')['st_state_vc'] === 'problem' && in_array("systemctl restart 'apache2'", $GLOBALS['calls'], true), 'Apache did not run after the reload: the old file back, Apache restarted');
+ph::Set('ms:level', '1');
+ph_modsec::Apply();
+// the system's own ModSecurity already on
+ph::Set('ms:mode', 'off');
+ph_modsec::Apply();
+check(!is_file($msFile) && ph::Status('modsec')['st_state_vc'] === 'off', 'off: its file taken out, Apache reloaded');
+$GLOBALS['sysmodsec'] = true;
+ph::Set('ms:mode', 'watch');
+ph_modsec::Apply();
+$GLOBALS['sysmodsec'] = false;
+check(!is_file($msFile) && strpos(ph::Status('modsec')['st_note_tx'], 'a2dismod -q -f security2') !== false, 'the system\'s own ModSecurity already loaded: left alone, says how to switch it off (modsec_off_cmd)', ph::Status('modsec')['st_note_tx']);
+// not installed, no rules, no Include line
+rename("$W/modsec/mod_security2.so", "$W/modsec/away.so");
+ph_modsec::Apply();
+check(strpos(ph::Status('modsec')['st_note_tx'], 'sentora-update installs it') !== false && !is_file($msFile), 'ModSecurity not installed: says sentora-update installs it');
+rename("$W/modsec/away.so", "$W/modsec/mod_security2.so");
+file_put_contents("$W/apache/httpd.conf", "ServerName localhost\n");
+ph_modsec::Apply();
+check(strpos(ph::Status('modsec')['st_note_tx'], 'sentora-update adds it') !== false && !is_file($msFile), 'httpd.conf without the Include line: says sentora-update adds it');
+file_put_contents("$W/apache/httpd.conf", "IncludeOptional $W/apache/modsecurity.d/*.conf\n");
+rename("$W/panel/etc/modsecurity/coreruleset/VERSION", "$W/v.away");
+ph_modsec::Apply();
+check(strpos(ph::Status('modsec')['st_note_tx'], 'rules are missing') !== false, 'the rules missing: says so');
+rename("$W/v.away", "$W/panel/etc/modsecurity/coreruleset/VERSION");
+ph_modsec::Apply();
+check(ph::Status('modsec')['st_state_vc'] === 'watch' && is_file($msFile), 'all there again: watching');
+// new rules (sentora-update brought a new CRS): the file changes, Apache is tested again
+file_put_contents("$W/panel/etc/modsecurity/coreruleset/VERSION", "OWASP CRS 4.25.3 (git commit x)\n");
+$GLOBALS['calls'] = array();
+ph_modsec::Apply();
+check(strpos(file_get_contents($msFile), 'OWASP CRS 4.25.3') !== false && in_array('apache2ctl configtest', $GLOBALS['calls'], true) && ph::Status('modsec')['st_sp_vc'] === 'OWASP CRS 4.25.3', 'a newer rule set (sentora-update): tested and noted');
+
+section('ModSecurity: what it caught (audit log)');
+$zdbh->exec("DELETE FROM x_ph_caught");
+$zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_group_fk) VALUES (30, 'bobsite', 3)");
+$zdbh->exec("INSERT INTO x_vhosts (vh_name_vc, vh_acc_fk) VALUES ('bob.example', 30)");
+$zdbh->exec("INSERT INTO x_vhosts (vh_name_vc, vh_acc_fk, vh_deleted_ts) VALUES ('gone.example', 30, 1)");
+function audit($id, $ts, $ip, $host, $uri, array $msgs, $blocked)
+{
+    $o = "--$id-A--\n[$ts] ZXk1aBcDeF\@AAAAAAAAAAAA $ip 51234 10.0.0.5 443\n--$id-H--\n";
+    foreach ($msgs as $m) {
+        $o .= 'Message: ' . ($blocked && $m[0] === '949110' ? 'Access denied with code 403 (phase 2). ' : 'Warning. ') . 'Pattern match at ARGS:q. [file "/etc/x/rules/R.conf"] [line "1"] [id "' . $m[0] . '"] [msg "' . $m[1] . '"] [severity "CRITICAL"] [ver "OWASP_CRS/4.25.2"] [hostname "' . $host . '"] [uri "' . $uri . '"] [unique_id "ZXk1aBcDeF@AAAAAAAAAAAA"]' . "\n";
+    }
+    if ($blocked) {
+        $o .= "Action: Intercepted (phase 2)\n";
+    }
+    return $o . "Apache-Handler: proxy:unix:/run/x.sock|fcgi://localhost\nStopwatch: 1700000000000000 1234 (- - -)\nProducer: ModSecurity for Apache/2.9.12 (http://www.modsecurity.org/); OWASP_CRS/4.25.2.\nServer: Apache\nEngine-Mode: \"" . ($blocked ? 'ENABLED' : 'DETECTION_ONLY') . "\"\n\n--$id-Z--\n\n";
+}
+$audit = "$W/log/modsec_audit.log";
+file_put_contents($audit,
+    audit('3c6a5b1f', '10/Nov/2026:13:20:01.123456 -0600', '203.0.113.9', 'www.bob.example', '/index.php', array(array('941100', 'XSS Attack Detected via libinjection'), array('941110', 'XSS Filter - Category 1: Script Tag Vector'), array('949110', 'Inbound Anomaly Score Exceeded (Total Score: 10)'), array('980170', 'Anomaly Scores: (Inbound Scores: blocking=10)')), true)
+    . audit('4d7b6c2a', '10/Nov/2026:13:21:00 -0600', '198.51.100.7', 'nobody.example', '/wp-login.php', array(array('942100', 'SQL Injection Attack Detected via libinjection'), array('949110', 'Inbound Anomaly Score Exceeded (Total Score: 5)')), false)
+    . audit('5e8c7d3b', '10/Nov/2026:13:22:00 -0600', '198.51.100.8', 'bob.example', '/ok.php', array(array('920350', 'Host header is a numeric IP address')), false)
+    . "--6f9d8e4c-A--\n[10/Nov/2026:13:23:00 -0600] half 1.2.3.4 1 2 3\n--6f9d8e4c-H--\nMessage: Warning. [id \"949110\"]\n");
+$n = ph_modsec::ReadLog();
+$c = ph::Caught();
+check($n === 2 && count($c) === 2, 'two requests caught (one below the score is not; the half-written last entry waits)', json_encode($c));
+$b = $c[1];
+check($b['ca_feature_vc'] === 'modsecurity' && $b['ca_action_vc'] === 'drop' && $b['ca_ip_vc'] === '203.0.113.9' && $b['ca_account_vc'] === 'bobsite' && $b['ca_file_tx'] === 'www.bob.example/index.php', 'blocked: address, the account whose domain it is (www. too), host and address', json_encode($b));
+check($b['ca_message_tx'] === 'Rules 941100 XSS Attack Detected via libinjection; 941110 XSS Filter - Category 1: Script Tag Vector', 'its rules with their numbers (CRS\'s bookkeeping left out)', $b['ca_message_tx']);
+check((int) $b['ca_time_in'] === (new DateTime('2026-11-10 13:20:01', new DateTimeZone('-0600')))->getTimestamp(), 'its time');
+check($c[0]['ca_action_vc'] === 'simulation' && $c[0]['ca_account_vc'] === '' && strpos($c[0]['ca_message_tx'], '942100') !== false, 'watch only: would block; a domain not on this server is nobody\'s');
+check(ph_modsec::ReadLog() === 0, 'read again: nothing new');
+file_put_contents($audit, "Message: Warning. [id \"941100\"] [msg \"x\"] [hostname \"bob.example\"] [uri \"/a\"]\nAction: Intercepted (phase 2)\n\n--6f9d8e4c-Z--\n\n", FILE_APPEND);
+check(ph_modsec::ReadLog() === 1, 'the rest of the half entry, once written: read');
+// rotated: a new file is read from its start
+rename($audit, "$audit.1");
+file_put_contents($audit, audit('7a0e9f5d', '10/Nov/2026:14:00:00 -0600', '192.0.2.1', 'bob.example', '/x', array(array('932100', 'Remote Command Execution: Unix Command Injection'), array('949110', 'Inbound Anomaly Score Exceeded (Total Score: 5)')), true));
+check(ph_modsec::ReadLog() === 1 && strpos(ph::Caught(1)[0]['ca_message_tx'], '932100') !== false, 'after log rotation: the new file is read from its start');
+check(ph_modsec::AccountOfHost('BOB.example:443') === 'bobsite' && ph_modsec::AccountOfHost('gone.example') === '' && ph_modsec::AccountOfHost("x' OR 1=1 --") === '', 'host to account: case and port ignored, deleted domains and nonsense are nobody\'s');
+
+$GLOBALS['journal'] = jline('[snuffleupagus][1.2.3.4][disabled_function][drop] <script>alert(1)</script> in ' . $W . '/hosted/bob/<b>.php on line 1') . "\n"
+    . jline("[snuffleupagus][1.2.3.4][disabled_function][simulation] watched in $W/hosted/bob/a.php on line 1");
+run_daemon();
 // ---------------------------------------------------------------------------------------------
 section('The page');
 $zdbh->exec("DELETE FROM x_accounts");
@@ -426,6 +579,22 @@ page(1, 'Exempt', array('inExempt' => "bob/../x"));
 check(ph::Exempt() === array('bob', 'alice'), 'a path is not an account');
 $zdbh->exec("INSERT INTO x_ph_settings (ph_name_vc, ph_value_tx) VALUES ('exempt', 'x/../../etc,bob') ON CONFLICT(ph_name_vc) DO UPDATE SET ph_value_tx = excluded.ph_value_tx");
 check(ph::Exempt() === array('bob'), 'and one written straight into the table is ignored too');
+$h = page(1);
+check(strpos($h, 'ModSecurity (in Apache)') !== false && strpos($h, 'name="inMsMode"') !== false, 'the ModSecurity part is on the page');
+page(3, 'ModSec', array('inMsMode' => 'off', 'inMsLevel' => '1', 'inMsThreshold' => '5'));
+check(ph_modsec::Mode() === 'watch', 'a client can not change ModSecurity');
+$h = page(1, 'ModSec', array('inMsMode' => 'on', 'inMsLevel' => '4', 'inMsThreshold' => '5'));
+check(ph_modsec::Mode() === 'watch' && strpos($h, 'choose from the lists') !== false, 'a level not offered: not saved');
+page(1, 'ModSec', array('inMsMode' => 'on', 'inMsLevel' => '2', 'inMsThreshold' => '10'));
+check(ph_modsec::Mode() === 'on' && ph_modsec::Level() === 2 && ph_modsec::Threshold() === 10, 'ModSecurity: mode, level and score saved');
+$h = page(1, 'ModSecSkip', array('inMsDomains' => 'www.BOB.example, other.example', 'inMsRules' => '942100'));
+check(strpos($h, 'other.example is not a domain on this server') !== false, 'a domain not on this server: not saved, named');
+$h = page(1, 'ModSecSkip', array('inMsDomains' => 'bob.example', 'inMsRules' => '942100 1;rm'));
+check(strpos($h, 'is not a rule number') !== false, 'something that is not a rule number: not saved');
+page(1, 'ModSecSkip', array('inMsDomains' => 'www.BOB.example', 'inMsRules' => '942100, 920350 942100'));
+check(ph_modsec::SkipDomains() === array('bob.example') && ph_modsec::SkipRules() === array('942100', '920350'), 'domains (www. and case dropped) and rules saved once each');
+$zdbh->exec("UPDATE x_ph_settings SET ph_value_tx = 'bob.example,x\") ctl:ruleEngine=Off\"' WHERE ph_name_vc = 'ms:skipdomains'");
+check(ph_modsec::SkipDomains() === array('bob.example'), 'one written straight into the table that is no domain is ignored (nothing reaches Apache\'s settings)');
 page(1, 'Clear', array());
 check(count(ph::Caught()) === 0, 'the list can be emptied');
 page(1, 'Rules', array('inRule' => array_fill_keys(ph::Chosen() ?: array('random', 'xxe', 'samesite', 'mail', 'putenv', 'basedir', 'curl', 'eval'), '1')));
@@ -434,22 +603,31 @@ check(ph::Status($v83)['st_state_vc'] === 'watch' && ph::Status('8.4')['st_state
 
 // ---------------------------------------------------------------------------------------------
 section('Install and remove');
-$zdbh->exec("INSERT INTO x_modules (mo_id_pk, mo_folder_vc) VALUES (7, 'php_hardening')");
+$zdbh->exec("ALTER TABLE x_modules ADD COLUMN mo_name_vc TEXT");
+$zdbh->exec("ALTER TABLE x_modules ADD COLUMN mo_desc_tx TEXT");
+$zdbh->exec("INSERT INTO x_modules (mo_id_pk, mo_folder_vc, mo_name_vc) VALUES (7, 'php_hardening', 'PHP Hardening')");
 $zdbh->exec("INSERT INTO x_groups (ug_id_pk, ug_name_vc) VALUES (1, 'Administrators'), (2, 'Resellers'), (3, 'Users')");
 $zdbh->exec("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (2, 7), (3, 7)");
 list($rc, $o) = sh('cd ' . escapeshellarg(__DIR__ . '/root') . ' && ' . escapeshellarg($PHP) . ' ' . escapeshellarg("$MOD/deploy/install.run"));
 $perm = $zdbh->query("SELECT pe_group_fk FROM x_permissions WHERE pe_module_fk = 7")->fetchAll(PDO::FETCH_COLUMN);
 check($rc === 0 && array_map('intval', $perm) === array(1), 'install: administrators only', $o . ' ' . json_encode($perm));
+check($zdbh->query("SELECT mo_name_vc FROM x_modules WHERE mo_id_pk = 7")->fetchColumn() === 'Web Hardening', 'its name in the panel: Web Hardening (an upgrade from PHP Hardening changes it too)');
 sh('cd ' . escapeshellarg(__DIR__ . '/root') . ' && ' . escapeshellarg($PHP) . ' ' . escapeshellarg("$MOD/deploy/upgrade.run"));
 check((int) $zdbh->query("SELECT COUNT(*) FROM x_permissions WHERE pe_module_fk = 7")->fetchColumn() === 1, 'upgrade: still once');
 // remove (zppy includes it in its own run; here the commands really run, so systemctl is a stand-in on PATH)
 file_put_contents("$W/sbin/systemctl", "#!/bin/sh\necho \"\$@\" >> " . escapeshellarg("$W/systemctl.log") . "\n");
 chmod("$W/sbin/systemctl", 0755);
+file_put_contents("$W/sbin/apache2ctl", "#!/bin/sh\necho \"apache2ctl \$@\" >> " . escapeshellarg("$W/systemctl.log") . "\n[ \"\$1\" = configtest ] && echo 'Syntax OK'\nexit 0\n");
+chmod("$W/sbin/apache2ctl", 0755);
+ph::Set('ms:mode', 'on');
+ph_modsec::Apply();
+check(is_file($msFile), '(ModSecurity on before removing)');
 list($rc, $o) = sh('cd ' . escapeshellarg(__DIR__ . '/root') . ' && ' . escapeshellarg($PHP) . ' ' . escapeshellarg("$MOD/deploy/remove.run"));
 check($rc === 0 && !is_file("$sysScan/" . ph::INI) && !is_file("$W/opt/sentora-php/8.4/etc/conf.d/" . ph::INI) && !is_file("$sysScan/" . ph::RULES), 'remove: switched off in every PHP', $o);
 check(!is_file("$sysExt/sentora-snuffleupagus.so") && is_file("$W/opt/sentora-php/8.4/lib/ext/snuffleupagus.so"), 'remove: the downloaded build deleted; a bundle\'s own stays');
 check(strpos((string) @file_get_contents("$W/systemctl.log"), "reload php$v83-fpm") !== false, 'remove: PHP-FPM reloaded', (string) @file_get_contents("$W/systemctl.log"));
 check(ph::Mode($v83) === 'off' && ph::Mode('8.4') === 'off', 'remove: every PHP noted off (so installing it again switches nothing on)');
+check(!is_file($msFile) && ph_modsec::Mode() === 'off' && strpos((string) @file_get_contents("$W/systemctl.log"), 'reload apache2') !== false, 'remove: ModSecurity switched off too (its file out, Apache reloaded)');
 
 // the hook runs only from the command line
 list(, $o) = sh(escapeshellarg($PHP) . ' -r ' . escapeshellarg('echo strpos(file_get_contents(' . var_export("$MOD/hooks/OnDaemonRun.hook.php", true) . '), "PHP_SAPI !== \'cli\'") !== false ? "yes" : "no";'));

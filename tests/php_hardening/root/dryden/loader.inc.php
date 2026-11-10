@@ -38,6 +38,7 @@ $zdbh->exec('PRAGMA busy_timeout=5000');
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_group_fk INT, ac_deleted_ts INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_modules (mo_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, mo_folder_vc TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_groups (ug_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ug_name_vc TEXT)");
+$zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, vh_name_vc TEXT, vh_acc_fk INT, vh_deleted_ts INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_permissions (pe_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, pe_group_fk INT, pe_module_fk INT)");
 date_default_timezone_set('UTC');
 
@@ -60,7 +61,8 @@ class ctrl_options
     static function GetSystemOption($n)
     {
         $w = getenv('PH_W');
-        $o = array('sentora_root' => $w . '/panel/', 'hosted_dir' => $w . '/hosted/');
+        $o = array('sentora_root' => $w . '/panel/', 'hosted_dir' => $w . '/hosted/', 'apache_vhost' => $w . '/apache/httpd-vhosts.conf',
+            'apache_sn' => 'apache2', 'sentora_domain' => 'panel.example');
         return isset($o[$n]) ? $o[$n] : '';
     }
 }
@@ -69,7 +71,11 @@ class sys_platform
 {
     static function Get($name, $fill = array())
     {
-        $o = array('php_fpm_process' => 'fake-php-fpm{v}', 'php_fpm_service' => 'php{v}-fpm');
+        $w = getenv('PH_W');
+        $o = array('php_fpm_process' => 'fake-php-fpm{v}', 'php_fpm_service' => 'php{v}-fpm',
+            'modsec_module' => $w . '/modsec/mod_security2.so', 'modsec_unique_id_module' => $w . '/modsec/mod_unique_id.so',
+            'modsec_data_dir' => $w . '/modsec/data', 'modsec_conf_dir' => $w . '/apache/modsecurity.d', 'modsec_off_cmd' => 'a2dismod -q -f security2',
+            'apache_ctl' => 'apache2ctl', 'apache_modules_cmd' => 'apache2ctl -M', 'apache_log_dir' => $w . '/log', 'web_user' => 'root');
         $v = isset($o[$name]) ? $o[$name] : '';
         foreach ($fill as $k => $x) {
             $v = str_replace('{' . $k . '}', $x, $v);

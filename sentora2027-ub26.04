@@ -1486,6 +1486,13 @@ a2enmod rewrite
 a2enmod -q headers > /dev/null 2>&1
 # mod_lua: sentora-guard.lua checks what a hosted site's request may be handed to
 a2enmod -q lua > /dev/null 2>&1
+# ModSecurity (Apache's web application firewall): installed switched off, without the system's own
+# (older) rule set; the Web Hardening add-on (Repo Browser) switches it on with Sentora's copy of the
+# OWASP rules. Its settings (modsec_*) are set in "Configuring Sentora".
+DEBIAN_FRONTEND=noninteractive $PACKAGE_INSTALLER --no-install-recommends libapache2-mod-security2 > /dev/null 2>&1 \
+    || echo "WARNING: ModSecurity did not install (apt-get install libapache2-mod-security2); the Web Hardening add-on needs it"
+a2dismod -q -f security2 > /dev/null 2>&1
+mkdir -p "$PANEL_CONF/apache/modsecurity.d"
 
 if ! grep -q "Include $PANEL_CONF/apache/httpd.conf" "$HTTP_CONF_PATH"; then
     echo "Include $PANEL_CONF/apache/httpd.conf" >> "$HTTP_CONF_PATH";
@@ -2042,6 +2049,14 @@ a2enmod status > /dev/null
 #--- Set some Sentora database entries using. setso and setzadmin (require PHP)
 ui_step "Configuring Sentora"
 # Ubuntu's values for the settings that differ from the defaults (dryden/sys/platform.class.php)
+# ModSecurity (Web Hardening switches it on): its package, module files, data folder, the folder
+# Sentora's httpd.conf includes, and the command that keeps the system's own settings off
+$PANEL_PATH/panel/bin/setso --set modsec_package "--no-install-recommends libapache2-mod-security2" > /dev/null
+$PANEL_PATH/panel/bin/setso --set modsec_module /usr/lib/apache2/modules/mod_security2.so > /dev/null
+$PANEL_PATH/panel/bin/setso --set modsec_unique_id_module /usr/lib/apache2/modules/mod_unique_id.so > /dev/null
+$PANEL_PATH/panel/bin/setso --set modsec_data_dir /var/cache/modsecurity > /dev/null
+$PANEL_PATH/panel/bin/setso --set modsec_conf_dir "$PANEL_CONF/apache/modsecurity.d" > /dev/null
+$PANEL_PATH/panel/bin/setso --set modsec_off_cmd "a2dismod -q -f security2" > /dev/null
 $PANEL_PATH/panel/bin/setso --set php_bundle_tag ubuntu26.04 > /dev/null
 $PANEL_PATH/panel/bin/setso --set php_bundle_libs "libpng16-16t64 libjpeg-turbo8 libfreetype6 libwebp7 libgmp10 zlib1g libldap2 libgnutls30t64 libonig5 libzip5 libsodium23 libargon2-1 libsqlite3-0 libxml2-16 libcurl4t64 libicu78 libxslt1.1 libssl3t64" > /dev/null
 zadminpassword=$(passwordgen);

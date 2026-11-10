@@ -1504,6 +1504,14 @@ $PACKAGE_INSTALLER httpd mod_ssl mod_http2 mod_lua openssl
 HTTP_CONF_PATH="/etc/httpd/conf/httpd.conf"
 HTTP_SERVICE="httpd"
 # (mod_rewrite, headers, lua, ssl, status, proxy_fcgi: installed and on with the packages above)
+# ModSecurity (Apache's web application firewall, from EPEL; in RHEL itself from 10.3): installed
+# switched off; the Web Hardening add-on (Repo Browser) switches it on with Sentora's copy of the OWASP
+# rules. Its own settings files stay empty (a package update keeps an emptied file).
+$PACKAGE_INSTALLER mod_security > /dev/null 2>&1 \
+    || echo "WARNING: ModSecurity did not install (dnf install mod_security, from EPEL); the Web Hardening add-on needs it"
+MODSEC_OFF='for f in /etc/httpd/conf.modules.d/*mod_security*.conf /etc/httpd/conf.d/mod_security.conf; do if [ -s "$f" ]; then mv "$f" "$f.disabled-by-sentora"; : > "$f"; fi; done; true'
+sh -c "$MODSEC_OFF"
+mkdir -p "$PANEL_CONF/apache/modsecurity.d"
 
 if ! grep -q "Include $PANEL_CONF/apache/httpd.conf" "$HTTP_CONF_PATH"; then
     echo "Include $PANEL_CONF/apache/httpd.conf" >> "$HTTP_CONF_PATH";
@@ -2120,6 +2128,11 @@ SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
 so php_bundle_tag alma10; so php_bundle_libs "$PHP_BUNDLE_LIBS"
+# ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
+# httpd.conf includes, and the command that keeps the system's own settings off
+so modsec_package mod_security; so modsec_module /usr/lib64/httpd/modules/mod_security2.so
+so modsec_unique_id_module /usr/lib64/httpd/modules/mod_unique_id.so; so modsec_data_dir /var/lib/mod_security
+so modsec_conf_dir "$PANEL_CONF/apache/modsecurity.d"; so modsec_off_cmd "$MODSEC_OFF"
 so ftp_config_file "$FTP_CONF_PATH"; so ftp_service proftpd
 zadminpassword=$(passwordgen);
 setzadmin --set "$zadminpassword";

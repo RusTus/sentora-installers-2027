@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install Sentora on a fresh system in a container (systemd as PID 1), restart it like a server, and
-# run sentora-post-install-check and sentora-smoke-test. Exit 0 only when the install worked, the check
-# has no FAIL and the smoke test passed.
+# run sentora-post-install-check, sentora-smoke-test and ModSecurity through the Web Hardening add-on
+# (modsec-test.sh). Exit 0 only when the install worked, the check has no FAIL and both tests passed.
 #
 #   install-test.sh <system> <core checkout> <installers checkout> <results folder>
 #     system: ub26.04 | deb13 | alma10
@@ -121,9 +121,17 @@ in_box 'sentora-smoke-test' > "$OUT/smoke-test.txt" 2>&1
 grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
+say "ModSecurity through the Web Hardening add-on (on, attacks, watch only, off)"
+docker cp "$INST/sentora-repo/php_hardening.zpp" "$NAME:/root/php_hardening.zpp"
+docker cp "$INST/.github/scripts/modsec-test.sh" "$NAME:/root/modsec-test.sh"
+in_box 'bash /root/modsec-test.sh' > "$OUT/modsec-test.txt" 2>&1
+cat "$OUT/modsec-test.txt"
+in_box "tail -60 \"\$(php -q /etc/sentora/panel/bin/setso --get apache_log_dir)/modsec_audit.log\"" > "$OUT/modsec-audit.log" 2>&1
+
 say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
-[ $ok -eq 1 ] && echo "$SYS: installed, post-install check without FAIL, smoke test passed"
+if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
+[ $ok -eq 1 ] && echo "$SYS: installed, post-install check without FAIL, smoke test passed, ModSecurity works"
 [ $ok -eq 1 ]
