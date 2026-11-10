@@ -105,16 +105,18 @@ fetch Alinto/sogo "SOGo-$SOGO" sogo
 step "Packaging"
 # SOGo's backup script (the same one Debian's package installs as sogo-backup)
 install -m 755 sogo/Scripts/sogo-backup.sh "$PREFIX/sbin/sogo-backup"
+# SOGo's programs need only their library path (the installer's service and tool wrappers set it)
 cat > "$PREFIX/sogo-env.sh" <<EOF
-# SOGo's environment (sourced by its service and its tools): Sentora's own build in $PREFIX
-. $PREFIX/share/GNUstep/Makefiles/GNUstep.sh
+# SOGo's environment (for a shell: . $PREFIX/sogo-env.sh): Sentora's own build in $PREFIX
 export LD_LIBRARY_PATH=$PREFIX/lib64:$PREFIX/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
 export PATH=$PREFIX/sbin:$PREFIX/bin:\$PATH
 EOF
-SOGOD=$(find "$PREFIX" -name sogod -type f | head -1)
-[ -n "$SOGOD" ] || { echo "sogod was not built"; exit 1; }
-# it must start: the libraries it needs are all there (none "not found")
-( . "$PREFIX/sogo-env.sh"; ldd "$SOGOD" | grep 'not found' && exit 1; "$SOGOD" --help > /dev/null 2>&1 || true )
+SOGOD="$PREFIX/sbin/sogod"
+# it must start: every library it and ActiveSync need is there (none "not found")
+for f in "$SOGOD" "$PREFIX/sbin/sogo-tool" "$PREFIX/lib64/GNUstep/SOGo/ActiveSync.SOGo/ActiveSync"; do
+    [ -e "$f" ] || { echo "$f was not built"; exit 1; }
+    if LD_LIBRARY_PATH="$PREFIX/lib64:$PREFIX/lib" ldd "$f" | grep 'not found'; then echo "$f: libraries missing"; exit 1; fi
+done
 cat > "$PREFIX/BUILD-INFO" <<EOF
 system=alma10
 sogo=$SOGO
@@ -123,7 +125,6 @@ gnustep-make=$GNUSTEP_MAKE
 gnustep-base=$GNUSTEP_BASE
 libwbxml=$LIBWBXML
 ytnef=$YTNEF
-sogod=${SOGOD#$PREFIX/}
 built=$(date -u '+%Y-%m-%d %H:%M UTC')
 EOF
 TAR="$OUT/sentora-sogo-alma10-amd64.tar.gz"
