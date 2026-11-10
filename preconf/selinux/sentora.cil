@@ -1,0 +1,8 @@
+; Sentora's own SELinux rules (AlmaLinux/Rocky with SELinux enforcing), loaded by the installer:
+;   semodule -i sentora.cil
+; Only what AlmaLinux's own policy does not cover and labels can not fix; each rule is as narrow as
+; it can be. Nothing here switches anything off.
+
+; BIND writes its log in Sentora's log folder (/var/sentora/logs/bind, labelled named_log_t): it may
+; enter /var/sentora/logs (Apache's logs, httpd_log_t) on its way, but not list or read anything there.
+(allow named_t httpd_log_t (dir (search)))

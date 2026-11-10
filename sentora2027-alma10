@@ -2216,8 +2216,13 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
         setsebool -P "$b" on > /dev/null 2>&1 && echo "SELinux: $b on" || echo "SELinux: $b not set (not known here)"
     done
     echo "SELinux: labels set for $PANEL_PATH, $PANEL_DATA and /var/lib/sentora"
+    # Sentora's own rules, for what labels can not fix (each one explained in the file)
+    if [ -f "$PANEL_CONF/selinux/sentora.cil" ]; then
+        semodule -i "$PANEL_CONF/selinux/sentora.cil" && echo "SELinux: Sentora's rules loaded (semodule -l: sentora)" \
+            || echo "WARNING: SELinux: Sentora's rules ($PANEL_CONF/selinux/sentora.cil) could not be loaded."
+    fi
     # what started before its files had their labels starts again now
-    for u in dovecot fail2ban clamav-freshclam; do
+    for u in dovecot fail2ban clamav-freshclam named; do
         systemctl is-enabled --quiet "$u" 2> /dev/null && systemctl restart "$u" > /dev/null 2>&1
     done
 fi
