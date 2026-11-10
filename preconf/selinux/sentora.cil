@@ -6,3 +6,10 @@
 ; BIND writes its log in Sentora's log folder (/var/sentora/logs/bind, labelled named_log_t): it may
 ; enter /var/sentora/logs (Apache's logs, httpd_log_t) on its way, but not list or read anything there.
 (allow named_t httpd_log_t (dir (search)))
+
+; The Sentora daemon (cron, every 5 minutes) runs postqueue (to count the mail queue) and sendmail (its
+; alerts): they inherit the daemon's open files (its script, its report), which SELinux rightly closes
+; for them. Nothing is allowed here: these two refusals are only not written to the audit log, as they
+; are expected and change nothing (the mail queue is counted, the alerts are sent).
+(dontaudit postfix_postqueue_t httpd_sys_content_t (file (read)))
+(dontaudit system_mail_t httpd_log_t (file (write append)))
