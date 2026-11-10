@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
-# Sentora-2027 patch: run it on a fresh server BEFORE sentora2027-install. It is not part of the
+# Sentora-2027 patch for Ubuntu 26.04: run it on a fresh server BEFORE the Sentora installer. It is not part of the
 # installer and changes nothing of Sentora; it brings the system itself up to date:
 #   1. installs every pending update of this system (the kernel too);
 #   2. applies Sentora's stopgaps for known holes the system has not fixed yet (each one removes
 #      itself once the server runs a fixed kernel or package);
 #   3. says whether to restart before installing Sentora (a new kernel only runs after a restart).
 #
-#   wget -O sentora2027-patch https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora2027-patch
-#   bash sentora2027-patch             patch, then say whether to restart
-#   bash sentora2027-patch --check     only show what it would do (changes nothing)
-#   bash sentora2027-patch --reboot    patch, and restart by itself when a restart is needed
+#   wget -O sentora2027-patch-ub26.04 https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora2027-patch-ub26.04
+#   bash sentora2027-patch-ub26.04             patch, then say whether to restart
+#   bash sentora2027-patch-ub26.04 --check     only show what it would do (changes nothing)
+#   bash sentora2027-patch-ub26.04 --reboot    patch, and restart by itself when a restart is needed
 #
-# Supported: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise Linux 10, Fedora.
-# Log: /var/log/sentora2027-patch.log
+# For: Ubuntu 26.04. (Each system has its own: sentora2027-patch-ub26.04, -deb13, -alma10, -fedora.)
+# Log: /var/log/sentora2027-patch-ub26.04.log
 #
 # Stopgaps in this version (2026-11-10):
-#   CVE-2026-98432  Linux kernel, IPv4 TCP handshake (use-after-free, CVSS 9.8). Until the server
-#                   runs a fixed kernel, incoming TCP packets carrying IPv4 options are dropped
-#                   (ordinary traffic never uses them; the filter Red Hat suggests). It stays on
-#                   across restarts and takes itself away once a fixed kernel runs.
+#   CVE-2026-98432  Linux kernel, IPv4 TCP handshake (use-after-free, CVSS 9.8). Ubuntu's fixed kernel
+#                   (7.0.0-43.43) was still in its test channel (-proposed) on 2026-11-10, which this
+#                   script does not use; until the server runs it, incoming TCP packets carrying IPv4
+#                   options are dropped (ordinary traffic never uses them; the filter Red Hat suggests).
+#                   It stays on across restarts and takes itself away once a fixed kernel runs.
 set -u
 PATCH_DATE=2026-11-10
 SELF_DIR=/usr/local/sbin
 STOP_DIR=/etc/sentora-patch
-LOG=/var/log/sentora2027-patch.log
+LOG=/var/log/sentora2027-patch-ub26.04.log
 
 MODE=patch
 for a in "$@"; do
@@ -41,17 +42,16 @@ REBOOT=${REBOOT:-0}
 [ -r /etc/os-release ] || { echo "This system does not say what it is (/etc/os-release)."; exit 1; }
 . /etc/os-release
 case "${ID:-} ${VERSION_ID:-}" in
-    "ubuntu 26.04")                          FAMILY=apt ;;
-    "debian 13"*)                            FAMILY=apt ;;
-    "almalinux 10"*|"rocky 10"*|"rhel 10"*)  FAMILY=dnf ;;
-    "fedora "*)                              FAMILY=dnf ;;
-    *) echo "sentora2027-patch does not know ${PRETTY_NAME:-this system} (it patches the systems Sentora-2027 supports)."; exit 1 ;;
+    "ubuntu 26.04") FAMILY=apt ;;
+    *) echo "This is the patch script for Ubuntu 26.04; this is ${PRETTY_NAME:-another system}."
+       echo "(Debian 13: sentora2027-patch-deb13; AlmaLinux/Rocky/RHEL 10: sentora2027-patch-alma10; Fedora: sentora2027-patch-fedora)"
+       exit 1 ;;
 esac
 WSL=0; grep -qi microsoft /proc/version 2> /dev/null && WSL=1
 
 if [ "$MODE" != boot ]; then
     exec > >(tee -a "$LOG") 2>&1
-    echo "== sentora2027-patch ($PATCH_DATE) on ${PRETTY_NAME:-$ID $VERSION_ID}, $(date '+%Y-%m-%d %H:%M %Z')$([ "$MODE" = check ] && echo ': --check, nothing is changed')"
+    echo "== sentora2027-patch-ub26.04 ($PATCH_DATE) on ${PRETTY_NAME:-$ID $VERSION_ID}, $(date '+%Y-%m-%d %H:%M %Z')$([ "$MODE" = check ] && echo ': --check, nothing is changed')"
 fi
 
 # ----- helpers -----------------------------------------------------------------------------------
@@ -81,14 +81,14 @@ deb_kernel_version() {
 }
 
 # whether a kernel's own changelog lists a CVE (rpm systems, and Debian/Ubuntu when it is there)
-changelog_lists() { # kernel-release CVE
+changelog_lists() { # kernel-release text (a CVE, or the fix's own title)
     if [ "$FAMILY" = dnf ]; then
-        rpm -q --changelog "kernel-core-$1" 2> /dev/null | grep -q "$2" && return 0
-        rpm -q --changelog "kernel-$1" 2> /dev/null | grep -q "$2" && return 0
+        rpm -q --changelog "kernel-core-$1" 2> /dev/null | grep -qF "$2" && return 0
+        rpm -q --changelog "kernel-$1" 2> /dev/null | grep -qF "$2" && return 0
     else
         local f
         for f in /usr/share/doc/linux-image-"$1"/changelog.Debian.gz /usr/share/doc/linux-modules-"$1"/changelog.Debian.gz; do
-            [ -f "$f" ] && zgrep -q "$2" "$f" && return 0
+            [ -f "$f" ] && zgrep -qF "$2" "$f" && return 0
         done
     fi
     return 1
@@ -106,7 +106,7 @@ ensure_nft() {
 boot_service() { # on|off
     local unit=/etc/systemd/system/sentora-patch-stopgaps.service
     if [ "$1" = on ]; then
-        install -m 755 "$(readlink -f "$0")" "$SELF_DIR/sentora2027-patch" 2> /dev/null
+        install -m 755 "$(readlink -f "$0")" "$SELF_DIR/sentora2027-patch-ub26.04" 2> /dev/null
         cat > "$unit" <<EOF
 [Unit]
 Description=Sentora patch: stopgaps for security holes the system has not fixed yet
@@ -115,7 +115,7 @@ Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=$SELF_DIR/sentora2027-patch --boot
+ExecStart=$SELF_DIR/sentora2027-patch-ub26.04 --boot
 
 [Install]
 WantedBy=multi-user.target
@@ -131,9 +131,10 @@ EOF
 # ----- stopgap: CVE-2026-98432 (kernel, IPv4 TCP handshake) ---------------------------------------
 # Fixed kernels (from the distributions' own notices): Ubuntu 26.04 7.0.0-43.43 (first in -proposed,
 # then -updates); Debian 13 6.12.113-1 (DSA-6568-1); RHEL 10 and its rebuilds: the kernel whose
-# changelog lists the CVE (RHSA-2026:93413). Fedora: its changelogs do not list CVEs, so the filter
-# stays until a kernel's changelog or this script says otherwise (it is harmless for normal traffic).
+# changelog lists the CVE (RHSA-2026:93413). Fedora: a kernel whose changelog lists the fix's title;
+# when it does not, the filter stays (it is harmless for normal traffic).
 CVE1=CVE-2026-98432
+CVE1_FIX="free inet_opt and ireq_opt after an RCU grace period"   # (the fix's title in the kernel's changelog)
 cve1_fixed() { # kernel-release: 0 fixed, 1 not fixed, 2 can not tell
     local k="$1" v
     case "$ID" in
@@ -143,6 +144,7 @@ cve1_fixed() { # kernel-release: 0 fixed, 1 not fixed, 2 can not tell
                 v=$(deb_kernel_version "$k"); [ -n "$v" ] || return 2
                 dpkg --compare-versions "$v" ge 6.12.113-1 && return 0; return 1 ;;
         *)      changelog_lists "$k" "$CVE1" && return 0
+                changelog_lists "$k" "$CVE1_FIX" && return 0
                 [ "$ID" = fedora ] && return 2; return 1 ;;
     esac
 }
