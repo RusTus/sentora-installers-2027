@@ -41,7 +41,8 @@ function daemon()
 }
 function fake($what, $q = array())
 {
-    return json_decode(file_get_contents(getenv('PP_FAKE') . '/control/' . $what . '?' . http_build_query($q)), true);
+    $ctx = stream_context_create(array('http' => array('ignore_errors' => true)));
+    return json_decode(file_get_contents(getenv('PP_FAKE') . '/control/' . $what . '?' . http_build_query($q), false, $ctx), true);
 }
 function web($url, $post = false)
 {
@@ -74,6 +75,15 @@ function events($like)
 function lastinv($acc)
 {
     return row("SELECT * FROM x_pp_invoices WHERE in_acc_fk = :a ORDER BY in_id_pk DESC LIMIT 1", array(':a' => $acc));
+}
+function unthrottle($id)
+{
+    global $zdbh;
+    $zdbh->exec("UPDATE x_pp_invoices SET in_order_in = in_order_in - 30 WHERE in_id_pk = " . (int) $id);
+}
+function sid($r)
+{
+    return basename((string) parse_url((string) $r['go'], PHP_URL_PATH));
 }
 function query_of($url)
 {
@@ -146,10 +156,10 @@ section('Prices');
 $r = req(2, 'Prices', array('inMonth2' => '10.00', 'inYear2' => '100', 'inMonth3' => '', 'inYear3' => '99,00', 'inMonth4' => '', 'inYear4' => ''));
 check(pp::Prices(2) === array(2 => array(1000, 10000), 3 => array(0, 9900), 4 => array(0, 0)), 'prices saved in cents', json_encode(pp::Prices(2)));
 
-section('Automatic billing: new clients on a priced package');
+section('Automatic billing waits for live mode; plans started by hand while testing');
 $s2 = pp::Seller(2);
 $t = (int) $s2['ps_autofrom_in'];
-check($t > $now - 60, 'automatic billing started when the seller first saved');
+check($t > $now - 60, 'automatic billing counts from the seller\'s first save');
 $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_reseller_fk, ac_package_fk, ac_group_fk, ac_created_ts) VALUES
     (11, 'c_new', 'new@example.com', 2, 2, 3, " . ($t + 1) . "),
     (12, 'c_pro', 'pro@example.com', 2, 3, 3, " . ($t + 2) . "),
@@ -157,13 +167,16 @@ $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_resel
     (14, 'c_gone', 'gone@example.com', 2, 2, 3, " . ($t + 4) . ")");
 $zdbh->exec("UPDATE x_accounts SET ac_deleted_ts = 1 WHERE ac_id_pk = 14");
 $out = daemon();
+check(pp::Plan(11) === null && pp::Plan(12) === null, 'in test mode, new clients are not billed by themselves (real clients would get TEST invoices)', $out);
+$r = req(2, 'Plan', array('inClient' => '11', 'inPeriod' => 'month', 'inPaidUntil' => date('Y-m-d')));
+$r = req(2, 'Plan', array('inClient' => '12', 'inPeriod' => 'year', 'inPaidUntil' => date('Y-m-d')));
+$r = req(2, 'Plan', array('inClient' => '13', 'inPeriod' => 'month', 'inPaidUntil' => date('Y-m-d')));
+check(strpos($r['text'], 'has no monthly price') !== false && pp::Plan(13) === null, 'a package without a price can not be billed', $r['text']);
+daemon();
 $p11 = pp::Plan(11);
 $p12 = pp::Plan(12);
-check($p11 && $p11['pl_period_vc'] === 'month' && (int) $p11['pl_seller_fk'] === 2, 'c_new is billed monthly by its reseller', $out);
-check($p12 && $p12['pl_period_vc'] === 'year', 'c_pro is billed yearly (its package has only a yearly price)');
-check(pp::Plan(13) === null, 'c_free (package without a price) is not billed');
-check(pp::Plan(10) === null, 'c_old (made before automatic billing) is not billed by surprise');
-check(pp::Plan(14) === null, 'a deleted client is not billed');
+check($p11 && $p11['pl_period_vc'] === 'month' && (int) $p11['pl_seller_fk'] === 2 && (int) $p11['pl_realuntil_in'] === (int) $p11['pl_paiduntil_in'], 'c_new is billed monthly by its reseller');
+check($p12 && $p12['pl_period_vc'] === 'year', 'c_pro is billed yearly');
 $i11 = lastinv(11);
 check($i11 && $i11['in_number_vc'] === 'TEST-00001' && (int) $i11['in_total_in'] === 1200 && (int) $i11['in_tax_in'] === 200, 'c_new\'s first invoice comes at once: TEST-00001, 10.00 + 20% VAT = 12.00', json_encode($i11));
 check((int) $i11['in_due_in'] <= time(), 'it is due at once');
@@ -174,12 +187,8 @@ check(count(events('email:new@example.com:Res One Hosting: TEST: Invoice TEST-00
 check(count(events('notice:pp-invoice-' . $i11['in_id_pk'] . ':info:%')) === 1, 'and a notice in the panel');
 daemon();
 check((int) row("SELECT COUNT(*) n FROM x_pp_invoices WHERE in_acc_fk = 11")['n'] === 1, 'the next daemon run makes no second invoice');
-$zdbh->exec("UPDATE x_accounts SET ac_group_fk = 1 WHERE ac_id_pk = 13");
-$zdbh->exec("UPDATE x_pp_prices SET pr_month_in = 500 WHERE pr_package_fk = 4");
-daemon();
-check(pp::Plan(13) === null, 'an administrator is never billed');
-$zdbh->exec("UPDATE x_accounts SET ac_group_fk = 3 WHERE ac_id_pk = 13");
-$zdbh->exec("UPDATE x_pp_prices SET pr_month_in = 0 WHERE pr_package_fk = 4");
+$r = req(2, 'InvoiceNow', array('inClient' => '11'));
+check(strpos($r['text'], 'An invoice is open already') !== false, '"Invoice now" while one is open makes none', $r['text']);
 
 section('Existing clients: billing them all at once');
 $r = req(2);
@@ -224,11 +233,13 @@ $order = query_of($r['go'])['token'];
 fake('paypal', array('o' => $order, 'capvalue' => '1.00'));
 $r = req(12, '', array(), array('pp' => 'return', 'i' => (string) $i12['in_id_pk'], 'token' => $order));
 check(strpos($r['text'], 'is not the invoice\'s amount: not counted') !== false && lastinv(12)['in_status_vc'] === 'open', 'a capture of another amount is not counted', $r['text']);
+unthrottle($i12['in_id_pk']);
 $r = req(12, 'Pay', array('inId' => (string) $i12['in_id_pk']));
 $order = query_of($r['go'])['token'];
 fake('paypal', array('o' => $order, 'capcustom' => '999'));
 $r = req(12, '', array(), array('pp' => 'return', 'i' => (string) $i12['in_id_pk'], 'token' => $order));
 check(strpos($r['text'], 'not for this invoice') !== false && lastinv(12)['in_status_vc'] === 'open', 'a capture naming another invoice is not counted', $r['text']);
+unthrottle($i12['in_id_pk']);
 $r = req(12, 'Pay', array('inId' => (string) $i12['in_id_pk']));
 $order = query_of($r['go'])['token'];
 fake('paypal', array('o' => $order, 'capstatus' => 'PENDING'));
@@ -305,6 +316,38 @@ foreach ($cases as $what => $c) {
     req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inVoid' => '1'));
 }
 
+section('Stripe: one invoice is never paid twice');
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$r = req(11, 'Pay', array('inId' => (string) $inv['in_id_pk']));
+$a = sid($r);
+$r = req(11, 'Pay', array('inId' => (string) $inv['in_id_pk']));
+check($r['go'] === '' && strpos($r['text'], 'wait a few seconds') !== false, 'clicking Pay again at once starts no second payment', $r['text']);
+unthrottle($inv['in_id_pk']);
+$r = req(11, 'Pay', array('inId' => (string) $inv['in_id_pk']));
+$b = sid($r);
+$state = fake('state');
+check($b !== $a && strpos($b, 'cs_test_') === 0 && $state['stripe'][$a]['status'] === 'expired', 'Pay again later: the first checkout page is closed at Stripe before a new one opens', json_encode($state['stripe'][$a]['status']));
+check(in_array('closed', array_column(pp::History((int) $inv['in_id_pk']), 'lg_what_vc'), true), 'the closing is in the invoice\'s history');
+$res = fake('stripe', array('s' => $a, 'pay' => 'paid'));
+check(isset($res['error']) && fake('state')['stripe'][$a]['status'] === 'expired', 'the old tab can not take money any more', json_encode($res));
+fake('stripe', array('s' => $b, 'pay' => 'paid'));
+unthrottle($inv['in_id_pk']);
+$r = req(11, 'Pay', array('inId' => (string) $inv['in_id_pk']));
+check($r['go'] === '' && isset($r['msg'][0]) && $r['msg'][0][0] === 'ok' && strpos($r['text'], 'paid already') !== false && lastinv(11)['in_status_vc'] === 'paid',
+    'paid in the other tab, then Pay again: the payment is found, nothing is paid twice', $r['text']);
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$c = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
+$r = req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inVoid' => '1'));
+check(lastinv(11)['in_status_vc'] === 'void' && fake('state')['stripe'][$c]['status'] === 'expired', 'voiding an invoice closes its open checkout page (no money for a void invoice)', $r['text']);
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$d = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
+fake('stripe', array('s' => $d, 'pay' => 'paid'));
+$r = req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inVoid' => '1'));
+check(strpos($r['text'], 'was just paid: it is not voided') !== false && lastinv(11)['in_status_vc'] === 'paid', 'voiding an invoice the client just paid: it is kept, paid', $r['text']);
+
 section('Stripe: a payment that takes time, and one that expires');
 req(2, 'InvoiceNow', array('inClient' => '11'));
 $inv = lastinv(11);
@@ -345,6 +388,10 @@ check(lastinv(11)['in_status_vc'] === 'paid', 'a client who paid and never came 
 section('Unpaid: switched off, then on again');
 req(2, 'InvoiceNow', array('inClient' => '11'));
 $inv = lastinv(11);
+$zdbh->exec("UPDATE x_pp_sellers SET ps_grace_in = 0 WHERE ps_acc_fk = 2");
+$zdbh->exec("UPDATE x_pp_invoices SET in_due_in = " . (time() - 60) . " WHERE in_id_pk = " . (int) $inv['in_id_pk']);
+$r = req(2, 'TestTools', array('inWhat' => 'run'));
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 11")['ac_enabled_in'] === 1, 'with 0 grace days, nobody is switched off within a day of the invoice being made', $r['text']);
 req(2, 'TestTools', array('inWhat' => 'overdue', 'inId' => (string) $inv['in_id_pk']));
 $r = req(2, 'TestTools', array('inWhat' => 'run'));
 $a = row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 11");
@@ -362,7 +409,9 @@ ws_suspend::Set(12, 'Abuse', 1);
 $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 12");
 $zdbh->exec("UPDATE x_pp_plans SET pl_suspended_in = 1 WHERE pl_acc_fk = 12");
 req(2, 'InvoiceNow', array('inClient' => '12'));
-req(2, 'Invoice', array('inId' => (string) lastinv(12)['in_id_pk'], 'inMethod' => 'Bank transfer'));
+$manual12 = (int) lastinv(12)['in_id_pk'];
+req(2, 'Invoice', array('inId' => (string) $manual12, 'inMethod' => 'Bank transfer'));
+$zdbh->exec("UPDATE x_pp_sellers SET ps_grace_in = 3 WHERE ps_acc_fk = 2");
 check(lastinv(12)['in_status_vc'] === 'paid' && (int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 12")['ac_enabled_in'] === 0, 'paying never switches on a client switched off for another reason');
 
 section('Stopped plans, removing keys, going live');
@@ -371,17 +420,39 @@ daemon();
 check((int) pp::Plan(11)['pl_active_in'] === 0, 'a plan the seller stopped is not started again automatically');
 $r = req(2, 'Settings', $st + array('inKDrop_paypal_sandbox' => '1'));
 check(!pp_pay::Ready(pp::Seller(2), 'paypal', 'sandbox') && pp_pay::Ready(pp::Seller(2)), 'Remove these keys takes PayPal\'s away, Stripe\'s stay', $r['text']);
+// before going live: c_old switched off for a TEST invoice; c_era made while testing
+req(2, 'InvoiceNow', array('inClient' => '10'));
+req(2, 'TestTools', array('inWhat' => 'overdue', 'inId' => (string) lastinv(10)['in_id_pk']));
+req(2, 'TestTools', array('inWhat' => 'run'));
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 10")['ac_enabled_in'] === 0, 'while testing, c_old is switched off for a TEST invoice');
+$zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_reseller_fk, ac_package_fk, ac_group_fk, ac_created_ts) VALUES (16, 'c_era', 'era@example.com', 2, 2, 3, " . (time() - 5) . ")");
+check((int) pp::Plan(12)['pl_paiduntil_in'] > time() + 300 * 86400, 'c_pro "paid" a year ahead with test money');
 $live = array('inTest' => '0') + $st;
 $r = req(2, 'Settings', $live);
 check(strpos($r['text'], 'Give your Stripe keys for live') !== false, 'going live without live keys says so', $r['text']);
+check(preg_match('/Live: (\d+) plan\(s\) moved by test payments are back to the date really paid until, and 1 client\(s\) switched off for a test invoice are on again/', $r['text'], $mm) && (int) $mm[1] >= 2,
+    'going live undoes the testing: plans back to the date really paid until, the TEST switch-off lifted', $r['text']);
+foreach (array(10, 11, 12) as $u) {
+    $p = pp::Plan($u);
+    check((int) $p['pl_paiduntil_in'] === (int) $p['pl_realuntil_in'], 'account ' . $u . ': test payments bought no real time', json_encode($p));
+}
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 10")['ac_enabled_in'] === 1 && ws_suspend::Reason(10) === '', 'c_old is on again');
+check(ws_suspend::Reason(12) === 'Abuse', 'c_pro, switched off for another reason, stays off');
 $r = req(2, 'Settings', $live + array('inK_stripe_live_secret' => 'sk_live_LiveKey12345678'));
 check(strpos($r['text'], 'Stripe accepts your keys (live)') !== false, 'live key accepted', $r['text']);
 $test = lastinv(12);
 check(!pp::CanPay(pp::Seller(2), array('in_test_in' => 1)), 'once live, a leftover TEST invoice can not be paid');
 $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_reseller_fk, ac_package_fk, ac_group_fk, ac_created_ts) VALUES (15, 'c_live', 'live@example.com', 2, 2, 3, " . time() . ")");
+$zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_email_vc, ac_reseller_fk, ac_package_fk, ac_group_fk, ac_created_ts) VALUES
+    (17, 'c_adm', 'adm@example.com', 2, 2, 1, " . time() . "), (18, 'c_gone2', 'g2@example.com', 2, 2, 3, " . time() . ")");
+$zdbh->exec("UPDATE x_accounts SET ac_deleted_ts = 1 WHERE ac_id_pk = 18");
 daemon();
 $i15 = lastinv(15);
-check($i15 && $i15['in_number_vc'] === 'R1-00001' && (int) $i15['in_test_in'] === 0, 'a new client\'s first real invoice: R1-00001', json_encode($i15));
+check($i15 && strpos($i15['in_number_vc'], 'R1-0000') === 0 && (int) $i15['in_test_in'] === 0 && (int) pp::Plan(15)['pl_seller_fk'] === 2, 'live: a new client is billed by itself, a real invoice at once', json_encode($i15));
+check(lastinv(12) && lastinv(12)['in_number_vc'] !== '' && (int) lastinv(12)['in_test_in'] === 0, 'c_pro, who "paid" only with test money, gets a real invoice');
+check(pp::Plan(16) === null && isset(pp::Unplanned(2)[16]), 'c_era (made while testing) is not billed by surprise: it waits for "Start billing them"');
+check(pp::Plan(17) === null, 'an administrator is never billed');
+check(pp::Plan(18) === null, 'a deleted client is not billed');
 $r = req(15, 'Pay', array('inId' => (string) $i15['in_id_pk']));
 $sid = basename(parse_url($r['go'], PHP_URL_PATH));
 check(strpos($sid, 'cs_live_') === 0, 'a real invoice is paid with the live key', $r['go']);
@@ -418,7 +489,7 @@ section('Figures and history');
 $f = pp::Stats(2);
 check($f['paid']['USD']['month'] === 1200 && $f['paid']['USD']['monthcount'] === 1, 'received this month: 12.00 USD (R1-00001; TEST invoices never count)', json_encode($f));
 check($f['recurring'] === 3390 && $f['plans'] === 3, 'coming in each month: 12.00 + 12.00 + 118.80/12 = 33.90 USD from 3 active plans (the stopped one not counted)', json_encode($f));
-check($f['open'] === array(), 'nothing real is waiting to be paid');
+check($f['open']['USD']['total'] === 11880 && $f['open']['USD']['count'] === 1, 'waiting to be paid: c_pro\'s real invoice, 118.80 USD', json_encode($f['open']));
 $fa = pp::Stats(1);
 check($fa['currency'] === 'HUF' && $fa['open']['HUF']['total'] === 5000 && $fa['recurring'] === 5000, 'the administrator: 5000 HUF waiting, 5000 HUF a month', json_encode($fa));
 $r = req(2);
@@ -433,11 +504,15 @@ $h2 = pp::History(2);
 $ref = array_values(array_filter($h2, function ($x) { return $x['lg_what_vc'] === 'refused'; }));
 check(count($ref) === 2 && $ref[0]['lg_note_vc'] === 'paid 1.00 USD' && $ref[1]['lg_note_vc'] === 'for invoice ID 999', 'refused payments are noted (the wrong amount, the wrong invoice)', json_encode($ref));
 check(in_array('pending', array_column($h2, 'lg_what_vc'), true), 'a pending payment is noted');
-$h12 = pp::History((int) lastinv(12)['in_id_pk']);
+$h12 = pp::History($manual12);
 check(end($h12)['lg_what_vc'] === 'paid' && end($h12)['lg_note_vc'] === 'Bank transfer' && (int) end($h12)['lg_by_fk'] === 2, 'marked paid by hand: noted with who did it');
 $off = row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_acc_fk = 11 AND lg_what_vc IN ('off', 'on')");
 check((int) $off['n'] === 2, 'switching off and on again is noted');
-check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 4, 'voided invoices are noted');
+check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 5, 'voided invoices are noted');
+$r = req(12, '', array(), array('invoice' => (string) $manual12));
+$r2 = req(2, '', array(), array('invoice' => (string) $manual12));
+check(strpos($r['html'], 'Bank transfer') !== false && strpos($r['html'], 'by res1') === false && strpos($r2['html'], 'by res1') !== false,
+    'the history shows who marked it paid to the seller only (a client never sees its seller\'s user name)');
 $r = req(2, '', array(), array('invoice' => '2'));
 check(strpos($r['html'], 'Payment not counted') !== false && strpos($r['html'], 'paid 1.00 USD') !== false, 'the invoice page shows its history');
 $before = (int) row("SELECT COUNT(*) n FROM x_pp_log")['n'];
@@ -453,6 +528,26 @@ putenv('PP_NOKEY=1');
 $r = req(2, 'Settings', $live + array('inK_paypal_live_clientid' => 'NEWCLIENTID9', 'inK_paypal_live_secret' => 'NEWSECRET999'));
 putenv('PP_NOKEY');
 check(strpos($r['text'], 'could not be stored') !== false && !pp_pay::Ready(pp::Seller(2), 'paypal', 'live'), 'a secret that can not be encrypted is not stored at all', $r['text']);
+
+section('A client moved to another account');
+$zdbh->exec("UPDATE x_accounts SET ac_reseller_fk = 1 WHERE ac_id_pk = 15");
+$zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . time() . " WHERE pl_acc_fk = 15");
+$n = (int) row("SELECT COUNT(*) n FROM x_pp_invoices WHERE in_acc_fk = 15")['n'];
+$out = daemon();
+check((int) pp::Plan(15)['pl_active_in'] === 0 && (int) row("SELECT COUNT(*) n FROM x_pp_invoices WHERE in_acc_fk = 15")['n'] === $n && strpos($out, 'belongs to another account now') !== false,
+    'its old seller\'s plan stops (no invoice, no error every 5 minutes)', $out);
+$out = daemon();
+check(strpos($out, 'account 15') === false, 'and is not mentioned again', $out);
+
+section('The daemon\'s hook can not be run from a browser');
+$before = (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'];
+list($code, $h, $b) = web(getenv('PP_WEB') . '/modules/payment_plans/hooks/OnDaemonRun.hook.php');
+check(trim($b) === '' && (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] === $before, 'asking for it does nothing', $code . ' ' . $b);
+
+section('Removing the module');
+$out = shell_exec('php -r ' . escapeshellarg('chdir("' . $T . '/root"); require "dryden/loader.inc.php"; include "modules/payment_plans/deploy/remove.run";') . ' 2>&1');
+check((int) row("SELECT COUNT(*) n FROM x_pp_keys")['n'] === 0 && (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] > 0 && (int) row("SELECT COUNT(*) n FROM x_pp_log")['n'] > 0,
+    'the payment keys are deleted; invoices and their history stay', $out);
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

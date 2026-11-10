@@ -79,14 +79,14 @@ Versions when a newer build is ready; nothing is ever compiled on a server (owne
 2. When the owner sends AlmaLinux VM results: fix what SELinux blocks (policy module), then
    `sentora-update` + `sentora-smoke-test` on the owner's Debian VM to confirm the 2027.62/63 core.
 
-**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 102):** billing belongs to each seller
+**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 103):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Processors are files in the
 module's `code/processors/` (PayPal, Stripe; `pp_pay::Processors()` lists them), and every payment is
 checked by `pp_pay::Apply`. New clients on priced packages are billed automatically. Figures at the top
-of the seller's page; every step noted in `x_pp_log`. Not yet tried against real MySQL or the real
-PayPal/Stripe test modes. The module is only kept as the .zpp: unzip it to change it. Its tests:
+of the seller's page; every step noted in `x_pp_log`. Security-reviewed in 103 (see the CHANGELOG). Not yet tried against real MySQL or the real
+PayPal/Stripe test modes; no webhooks yet, so a refund or chargeback after payment is not noticed. The module is only kept as the .zpp: unzip it to change it. Its tests:
 `tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
-before publishing a change).
+before publishing a change; `run.sh <unzipped module folder>` tests a working copy, without it the .zpp).
 
 **Ideas the owner is still thinking about (do not start without asking):** a SELinux policy module
 (after the VM test), a calendar/contacts alternative for AlmaLinux (no SOGo there), showing each

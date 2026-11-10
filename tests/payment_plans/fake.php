@@ -85,6 +85,13 @@ if (preg_match('#^/stripe(/.*)$#', $path, $m)) {
     if ($p === '/v1/checkout/sessions' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $out(200, array('object' => 'list', 'data' => array()));
     }
+    if (preg_match('#^/v1/checkout/sessions/(cs_\w+)/expire$#', $p, $mm) && isset($st['stripe'][$mm[1]])) {
+        if ($st['stripe'][$mm[1]]['status'] !== 'open') {
+            $out(400, array('error' => array('message' => 'Only Checkout Sessions with a status in [open] can be expired.')));
+        }
+        $st['stripe'][$mm[1]]['status'] = 'expired';
+        $out(200, $st['stripe'][$mm[1]]);
+    }
     if (preg_match('#^/v1/checkout/sessions/(cs_\w+)$#', $p, $mm) && isset($st['stripe'][$mm[1]])) {
         $out(200, $st['stripe'][$mm[1]]);
     }
@@ -115,6 +122,9 @@ if (strpos($path, '/control/') === 0) {
     }
     if ($what === 'stripe') { // a session: paid, unpaid (bank debit processing), expired; or changed fields
         $s = &$st['stripe'][$q['s']];
+        if (isset($q['pay']) && $s['status'] === 'expired') {
+            $out(409, array('error' => 'this checkout page is closed: nothing can be paid on it'));
+        }
         if (isset($q['pay'])) {
             $s['status'] = $q['pay'] === 'expired' ? 'expired' : 'complete';
             if ($q['pay'] !== 'expired') {
