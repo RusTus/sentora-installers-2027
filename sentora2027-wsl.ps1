@@ -1,0 +1,350 @@
+<#
+.SYNOPSIS
+    Sentora-2027 on Windows: the panel in its own Linux system (WSL 2), installed, started with Windows,
+    reachable from the network, backed up and removed with one PowerShell script.
+
+.DESCRIPTION
+    Run it in PowerShell as administrator:
+        powershell -ExecutionPolicy Bypass -File .\sentora2027-wsl.ps1
+    It asks a few questions (each with a default), then:
+      1. checks Windows (version, virtualisation, administrator) and WSL (installed, new enough)
+      2. says which programs already use Sentora's ports on this PC (IIS, another mail or DNS server)
+      3. sets WSL up for a server (.wslconfig: memory, processors, mirrored networking, no idle stop)
+      4. installs Debian 13 or Ubuntu 26.04 as its own WSL system "Sentora", where you choose to keep it
+      5. switches systemd on inside it, and runs Sentora's normal installer there (the same one as on a
+         server: it picks the right installer and checks it against its SHA-256)
+      6. opens Sentora's ports in the Windows firewall (only when the panel should be reachable from the
+         network), adds the panel's name to this PC's hosts file, and a startup task so Sentora runs
+         whenever Windows runs, also when nobody is logged in
+      7. asks whether Windows Defender should leave Sentora's disk image alone (the administrator decides)
+    Everything it adds to Windows is named "Sentora", so -Uninstall removes exactly that.
+
+    Other commands:
+      -Status                  is Sentora running, its address, and has Defender flagged its disk image
+      -Backup <folder>         the whole Sentora system in one file (wsl --export); a Windows scheduled
+                               task can run it nightly. Sentora's own backups (Admin > Backup Config) work too.
+      -Uninstall               removes the Sentora WSL system and everything this script added to Windows
+
+    Note: SELinux and AppArmor do not run inside WSL, and Windows updates restart the PC (and Sentora
+    with it). For production hosting a Linux server (or a virtual machine) is the better home.
+
+.NOTES
+    Sentora-2027, https://github.com/RusTus/sentora-installers-2027 (GPL-3.0)
+    Written by RusTus, 2026-11-10
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('debian13', 'ubuntu26.04')] [string] $Distro,
+    [string] $InstallPath,
+    [int] $MemoryGB,
+    [int] $Processors,
+    [string] $PanelName,
+    [string] $AdminEmail,
+    [ValidateSet('Yes', 'No')] [string] $StartWithWindows,
+    [ValidateSet('Network', 'ThisPC')] [string] $Reach,
+    [ValidateSet('Yes', 'No')] [string] $DefenderExclusion,
+    [switch] $Status,
+    [string] $Backup,
+    [switch] $Uninstall
+)
+
+$ErrorActionPreference = 'Stop'
+$Name = 'Sentora'
+$Release = 'https://github.com/RusTus/sentora-installers-2027/releases/download/current'
+# Sentora's ports: web, mail (SMTP, submission, SMTPS, POP3/S, IMAP/S, ManageSieve), FTP and its passive
+# range, DNS
+$TcpPorts = @(80, 443, 25, 587, 465, 110, 995, 143, 993, 4190, 21, 53)
+$UdpPorts = @(53)
+$PassivePorts = '60000-65535'
+# the Hyper-V firewall's id for WSL (mirrored networking passes through it too)
+$WslVmCreatorId = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+$HostsFile = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
+$TaskName = 'Sentora (WSL)'
+
+function Say([string] $Text) { Write-Host "  $Text" }
+function Step([string] $Text) { Write-Host ""; Write-Host "-- $Text" -ForegroundColor Cyan }
+function Fail([string] $Text) { Write-Host ""; Write-Host "  $Text" -ForegroundColor Red; exit 1 }
+function Ask([string] $Question, [string] $Default) {
+    $a = Read-Host "  $Question [$Default]"
+    if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
+    return $a.Trim()
+}
+function AskChoice([string] $Question, [string[]] $Choices, [string] $Default) {
+    while ($true) {
+        # (no default: the question is asked until it is answered)
+        $a = if ($Default) { Ask "$Question ($($Choices -join '/'))" $Default } else { (Read-Host "  $Question ($($Choices -join '/'))").Trim() }
+        foreach ($c in $Choices) { if ($c -ieq $a) { return $c } }
+        Say "Please answer one of: $($Choices -join ', ')"
+    }
+}
+# wsl.exe writes UTF-16; read its output as text
+function Wsl([string[]] $Arguments) {
+    $old = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+        $out = & wsl.exe @Arguments 2>&1
+        return ($out | Out-String)
+    } finally { [Console]::OutputEncoding = $old }
+}
+function SentoraExists() { return (Wsl @('--list', '--quiet')) -match "(?m)^\s*$Name\s*$" }
+function InLinux([string] $Command) { & wsl.exe -d $Name -u root -- bash -lc $Command }
+# the disk image of the Sentora WSL system (from the registry, where WSL keeps its systems)
+function SentoraDiskImage() {
+    $key = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
+        Where-Object { (Get-ItemProperty $_.PSPath).DistributionName -eq $Name } | Select-Object -First 1
+    if (-not $key) { return $null }
+    $base = (Get-ItemProperty $key.PSPath).BasePath -replace '^\\\\\?\\', ''
+    $vhdx = Join-Path $base 'ext4.vhdx'
+    if (Test-Path $vhdx) { return $vhdx }
+    return $null
+}
+
+# --- administrator ---------------------------------------------------------------------------------
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { Fail "Run PowerShell as administrator (right-click > Run as administrator), then run this script again." }
+
+# --- -Status -----------------------------------------------------------------------------------------
+if ($Status) {
+    Step "Sentora on this PC"
+    if (-not (SentoraExists)) { Say "Sentora is not installed here."; exit 0 }
+    $running = (Wsl @('--list', '--running', '--quiet')) -match "(?m)^\s*$Name\s*$"
+    Say ("The Sentora system: " + $(if ($running) { 'running' } else { 'stopped (it starts with Windows, or: wsl -d Sentora)' }))
+    if ($running) {
+        $state = (InLinux 'systemctl is-system-running 2>/dev/null; hostname -I 2>/dev/null' | Out-String).Trim() -split "`n"
+        Say "Its services: $($state[0])"
+        if ($state.Count -gt 1) { Say "Its address: $($state[1].Trim())" }
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Say ("Starts with Windows: " + $(if ($task) { 'yes' } else { 'no' }))
+    $vhdx = SentoraDiskImage
+    if ($vhdx) {
+        Say "Disk image: $vhdx ($([math]::Round((Get-Item $vhdx).Length / 1GB, 1)) GB)"
+        $pref = Get-MpPreference -ErrorAction SilentlyContinue
+        if ($pref) {
+            Say ("Windows Defender leaves it alone: " + $(if ($pref.ExclusionPath -contains $vhdx) { 'yes (excluded)' } else { 'no (it is scanned)' }))
+            # Windows does not say much when Defender acts: its own history is checked here
+            $hits = Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+                ($_.Resources -join ' ') -match [regex]::Escape((Split-Path $vhdx -Parent)) }
+            if ($hits) {
+                Write-Host "  Windows Defender has acted on Sentora's files:" -ForegroundColor Yellow
+                $hits | ForEach-Object { Say "  $($_.InitialDetectionTime)  $($_.ActionSuccess)  $($_.Resources -join ', ')" }
+                Say "  (Windows Security > Virus & threat protection > Protection history: restore or allow there)"
+            } else {
+                Say "Windows Defender has not acted on Sentora's files."
+            }
+        }
+    }
+    exit 0
+}
+
+# --- -Backup -----------------------------------------------------------------------------------------
+if ($Backup) {
+    if (-not (SentoraExists)) { Fail "Sentora is not installed here." }
+    if (-not (Test-Path $Backup)) { New-Item -ItemType Directory -Path $Backup | Out-Null }
+    $file = Join-Path $Backup ("sentora-wsl-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.tar')
+    Step "Backing up the whole Sentora system to $file"
+    Say "(Sentora's services are stopped for a moment, so the copy is consistent)"
+    & wsl.exe --terminate $Name | Out-Null
+    & wsl.exe --export $Name $file
+    if ($LASTEXITCODE -ne 0) { Fail "The backup did not work (wsl --export)." }
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Say "Done: $file ($([math]::Round((Get-Item $file).Length / 1GB, 1)) GB). To restore it: wsl --import Sentora <folder> `"$file`""
+    exit 0
+}
+
+# --- -Uninstall --------------------------------------------------------------------------------------
+if ($Uninstall) {
+    Step "Removing Sentora from this PC"
+    Write-Host "  This deletes the Sentora system with all its websites, mail and databases." -ForegroundColor Yellow
+    if ((Ask "Type REMOVE to go on" "no") -cne 'REMOVE') { Say "Nothing was removed."; exit 0 }
+    $vhdx = SentoraDiskImage
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if (SentoraExists) { & wsl.exe --unregister $Name | Out-Null; Say "the Sentora WSL system: removed" }
+    Get-NetFirewallRule -DisplayName 'Sentora *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'Sentora-*' } |
+        ForEach-Object { Remove-NetFirewallHyperVRule -Name $_.Name }
+    Say "firewall rules named Sentora: removed"
+    if ($vhdx) { Remove-MpPreference -ExclusionPath $vhdx -ErrorAction SilentlyContinue }
+    if (Test-Path $HostsFile) {
+        $lines = Get-Content $HostsFile | Where-Object { $_ -notmatch '#\s*Sentora$' }
+        Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
+        Say "the panel's line in the hosts file: removed"
+    }
+    Say "The startup task and the Defender exclusion (if any) are removed too. WSL itself stays installed;"
+    Say "the settings this script put in $env:USERPROFILE\.wslconfig stay (a copy from before: .wslconfig.sentora-orig)."
+    exit 0
+}
+
+# --- install -------------------------------------------------------------------------------------------
+Write-Host ""
+Write-Host "  Sentora-2027 for Windows (WSL 2)  -  Installer" -ForegroundColor White -BackgroundColor DarkBlue
+Say "SELinux and AppArmor do not run inside WSL, and Windows updates restart the PC (and Sentora with it):"
+Say "for production hosting a Linux server or a virtual machine is the better home."
+
+Step "Checking Windows"
+$build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+# mirrored networking (the panel answers on this PC's own address) needs Windows 11 22H2 or Windows Server 2025
+if ($build -lt 22621) { Fail "Windows build $build is too old: Windows 11 (22H2 or newer) or Windows Server 2025 is needed." }
+Say "Windows build ${build}: OK"
+$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+$hv = (Get-CimInstance Win32_ComputerSystem).HypervisorPresent
+if (-not $hv -and -not $cpu.VirtualizationFirmwareEnabled) {
+    Fail "Virtualisation is switched off in this PC's firmware (BIOS/UEFI): switch it on (Intel VT-x or AMD-V), then run this again."
+}
+Say "virtualisation: on"
+
+Step "Checking WSL"
+& wsl.exe --status *> $null
+if ($LASTEXITCODE -ne 0) {
+    Say "WSL is not installed: installing it (Windows may ask for a restart; then run this script again)"
+    & wsl.exe --install --no-distribution
+    Fail "WSL was installed. Restart Windows, then run this script again."
+}
+& wsl.exe --update | Out-Null
+$wslVersion = ((Wsl @('--version')) -split "`n" | Select-Object -First 1) -replace '[^0-9.]', ''
+Say "WSL $wslVersion"
+if ([version]($wslVersion -replace '^(\d+\.\d+\.\d+).*', '$1') -lt [version]'2.4.4') {
+    Fail "WSL $wslVersion is too old (2.4.4 or newer is needed): run 'wsl --update', then this script again."
+}
+if (SentoraExists) { Fail "A WSL system named Sentora is already installed (remove it first: this script with -Uninstall)." }
+
+Step "Questions (Enter keeps the answer in brackets)"
+if (-not $Distro) { $Distro = AskChoice "Which Linux" @('debian13', 'ubuntu26.04') 'debian13' }
+if (-not $InstallPath) {
+    $drive = (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | Sort-Object Free -Descending | Select-Object -First 1).Root
+    $InstallPath = Ask "Where to keep Sentora (its disk image grows with websites and mail)" (Join-Path $drive 'Sentora')
+}
+$totalGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+if (-not $MemoryGB) { $MemoryGB = [int](Ask "Memory for Sentora in GB (this PC has $totalGB; ClamAV needs 2 or more)" ([math]::Max(4, [math]::Floor($totalGB / 2)))) }
+$cores = [Environment]::ProcessorCount
+if (-not $Processors) { $Processors = [int](Ask "Processors for Sentora (this PC has $cores)" ([math]::Max(2, [math]::Floor($cores / 2)))) }
+if (-not $PanelName) { $PanelName = Ask "The panel's name (a host name, e.g. panel.example.com)" ("panel." + ($env:USERDNSDOMAIN, 'example.com' | Where-Object { $_ } | Select-Object -First 1).ToLower()) }
+if ($PanelName -notmatch '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$') { Fail "'$PanelName' is not a host name." }
+if (-not $AdminEmail) { $AdminEmail = Ask "The administrator's email address" "admin@$(($PanelName -split '\.', 2)[1])" }
+if (-not $StartWithWindows) { $StartWithWindows = AskChoice "Start Sentora with Windows, also when nobody is logged in" @('Yes', 'No') 'Yes' }
+if (-not $Reach) { $Reach = AskChoice "Reachable from the network, or from this PC only" @('Network', 'ThisPC') 'Network' }
+if (-not $DefenderExclusion) {
+    Write-Host ""
+    Say "Windows Defender and Sentora's disk image:"
+    Say "  Everything Sentora keeps (websites, mail, databases) is inside one disk image file. Defender can"
+    Say "  not look at the files inside it, only at the image as a whole; if it ever flags or locks that file,"
+    Say "  the whole server stops, and Windows does not always say so clearly (this script's -Status checks it)."
+    Say "  Leaving the image alone (only that one file) avoids that; Sentora's own ClamAV still checks mail."
+    Say "  Scanning it keeps Windows' usual protection, at that risk and a little speed."
+    $DefenderExclusion = AskChoice "Should Windows Defender leave Sentora's disk image alone (your decision)" @('Yes', 'No') ''
+}
+
+Step "Programs already using Sentora's ports on this PC"
+$busy = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $TcpPorts -contains $_.LocalPort } |
+    Sort-Object LocalPort -Unique
+if ($busy) {
+    foreach ($b in $busy) {
+        $p = Get-Process -Id $b.OwningProcess -ErrorAction SilentlyContinue
+        Write-Host ("  port {0}: {1}" -f $b.LocalPort, $(if ($p) { $p.ProcessName } else { "process $($b.OwningProcess)" })) -ForegroundColor Yellow
+    }
+    Say "Sentora can not use a port another program has (stop that program, e.g. IIS for 80/443, or its service)."
+    if ((AskChoice "Go on anyway" @('Yes', 'No') 'No') -ne 'Yes') { Fail "Nothing was changed." }
+} else {
+    Say "none: all free"
+}
+
+Step "WSL settings for a server ($env:USERPROFILE\.wslconfig)"
+$cfg = Join-Path $env:USERPROFILE '.wslconfig'
+if ((Test-Path $cfg) -and -not (Test-Path "$cfg.sentora-orig")) { Copy-Item $cfg "$cfg.sentora-orig" }
+$want = [ordered]@{
+    'memory'           = "${MemoryGB}GB"
+    'processors'       = "$Processors"
+    'networkingMode'   = 'mirrored'
+    'vmIdleTimeout'    = '-1'
+}
+$text = if (Test-Path $cfg) { Get-Content $cfg -Raw } else { '' }
+if ($text -notmatch '(?m)^\[wsl2\]') { $text = "[wsl2]`r`n" + $text }
+foreach ($k in $want.Keys) {
+    if ($text -match "(?m)^\s*$k\s*=") { $text = $text -replace "(?m)^\s*$k\s*=.*$", "$k=$($want[$k])" }
+    else { $text = $text -replace '(?m)^\[wsl2\]\s*$', "[wsl2]`r`n$k=$($want[$k])" }
+}
+if ($text -notmatch '(?m)^\[experimental\]') { $text += "`r`n[experimental]`r`nhostAddressLoopback=true`r`n" }
+elseif ($text -notmatch '(?m)^\s*hostAddressLoopback\s*=') { $text = $text -replace '(?m)^\[experimental\]\s*$', "[experimental]`r`nhostAddressLoopback=true" }
+Set-Content -Path $cfg -Value $text -Encoding ASCII
+Say "memory $MemoryGB GB, $Processors processors, mirrored networking, no stop when idle (a copy from before: .wslconfig.sentora-orig)"
+& wsl.exe --shutdown
+
+Step "Installing $Distro as the WSL system Sentora (in $InstallPath)"
+$online = Wsl @('--list', '--online')
+$image = if ($Distro -eq 'debian13') { 'Debian' } else { 'Ubuntu-26.04' }
+if ($online -notmatch "(?m)^\s*$([regex]::Escape($image))\s") { Fail "WSL does not offer $image here (wsl --list --online)." }
+New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
+& wsl.exe --install $image --name $Name --location $InstallPath --no-launch
+if ($LASTEXITCODE -ne 0 -or -not (SentoraExists)) { Fail "WSL could not install $image (wsl --install $image --name $Name)." }
+$os = (InLinux '. /etc/os-release; echo "$ID $VERSION_ID"' | Out-String).Trim()
+Say "inside: $os"
+if (($Distro -eq 'debian13' -and $os -notmatch '^debian 13') -or ($Distro -eq 'ubuntu26.04' -and $os -notmatch '^ubuntu 26\.04')) {
+    Fail "WSL installed '$os', not the $Distro Sentora is made for: remove it (wsl --unregister Sentora) and try again later."
+}
+
+Step "systemd inside Sentora (its services need it)"
+InLinux "printf '[boot]\nsystemd=true\n\n[user]\ndefault=root\n\n[network]\nhostname=$PanelName\ngenerateHosts=true\n' > /etc/wsl.conf"
+& wsl.exe --terminate $Name | Out-Null
+InLinux 'for i in $(seq 1 60); do s=$(systemctl is-system-running 2>/dev/null); case "$s" in running|degraded) echo "systemd: $s"; exit 0 ;; esac; sleep 2; done; echo "systemd did not start"; exit 1'
+if ($LASTEXITCODE -ne 0) { Fail "systemd did not start inside Sentora (wsl -d Sentora, then: systemctl status)." }
+
+Step "Sentora's installer (inside Linux; it asks the rest of its questions there)"
+$tz = (Get-TimeZone).Id
+# (Windows' time zone as Linux names it: PowerShell 7 knows the conversion; otherwise the installer asks)
+$tzArg = ''
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $out = $null
+    if ([System.TimeZoneInfo]::TryConvertWindowsIdToIanaId($tz, [ref]$out)) { $tzArg = "-t $out" }
+}
+& wsl.exe -d $Name -u root -- bash -lc "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName $tzArg"
+$installed = (InLinux 'test -f /etc/sentora/panel/cnf/db.php && echo yes' | Out-String).Trim()
+if ($installed -ne 'yes') { Fail "Sentora's installer did not finish (its log is in /root inside Sentora: wsl -d Sentora)." }
+# (the installer may have restarted Linux at its end: it starts again here)
+& wsl.exe --terminate $Name | Out-Null
+
+Step "Windows: firewall, hosts file, startup, Defender"
+if ($Reach -eq 'Network') {
+    New-NetFirewallRule -DisplayName 'Sentora TCP' -Direction Inbound -Protocol TCP -LocalPort $TcpPorts -Action Allow -Profile Any | Out-Null
+    New-NetFirewallRule -DisplayName 'Sentora UDP' -Direction Inbound -Protocol UDP -LocalPort $UdpPorts -Action Allow -Profile Any | Out-Null
+    New-NetFirewallRule -DisplayName 'Sentora FTP passive' -Direction Inbound -Protocol TCP -LocalPort $PassivePorts -Action Allow -Profile Any | Out-Null
+    # mirrored networking passes through the Hyper-V firewall too
+    $i = 0
+    foreach ($p in $TcpPorts + @($PassivePorts)) {
+        $i++; New-NetFirewallHyperVRule -Name "Sentora-tcp-$i" -DisplayName "Sentora TCP $p" -Direction Inbound -VMCreatorId $WslVmCreatorId -Protocol TCP -LocalPorts $p -Action Allow | Out-Null
+    }
+    New-NetFirewallHyperVRule -Name 'Sentora-udp-53' -DisplayName 'Sentora UDP 53' -Direction Inbound -VMCreatorId $WslVmCreatorId -Protocol UDP -LocalPorts 53 -Action Allow | Out-Null
+    Say "firewall: Sentora's ports open (rules named Sentora)"
+} else {
+    Say "firewall: unchanged (Sentora answers on this PC only)"
+}
+$lines = @(Get-Content $HostsFile | Where-Object { $_ -notmatch '#\s*Sentora$' }) + "127.0.0.1 $PanelName # Sentora"
+Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
+Say "hosts file: $PanelName points at this PC"
+if ($StartWithWindows -eq 'Yes') {
+    # a WSL system runs while a program in it is attached: the task keeps one attached from startup on
+    $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Name -u root -- /bin/sh -c 'exec sleep infinity'"
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $TaskName
+    Say "startup: Sentora starts with Windows (task '$TaskName')"
+} else {
+    & wsl.exe -d $Name -u root -- true
+    Say "startup: not with Windows (start it with: wsl -d Sentora)"
+}
+$vhdx = SentoraDiskImage
+if ($DefenderExclusion -eq 'Yes' -and $vhdx) {
+    Add-MpPreference -ExclusionPath $vhdx
+    Say "Windows Defender: leaves only $vhdx alone"
+} else {
+    Say "Windows Defender: unchanged (it scans Sentora's disk image; -Status shows whether it ever acted on it)"
+}
+
+Step "Done"
+Say "Panel:  https://$PanelName  (user zadmin; the passwords are in /root/passwords.txt inside Sentora:"
+Say "        wsl -d Sentora -- cat /root/passwords.txt)"
+Say "Check:  wsl -d Sentora -- sentora-post-install-check   and   wsl -d Sentora -- sentora-smoke-test"
+Say "Later:  this script with -Status, -Backup <folder> or -Uninstall"
+Start-Process "https://$PanelName"

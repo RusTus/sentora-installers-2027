@@ -23,6 +23,7 @@ The installer downloads from the GitHub releases of both repositories with the t
 | | `sentora2027-deb13` | The installer for Debian 13 |
 | | `sentora2027-alma10` | The installer for AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10 |
 | | `sentora2027-fedora` | The installer for Fedora 45 |
+| | `sentora2027-wsl.ps1` | Sentora on Windows (WSL 2): a PowerShell script that sets up its own Linux system |
 | | `sentora2027-install` | One install command for all of them: picks the right installer |
 | | `sentora-sogo-alma10-amd64.tar.gz` | SOGo for AlmaLinux 10 (built by **Actions > SOGo bundle**) |
 | | `sentora-installers-2027.zip` | This repository |
@@ -51,6 +52,13 @@ clean server, as root. It finds out which system this is, downloads that system'
 ```bash
 wget -O sentora2027-install https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-install
 bash sentora2027-install
+```
+
+On Windows 11 (22H2 or newer) or Windows Server 2025, in PowerShell as administrator. It sets up WSL and its own Linux system (Debian 13 or Ubuntu 26.04) named Sentora, runs the installer there, opens Sentora's ports in the Windows firewall, starts it with Windows, and asks whether Windows Defender should leave Sentora's disk image alone (the administrator decides). `-Status`, `-Backup <folder>` and `-Uninstall` do the rest. SELinux and AppArmor do not run in WSL, and Windows updates restart the PC: for production hosting a Linux server is the better home.
+
+```powershell
+Invoke-WebRequest -OutFile sentora2027-wsl.ps1 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-wsl.ps1
+powershell -ExecutionPolicy Bypass -File .\sentora2027-wsl.ps1
 ```
 
 Or each system's own installer. On a clean Ubuntu 26.04 server, as root:
