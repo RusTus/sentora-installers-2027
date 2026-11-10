@@ -17,11 +17,11 @@ SYS=${1:?system}; CORE=$(cd "${2:?core checkout}" && pwd); INST=$(cd "${3:?insta
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 case "$SYS" in
     ub26.04) IMAGE=ubuntu:26.04; INSTALLER=sentora2027-ub26.04; TAG=ubuntu26.04
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata > /dev/null && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata && apt-get clean' ;;
     deb13) IMAGE=debian:13; INSTALLER=sentora2027-deb13; TAG=debian13
-        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata > /dev/null && apt-get clean' ;;
+        PREP='RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -yqq systemd systemd-sysv dbus tzdata && apt-get clean' ;;
     alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; INSTALLER=sentora2027-alma10; TAG=alma10
-        PREP='RUN dnf -y -q install systemd procps-ng hostname iproute tzdata > /dev/null && dnf clean all' ;;
+        PREP='RUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all' ;;
     *) echo "unknown system $SYS (ub26.04, deb13, alma10)"; exit 2 ;;
 esac
 NAME=sentora-test-$SYS
@@ -58,7 +58,12 @@ RUN update-ca-trust'
 RUN apt-get update -qq && apt-get install -yqq ca-certificates > /dev/null && update-ca-certificates > /dev/null'; fi
 fi
 printf 'FROM %s\n%s\n%s\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" "$CA" "$PREP" > "$OUT/Dockerfile"
-docker build -q -t "sentora-test:$SYS" -f "$OUT/Dockerfile" "$OUT" || { echo "::error::the $SYS image did not build"; exit 1; }
+built=0
+for try in 1 2 3; do   # (a mirror can fail for a moment)
+    if docker build --progress=plain -t "sentora-test:$SYS" -f "$OUT/Dockerfile" "$OUT" > "$OUT/image-build.log" 2>&1; then built=1; break; fi
+    echo "the image did not build (try $try):"; tail -15 "$OUT/image-build.log"; sleep $(( try * 20 ))
+done
+[ $built -eq 1 ] || { echo "::error::the $SYS image did not build"; exit 1; }
 docker rm -f "$NAME" > /dev/null 2>&1
 docker run -d --name "$NAME" --privileged --cgroupns=host -v "${CGROUP_DIR:-/sys/fs/cgroup}":/sys/fs/cgroup:rw \
     --tmpfs /run --tmpfs /run/lock -h panel.example.test "sentora-test:$SYS" > /dev/null
