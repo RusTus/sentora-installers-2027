@@ -53,6 +53,18 @@ echo "first start: ${state:-timed out} after $(( ($(date +%s) - START) / 60 )) m
 in_box 'cat /root/sentora-install-screen.txt' > "$OUT/install-screen.txt" 2>&1
 in_box 'cat /root/*_sentora_install.log' > "$OUT/install.log" 2>&1
 in_box 'systemctl --failed --no-legend' > "$OUT/failed-units-first-start.txt" 2>&1
+if [ "$state" = stopped ]; then
+    echo "--- why the container stopped"
+    docker inspect "$NAME" --format 'exit code {{.State.ExitCode}}  error: {{.State.Error}}  OOM: {{.State.OOMKilled}}'
+    echo "--- the same start again, with systemd telling everything on the console"
+    docker rm -f "$NAME-why" > /dev/null 2>&1
+    # shellcheck disable=SC2086
+    docker run -d -t --name "$NAME-why" $FLAGS -h "$DOMAIN" "$IMAGE" /sbin/init --log-target=console --log-level=debug > /dev/null
+    sleep 20
+    docker logs "$NAME-why" 2>&1 | tr -d '\r' | tail -80 | tee "$OUT/why-stopped.log"
+    docker inspect "$NAME-why" --format 'running: {{.State.Running}}  exit code {{.State.ExitCode}}'
+    docker rm -f "$NAME-why" > /dev/null 2>&1
+fi
 if [ "$state" != installed ]; then
     tail -40 "$OUT/install-screen.txt"
     echo "--- services that failed"; cat "$OUT/failed-units-first-start.txt"
