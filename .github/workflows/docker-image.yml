@@ -28,7 +28,7 @@ env:
   # the documented way to run it: no --privileged; its own cgroup namespace, writable only there
   # (systemd needs it); NET_ADMIN for fail2ban's bans inside the container's own network; the ports
   # (DNS's 53 left out: the runner's own resolver has it, as on many hosts)
-  DOCUMENTED: --restart unless-stopped --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN -p 80:80 -p 443:443 -p 21:21 -p 61000-61099:61000-61099 -p 25:25 -p 465:465 -p 587:587 -p 110:110 -p 143:143 -p 993:993 -p 995:995 -p 4190:4190
+  DOCUMENTED: --restart unless-stopped --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN -v sentora-backup:/backup -p 80:80 -p 443:443 -p 21:21 -p 61000-61099:61000-61099 -p 25:25 -p 465:465 -p 587:587 -p 110:110 -p 143:143 -p 993:993 -p 995:995 -p 4190:4190
   IMAGE_NAME: ghcr.io/rustus/sentora2027
 
 jobs:

@@ -10,7 +10,8 @@
 #   ADMIN_NAME ADMIN_PHONE ADMIN_ADDRESS ADMIN_PROVINCE ADMIN_POSTALCODE ADMIN_COUNTRY
 #                   zadmin's profile (optional; changed later in the panel)
 #
-# FTP's passive ports are 61000-61099 in a container (see below).
+# FTP's passive ports are 61000-61099 in a container, and a volume at /backup gets the nightly
+# full backup (see below).
 # Progress goes to the container's log (docker logs); passwords never do: they are in
 # /root/passwords.txt inside the container, readable by root only.
 set -uo pipefail
@@ -71,7 +72,27 @@ if [ -f "$FTPCONF" ]; then
     sed -i 's/^PassivePorts[[:space:]].*/PassivePorts\t\t\t61000 61099/' "$FTPCONF"
     systemctl restart proftpd 2> /dev/null
 fi
+# The nightly full backup into /backup when the container has a volume there
+# (-v sentora-backup:/backup): it stays on the host when the container is removed, and a new
+# container restores from it (Admin > Backup Config > Restore). The off-server backup with no
+# server writes to a folder on this machine. Its settings are made by the daemon's first run.
+BACKUP_NOTE=""
+if mountpoint -q /backup; then
+    chmod 700 /backup
+    php -q /etc/sentora/panel/bin/daemon.php > /dev/null 2>&1
+    /etc/sentora/panel/bin/setso --set offsite_server "" > /dev/null
+    /etc/sentora/panel/bin/setso --set offsite_path /backup > /dev/null
+    /etc/sentora/panel/bin/setso --set offsite_enabled true > /dev/null
+    if [ "$(/etc/sentora/panel/bin/setso --get offsite_path 2> /dev/null)" = /backup ] \
+            && [ "$(/etc/sentora/panel/bin/setso --get offsite_enabled 2> /dev/null)" = true ]; then
+        BACKUP_NOTE="Nightly full backup: on, into the volume at /backup (Admin > Backup Config)."
+        [ -n "$(ls -A /backup 2> /dev/null)" ] && BACKUP_NOTE="$BACKUP_NOTE It already holds a backup: restore it in Admin > Backup Config > Restore."
+    else
+        BACKUP_NOTE="The nightly backup into /backup could not be switched on: do it in Admin > Backup Config > Off-server backup (no server, folder /backup)."
+    fi
+fi
 mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
 say "Sentora is installed: https://$DOMAIN"
 say "Log in as zadmin. Its password and every other one: docker exec <container> cat /root/passwords.txt"
 say "Then, inside the container: sentora-post-install-check"
+[ -n "$BACKUP_NOTE" ] && say "$BACKUP_NOTE"
