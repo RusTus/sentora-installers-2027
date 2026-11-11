@@ -31,7 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: PHP for the stand-in panel
-        run: sudo apt-get update -qq && sudo apt-get install -yqq php-cli php-sqlite3 php-curl unzip > /dev/null && php -m | grep -E 'sodium|pdo_sqlite|curl'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: sodium, pdo_sqlite, curl
       - name: The add-on's own tests
         run: tests/docker_hosting/run.sh
       - name: Real node

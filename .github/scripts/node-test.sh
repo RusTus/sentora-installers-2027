@@ -105,6 +105,15 @@ C=$(code "-u setup:wrong-password")
 [ "$C" = 401 ] && ok "a wrong password is refused" || bad "wrong password: HTTP $C"
 C=$(in_box "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://\$(hostname -I | awk '{print \$1}'):20000/" 2> /dev/null)
 [ "$C" = 000 ] && ok "the container's port is not reachable from outside 127.0.0.1" || bad "port 20000 answers on the public address ($C)"
+# another container (any customer's) must not reach the node's 127.0.0.1: the app behind the setup
+# password, or Caddy's admin API
+PROBE=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman run --rm docker.io/library/busybox:1 sh -c '
+    gw=\$(ip route | awk \"/default/ {print \\\$3}\"); for h in host.containers.internal 169.254.1.2 \$gw 10.0.2.2; do for p in 20000 2019; do
+    wget -q -T 3 -O /dev/null http://\$h:\$p/ 2> /dev/null && echo \"reached \$h:\$p\"; done; done; echo probed'" 2>&1)
+echo "$PROBE" | tail -5
+if echo "$PROBE" | grep -q '^probed'; then
+    echo "$PROBE" | grep -q '^reached' && bad "a container reached the node's 127.0.0.1 ($(echo "$PROBE" | grep '^reached' | tr '\n' ' '))" || ok "a container can not reach the node's 127.0.0.1 (apps, Caddy's admin)"
+else bad "the probe container did not run"; fi
 panel act "$CID" public > /dev/null
 for _ in $(seq 1 20); do C=$(code ''); case "$C" in 200|302) break ;; esac; sleep 3; done
 case "$C" in 200|302) ok "open to the public: the app answers without a password ($C)" ;; *) bad "public: HTTP $C" ;; esac
