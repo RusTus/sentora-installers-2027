@@ -108,6 +108,17 @@ function SentoraDiskImage() {
     return $null
 }
 
+# Everything in one place: a copy of this script in Sentora's folder, and a double-click file next to it
+# for each command (each asks for administrator rights itself and keeps its window open to read)
+$Launchers = [ordered]@{ 'Sentora Status.cmd' = '-Status'; 'Sentora Backup.cmd' = '-Backup \"%~dp0Backups\"'; 'Sentora Uninstall.cmd' = '-Uninstall' }
+function WriteLaunchers([string] $Folder) {
+    Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $Folder 'sentora2027-wsl.ps1') -Force
+    foreach ($f in $Launchers.Keys) {
+        $line = '@powershell -NoProfile -Command "Start-Process powershell -Verb RunAs -ArgumentList ''-NoExit -ExecutionPolicy Bypass -File \"%~dp0sentora2027-wsl.ps1\" ' + $Launchers[$f] + '''"'
+        Set-Content -LiteralPath (Join-Path $Folder $f) -Value $line -Encoding ASCII
+    }
+}
+
 # --- administrator ---------------------------------------------------------------------------------
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -168,6 +179,7 @@ if ($Uninstall) {
     Write-Host "  This deletes the Sentora system with all its websites, mail and databases." -ForegroundColor Yellow
     if ((Ask "Type REMOVE to go on" "no") -cne 'REMOVE') { Say "Nothing was removed."; exit 0 }
     $vhdx = SentoraDiskImage
+    $folder = if ($vhdx) { Split-Path $vhdx } else { Split-Path $PSCommandPath }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     if (SentoraExists) { & wsl.exe --unregister $Name | Out-Null; Say "the Sentora WSL system: removed" }
     Get-NetFirewallRule -DisplayName 'Sentora *' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
@@ -180,6 +192,10 @@ if ($Uninstall) {
         Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
         Say "the panel's line in the hosts file: removed"
     }
+    # the double-click files and the script's copy in Sentora's folder (backups made there stay)
+    foreach ($f in @($Launchers.Keys) + 'sentora2027-wsl.ps1') { Remove-Item -LiteralPath (Join-Path $folder $f) -ErrorAction SilentlyContinue }
+    if ((Test-Path $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) { Remove-Item -LiteralPath $folder }
+    Say "Sentora's double-click files in ${folder}: removed (a Backups folder there stays)"
     Say "The startup task and the Defender exclusion (if any) are removed too. WSL itself stays installed;"
     Say "the settings this script put in $env:USERPROFILE\.wslconfig stay (a copy from before: .wslconfig.sentora-orig)."
     exit 0
@@ -358,9 +374,12 @@ if ($DefenderExclusion -eq 'Yes' -and $vhdx) {
     Say "Windows Defender: unchanged (it scans Sentora's disk image; -Status shows whether it ever acted on it)"
 }
 
+WriteLaunchers $InstallPath
+Say "in ${InstallPath}: Sentora Status, Sentora Backup and Sentora Uninstall (double-click; each asks for administrator rights)"
+
 Step "Done"
 Say "Panel:  https://$PanelName  (user zadmin; the passwords are in /root/passwords.txt inside Sentora:"
 Say "        wsl -d Sentora -- cat /root/passwords.txt)"
 Say "Check:  wsl -d Sentora -- sentora-post-install-check   and   wsl -d Sentora -- sentora-smoke-test"
-Say "Later:  this script with -Status, -Backup <folder> or -Uninstall"
+Say "Later:  in ${InstallPath}: Sentora Status, Sentora Backup, Sentora Uninstall (or this script with -Status, -Backup <folder>, -Uninstall)"
 Start-Process "https://$PanelName"
