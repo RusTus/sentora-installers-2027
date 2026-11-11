@@ -27,9 +27,9 @@ jobs:
           WANT: ${{ inputs.variants }}
         run: |
           if [ -z "$WANT" ]; then
-            WANT='--cgroupns=private --tmpfs /run --tmpfs /run/lock
-          --cgroupns=private --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN
-          --cgroupns=private --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN --cap-add SYS_ADMIN'
+            WANT='--cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock
+          --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN
+          --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN --cap-add SYS_ADMIN'
           fi
           echo "list=$(printf '%s\n' "$WANT" | sed 's/^ *//; /^$/d' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
 

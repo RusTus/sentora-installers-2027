@@ -12,7 +12,7 @@
 set -uo pipefail
 INST=$(cd "${1:?installers checkout}" && pwd); OUT=${2:?results folder}
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
-FLAGS=${DOCKER_FLAGS:---cgroupns=private --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN}
+FLAGS=${DOCKER_FLAGS:---cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN}
 NAME=sentora-docker-test
 DOMAIN=panel.example.test
 say() { printf '\n=== %s  (%s)\n' "$1" "$(date '+%H:%M:%S')"; }
