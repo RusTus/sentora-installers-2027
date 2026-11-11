@@ -9,3 +9,4 @@ quickfig
 apps
 payment_plans
 php_hardening
+docker_hosting

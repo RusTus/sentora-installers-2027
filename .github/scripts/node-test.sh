@@ -108,7 +108,7 @@ code() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "HTTPS asks for the setup password (401)" || bad "without the setup password: HTTP $C (want 401)"
 PW=$(panel setup "$CID")
-C=$(code "-u setup:$PW")
+for _ in $(seq 1 40); do C=$(code "-u setup:$PW"); case "$C" in 200|302) break ;; esac; sleep 3; done   # (502 while the app still starts)
 case "$C" in 200|302) ok "with the setup password: the app answers ($C)" ;; *) bad "with the setup password: HTTP $C" ;; esac
 C=$(code "-u setup:wrong-password")
 [ "$C" = 401 ] && ok "a wrong password is refused" || bad "wrong password: HTTP $C"
