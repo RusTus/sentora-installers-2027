@@ -126,7 +126,10 @@ Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and R
 Actions > Windows setup on every release; `test_release` puts a test build on the `windows-setup-test` release for a public link):
 Sentora 2027 in Settings > Apps and the Start menu, the same PowerShell script inside (-FromSetup, -Yes), updates in place (fixed AppId),
 uninstalls cleanly (.wslconfig put back). Tested on the owner's Windows 11 VM. **Website:** SentoraReloaded2027/SentoraReloaded2027.github.io
-(https://sentorareloaded2027.github.io, one index.html on `main`, GitHub Pages); only tested facts on it.
+(https://sentorareloaded2027.github.io, one index.html on `main`, GitHub Pages); only tested facts on it. Its "Find an answer" search reads the READMEs and
+CHANGELOG live from raw.githubusercontent. **Ask Sentora** (ready, off): `worker/ask-sentora` in that repo, a Cloudflare Worker answering
+with Claude from those documents (cached block, refusal fallback, origin and per-visitor limits; 17 checks in its test; deploy: Actions >
+Deploy Ask Sentora). Waits for the owner's Anthropic API key (with a spending limit) and Cloudflare account; then set `ASK_URL` in index.html.
 **Released 2027.72 (2026-11-11):** Windows (WSL) fixes from the owner's first run, login block, double-click Status/Backup/Uninstall,
 Sentora Panel desktop shortcut, tray icon (green while port 443 answers, one click opens the panel), no disk alerts for read-only disks.
 **Released 2027.71 (2026-11-11):** AppArmor on for Debian and Ubuntu (see SELinux/AppArmor above).
