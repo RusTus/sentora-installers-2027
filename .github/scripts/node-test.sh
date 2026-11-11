@@ -68,7 +68,7 @@ docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/sentora-node-agent.ph
 START=$(date +%s)
 in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-node --panel http://$GW:18092 --key $KEY --code $CODE --no-tls-check --agent /root/sentora-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
 echo "installed in $(( $(date +%s) - START )) seconds"
-grep -q "^Done: this server is a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; exit 1; }
+grep -q "^Done: this server is a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; in_box 'tail -40 /var/log/sentora2027-node.log'; exit 1; }
 wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "node not online"
 in_box 'stat -c %a /etc/sentora-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
 in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
