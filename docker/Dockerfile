@@ -12,10 +12,10 @@ RUN apt-get update -qq \
  && DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
       systemd systemd-sysv dbus tzdata ca-certificates curl wget procps iproute2 \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
- # (a container has no consoles to log in on, and no hardware to set up)
+ # (a container has no consoles to log in on, no hardware to set up, and can't mount its own /tmp)
  && systemctl mask getty.target console-getty.service systemd-firstboot.service \
       systemd-udevd.service systemd-udev-trigger.service systemd-modules-load.service \
-      sys-kernel-debug.mount sys-kernel-tracing.mount > /dev/null 2>&1 || true
+      sys-kernel-debug.mount sys-kernel-tracing.mount tmp.mount > /dev/null 2>&1 || true
 
 COPY sentora2027-deb13 /usr/local/share/sentora/sentora2027-deb13
 COPY docker/sentora-docker-firstboot /usr/local/sbin/sentora-docker-firstboot

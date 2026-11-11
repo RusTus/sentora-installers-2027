@@ -81,6 +81,9 @@ fi
 rm -f "$OUT/.pw"
 echo "no password in the container's log"
 
+in_box 'head -c 32 /etc/sentora/panel/VERSION' | tr -cd 'A-Za-z0-9._-' > "$OUT/version.txt"
+echo "installed: Sentora-$(cat "$OUT/version.txt")"
+
 say "Restarting the container (services must come back by themselves)"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 90); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
@@ -102,9 +105,25 @@ in_box 'sentora-smoke-test' > "$OUT/smoke-test.txt" 2>&1
 grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
+say "From outside the container, through the published ports"
+outside=1
+if [[ " $FLAGS " == *" -p 443:443 "* ]]; then
+    code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/")
+    echo "panel over https (443): HTTP $code"; [[ "$code" =~ ^(200|302)$ ]] || outside=0
+fi
+if [[ " $FLAGS " == *" -p 25:25 "* ]]; then
+    banner=$(timeout 15 bash -c 'exec 3<>/dev/tcp/127.0.0.1/25; head -1 <&3; printf "QUIT\r\n" >&3' 2>/dev/null | tr -d '\r')
+    echo "mail (25): ${banner:-no answer}"; [[ "$banner" == 220* ]] || outside=0
+fi
+if [[ " $FLAGS " == *" -p 21:21 "* ]]; then
+    banner=$(timeout 15 bash -c 'exec 3<>/dev/tcp/127.0.0.1/21; head -1 <&3' 2>/dev/null | tr -d '\r')
+    echo "FTP (21): ${banner:-no answer}"; [[ "$banner" == 220* ]] || outside=0
+fi
+
 say "Result"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::the smoke test did not pass"; ok=0; fi
+if [ $outside -eq 0 ]; then echo "::error::the published ports did not all answer from outside the container"; ok=0; fi
 [ $ok -eq 1 ] && echo "docker run $FLAGS: installed on the first start, post-install check without FAIL, smoke test passed"
 [ $ok -eq 1 ]

@@ -1,20 +1,35 @@
 # The Sentora 2027 Docker image (docker/ in this repository): built, started without --privileged,
 # installed on its first start, restarted, and checked with sentora-post-install-check and
-# sentora-smoke-test (.github/scripts/docker-test.sh). Actions > Docker image > Run workflow.
+# sentora-smoke-test (.github/scripts/docker-test.sh). With publish, the image that passed is pushed
+# to ghcr.io/rustus/sentora2027 as :<version> and :latest; the release workflow does that after every
+# release. Actions > Docker image > Run workflow tests it alone (or other docker run options).
 name: Docker image
 
 on:
   workflow_dispatch:
     inputs:
+      publish:
+        description: Publish the image to ghcr.io/rustus/sentora2027 when it passes
+        type: boolean
+        default: false
       variants:
-        description: "docker run options to try, one set per line (empty: the documented ones)"
+        description: "Other docker run options to try, one set per line (not with publish)"
         default: ""
-  push:
-    branches: [claude/beautiful-fermi-acjk1d]
-    paths: [docker/**, .github/scripts/docker-test.sh, .github/workflows/docker-image.yml]
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+env:
+  # the documented way to run it: no --privileged; its own cgroup namespace, writable only there
+  # (systemd needs it); NET_ADMIN for fail2ban's bans inside the container's own network; the ports
+  # (DNS's 53 left out: the runner's own resolver has it, as on many hosts)
+  DOCUMENTED: --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN -p 80:80 -p 443:443 -p 21:21 -p 60000-65535:60000-65535 -p 25:25 -p 465:465 -p 587:587 -p 110:110 -p 143:143 -p 993:993 -p 995:995 -p 4190:4190
+  IMAGE_NAME: ghcr.io/rustus/sentora2027
 
 jobs:
   variants:
@@ -25,18 +40,18 @@ jobs:
       - id: pick
         env:
           WANT: ${{ inputs.variants }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
-          if [ -z "$WANT" ]; then
-            WANT='--cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock
-          --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN
-          --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN --cap-add SYS_ADMIN'
-          fi
+          [ -n "$WANT" ] && [ "$PUBLISH" != true ] || WANT=$DOCUMENTED
           echo "list=$(printf '%s\n' "$WANT" | sed 's/^ *//; /^$/d' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
 
   test:
     needs: variants
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -50,6 +65,21 @@ jobs:
         env:
           DOCKER_FLAGS: ${{ matrix.flags }}
         run: bash .github/scripts/docker-test.sh . results
+      - name: Publish the image that passed
+        if: ${{ inputs.publish && matrix.flags == env.DOCUMENTED }}
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          VERSION=$(cat results/version.txt)
+          [[ "$VERSION" =~ ^2027\.[0-9]+$ ]] || { echo "::error::no version from the test container ($VERSION)"; exit 1; }
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          for tag in "$VERSION" latest; do
+            docker tag sentora2027:test "$IMAGE_NAME:$tag"
+            docker push "$IMAGE_NAME:$tag"
+          done
+          docker logout ghcr.io
+          echo "published $IMAGE_NAME:$VERSION and :latest"
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
