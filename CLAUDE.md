@@ -125,7 +125,13 @@ Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and R
 **Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
 systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
 
-**Next (the owner's list):** the WSL version (`sentora2027-wsl.ps1`, on the release) needs its first run on a real Windows 11 PC (the owner is setting up a 23H2 VM with nested Hyper-V). Debian VM confirmed 2027.65 (smoke 26/26).
+**Windows (WSL), first real run 2026-11-11:** the owner's Windows 11 23H2 VM (VMware, nested virtualization), Debian 13 inside:
+installed in 14 minutes, post-install check 91 OK / 0 FAIL (WARNs: no SELinux/AppArmor in WSL, self-signed), smoke test 26/26.
+Fixed on the way (on master2027, not yet released): Windows PowerShell 5.1 mangled the quotes of commands passed to
+wsl.exe (InLinux now sends base64 into a file run with --exec), the installer needs -d with -i, the script checks the
+installer really finished (/etc/sentora/.installing gone), ends with a short login block, leaves double-click Status /
+Backup / Uninstall files in Sentora's folder; read-only disks (WSL's kernel headers) no longer raise disk alerts.
+**Next (the owner's list):** the restart test on Windows (Sentora back after a reboot with nobody logged in). Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
