@@ -1,0 +1,46 @@
+# Docker Hosting node test: a real AlmaLinux 10 (and Rocky Linux 10) in a container with systemd is made a
+# node with node/sentora2027-node-alma10 and linked to a stand-in panel running the add-on
+# (sentora-repo/docker_hosting.zpp); it must then really run an app (rootless Podman as the customer's
+# user, limits held, Caddy with the setup password, public, restart, delete). Also runs the add-on's
+# own tests (tests/docker_hosting/run.sh). Results kept 14 days.
+# The script that does the work: .github/scripts/node-test.sh.
+name: Node test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master2027, docker-hosting]
+    paths:
+      - node/**
+      - sentora-repo/docker_hosting.zpp
+      - tests/docker_hosting/**
+      - .github/scripts/node-test.sh
+      - .github/workflows/node-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [alma10, rocky10]
+    steps:
+      - uses: actions/checkout@v5
+      - name: PHP for the stand-in panel
+        run: sudo apt-get update -qq && sudo apt-get install -yqq php-cli php-sqlite3 php-curl unzip > /dev/null && php -m | grep -E 'sodium|pdo_sqlite|curl'
+      - name: The add-on's own tests
+        run: tests/docker_hosting/run.sh
+      - name: Real node
+        run: |
+          mkdir -p /tmp/mod && unzip -q sentora-repo/docker_hosting.zpp -d /tmp/mod
+          .github/scripts/node-test.sh /tmp/mod results ${{ matrix.system }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-test-${{ matrix.system }}
+          path: results
+          retention-days: 14

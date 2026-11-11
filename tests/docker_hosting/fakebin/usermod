@@ -1,0 +1,5 @@
+#!/bin/bash
+echo "usermod $*" >> "$FAKE_DIR/calls.log"
+r=$2; a=${r%-*}
+case "$1" in --add-subuids) f=subuid ;; --add-subgids) f=subgid ;; *) exit 2 ;; esac
+echo "$3:$a:65536" >> "$SNODE_SUBID/$f"

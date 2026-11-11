@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# Sentora Node installer for AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10: makes this
+# server a Docker Hosting node of a Sentora-2027 panel (the panel's Docker Hosting add-on, page
+# "Nodes and apps", gives the exact command with its keys and a one-time code). Run it as root on a
+# server of its own (not the panel's), with nothing else on it:
+#
+#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node/sentora2027-node-alma10 -o sentora2027-node
+#   sudo bash sentora2027-node --panel https://panel.example.com --key v1.... --code 1....
+#
+# Options:  --no-tls-check   the panel has a self-signed certificate (safe: every message from the
+#                            panel is signed with its key, which is in --key)
+#           --email ADDRESS  for Let's Encrypt's notices about the containers' certificates
+#           --agent FILE     use this agent instead of downloading it (tests)
+#
+# What it does:
+#   1. Podman (rootless containers: each customer has a Linux user of its own, sdh<account>),
+#      PHP (for the agent), Caddy (web server with automatic HTTPS, from Caddy's own COPR repository),
+#      firewalld (only SSH, HTTP and HTTPS open), chrony (the panel refuses messages with a wrong clock).
+#   2. systemd hands CPU, memory, I/O and process limits to the customers' users (cgroups), so each
+#      container's limits hold.
+#   3. SELinux stays enforcing: Caddy may only forward to the containers' ports (20000-29999, on
+#      127.0.0.1) and to web ports; nothing else is widened.
+#   4. The agent (/usr/local/lib/sentora-node/sentora-node-agent.php) is linked to the panel with the
+#      one-time code (new keys, made here; the secret ones never leave this server) and runs as the
+#      service sentora-node. It calls the panel; nothing is opened on this server for the panel.
+#
+# Uninstall: sentora-node-uninstall (keeps the customers' containers unless --purge).
+# Log: /var/log/sentora2027-node.log
+set -u
+LOG=/var/log/sentora2027-node.log
+RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node
+LIB=/usr/local/lib/sentora-node
+PANEL='' KEY='' CODE='' EMAIL='' AGENT='' TLS=''
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --panel) PANEL=${2:-}; shift ;;
+        --key) KEY=${2:-}; shift ;;
+        --code) CODE=${2:-}; shift ;;
+        --email) EMAIL=${2:-}; shift ;;
+        --agent) AGENT=${2:-}; shift ;;
+        --no-tls-check) TLS=--no-tls-check ;;
+        -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
+    esac
+    shift
+done
+
+say() { echo "$*"; echo "$(date '+%F %T') $*" >> "$LOG"; }
+die() { say "STOPPED: $*"; exit 1; }
+run() { "$@" >> "$LOG" 2>&1; }
+
+[ "$(id -u)" -eq 0 ] || die "Run this as root."
+[ -n "$PANEL" ] && [ -n "$KEY" ] && [ -n "$CODE" ] || die "Needs --panel, --key and --code: copy the whole command from the panel (Docker Hosting > Nodes and apps)."
+case "$PANEL" in https://*|http://*) ;; *) die "--panel must start with https://" ;; esac
+[[ "$KEY" =~ ^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$ ]] || die "--key is not right: copy the command from the panel again."
+[[ "$CODE" =~ ^[0-9]{1,9}\.[0-9a-f]{32}$ ]] || die "--code is not right: copy the command from the panel again."
+if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then die "--email is not an email address."; fi
+[ -r /etc/os-release ] || die "This system does not say what it is (/etc/os-release)."
+. /etc/os-release
+case "${ID:-}" in almalinux|rocky|rhel) ;; *) die "For AlmaLinux, Rocky Linux and Red Hat Enterprise Linux 10 only (this is ${PRETTY_NAME:-unknown})." ;; esac
+case "${VERSION_ID:-}" in 10|10.*) ;; *) die "For version 10 only (this is ${PRETTY_NAME:-unknown})." ;; esac
+[ "$(uname -m)" = x86_64 ] || [ "$(uname -m)" = aarch64 ] || die "For x86_64 or aarch64 servers."
+if [ -e /etc/sentora/.installing ] || [ -d /etc/sentora/panel ] || [ -d /etc/zpanel ]; then die "This is a Sentora panel server: a node must be a server of its own."; fi
+if [ "${ID}" = rhel ] && ! subscription-manager identity >/dev/null 2>&1; then die "Register this RHEL server first (subscription-manager register)."; fi
+: > "$LOG"; chmod 600 "$LOG"
+say "Sentora Node installer, $(date '+%F %T'), ${PRETTY_NAME}"
+
+say "1/6 Packages (Podman, PHP, Caddy, firewalld, chrony)..."
+run dnf -y install podman php-cli php-sodium php-json curl policycoreutils-python-utils dnf-plugins-core firewalld chrony util-linux \
+    || run dnf -y install podman php-cli php-sodium curl policycoreutils-python-utils dnf-plugins-core firewalld chrony util-linux \
+    || die "Could not install the packages (see $LOG)."
+php -r 'exit(function_exists("sodium_crypto_box_seal") && function_exists("curl_init") ? 0 : 1);' || die "PHP lacks sodium or curl (see $LOG)."
+if ! command -v caddy >/dev/null 2>&1; then
+    run dnf -y copr enable @caddy/caddy || die "Could not add Caddy's repository (dnf copr enable @caddy/caddy; see $LOG)."
+    run dnf -y install caddy || die "Could not install Caddy (see $LOG)."
+fi
+command -v caddy >/dev/null 2>&1 || die "Caddy is not there after installing it."
+run systemctl enable --now chronyd
+
+say "2/6 Limits for the customers' containers (cgroups)..."
+mkdir -p /etc/systemd/system/user@.service.d
+cat > /etc/systemd/system/user@.service.d/sentora-delegate.conf <<'EOF'
+# Sentora Node: each customer's containers get CPU, memory, I/O and process limits (rootless Podman).
+[Service]
+Delegate=cpu cpuset io memory pids
+EOF
+run systemctl daemon-reload
+[ -f /sys/fs/cgroup/cgroup.controllers ] || die "This system does not use cgroups v2: container limits would not hold."
+
+say "3/6 Web server (Caddy, automatic HTTPS) and firewall..."
+mkdir -p /etc/caddy/sentora
+[ -f /etc/caddy/Caddyfile ] && [ ! -f /etc/caddy/Caddyfile.before-sentora ] && cp -p /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-sentora
+{
+    echo "# Written by the Sentora Node installer. The containers' sites are in sentora/ (the agent writes them)."
+    echo "{"
+    [ -n "$EMAIL" ] && echo "	email $EMAIL"
+    # (install test only: certificates from Caddy's own local authority, as the test has no public name)
+    [ "${SNODE_TEST_LOCAL_CERTS:-}" = 1 ] && echo "	local_certs"
+    echo "	admin localhost:2019"
+    echo "}"
+    echo ""
+    echo "import /etc/caddy/sentora/*.caddy"
+} > /etc/caddy/Caddyfile
+[ -f /etc/caddy/sentora/sites.caddy ] || echo "# Written by Sentora Node (sentora-node-agent): no containers yet." > /etc/caddy/sentora/sites.caddy
+run caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile || die "Caddy does not accept its settings (see $LOG)."
+run systemctl enable --now firewalld
+for s in ssh http https; do run firewall-cmd --permanent --add-service=$s; done
+run firewall-cmd --permanent --add-port=443/udp
+run firewall-cmd --reload
+
+say "4/6 SELinux..."
+if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
+    # Caddy (httpd_t) may forward to the containers' ports only: label them as web cache ports and allow relaying
+    if ! run semanage port -a -t http_cache_port_t -p tcp 20000-29999; then run semanage port -m -t http_cache_port_t -p tcp 20000-29999; fi
+    run setsebool -P httpd_can_network_relay 1
+    say "   SELinux is $(getenforce): Caddy may reach ports 20000-29999 and web ports, nothing else was widened."
+else
+    say "   SELinux is off on this system (it was not switched off by Sentora)."
+fi
+run systemctl enable caddy
+run systemctl restart caddy || die "Caddy did not start (see $LOG and journalctl -u caddy)."
+
+say "5/6 The agent, linked to the panel..."
+mkdir -p "$LIB"; chmod 755 "$LIB"
+if [ -n "$AGENT" ]; then
+    cp "$AGENT" "$LIB/sentora-node-agent.php" || die "No agent at $AGENT."
+else
+    curl -fsSL "$RAW_BASE/sentora-node-agent.php" -o "$LIB/sentora-node-agent.php.new" || die "Could not download the agent."
+    mv "$LIB/sentora-node-agent.php.new" "$LIB/sentora-node-agent.php"
+fi
+chmod 755 "$LIB/sentora-node-agent.php"
+php -l "$LIB/sentora-node-agent.php" >> "$LOG" 2>&1 || die "The agent is damaged (see $LOG)."
+cat > /usr/local/sbin/sentora-node-agent <<EOF
+#!/bin/sh
+exec /usr/bin/php $LIB/sentora-node-agent.php "\$@"
+EOF
+chmod 755 /usr/local/sbin/sentora-node-agent
+if [ -f /etc/sentora-node/node.json ]; then
+    say "   Already linked to a panel (/etc/sentora-node/node.json): kept. To link it again, run sentora-node-uninstall first."
+else
+    /usr/local/sbin/sentora-node-agent pair --panel "$PANEL" --key "$KEY" --code "$CODE" $TLS 2>&1 | tee -a "$LOG"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || die "Not linked to the panel (see above)."
+fi
+
+say "6/6 The service..."
+cat > /etc/systemd/system/sentora-node.service <<EOF
+[Unit]
+Description=Sentora Node agent (Docker Hosting)
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/php $LIB/sentora-node-agent.php run
+Restart=always
+RestartSec=10
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
+EOF
+cat > /usr/local/sbin/sentora-node-uninstall <<'EOF'
+#!/bin/sh
+# Sentora Node: stop and remove the agent and its keys (the panel then sees the node offline; remove it there).
+# --purge also deletes every customer's containers, data and Linux user (sdh*), and the containers' sites.
+[ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
+systemctl disable --now sentora-node 2>/dev/null
+rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent
+rm -rf /etc/sentora-node /usr/local/lib/sentora-node
+if [ "${1:-}" = --purge ]; then
+    for u in $(awk -F: '$1 ~ /^sdh[0-9]+$/ {print $1}' /etc/passwd); do
+        loginctl disable-linger "$u" 2>/dev/null; loginctl terminate-user "$u" 2>/dev/null; sleep 1
+        userdel -r "$u" 2>/dev/null && echo "removed $u"
+    done
+    rm -rf /var/lib/sentora-node
+    echo "# no containers" > /etc/caddy/sentora/sites.caddy; systemctl reload caddy 2>/dev/null
+fi
+systemctl daemon-reload
+rm -f /usr/local/sbin/sentora-node-uninstall
+echo "Sentora Node agent removed."
+EOF
+chmod 755 /usr/local/sbin/sentora-node-uninstall
+run systemctl daemon-reload
+run systemctl enable --now sentora-node || die "The service did not start (journalctl -u sentora-node)."
+sleep 3
+systemctl is-active --quiet sentora-node || die "The service did not stay up (journalctl -u sentora-node)."
+say ""
+say "Done: this server is a node of $PANEL. The panel shows it online in a few seconds."
+say "Status: sentora-node-agent status    Log: journalctl -u sentora-node"

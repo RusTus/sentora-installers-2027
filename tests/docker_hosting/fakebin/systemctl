@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "systemctl $* ${FAKE_USER:+(as $FAKE_USER)}" >> "$FAKE_DIR/calls.log"
+exit 0

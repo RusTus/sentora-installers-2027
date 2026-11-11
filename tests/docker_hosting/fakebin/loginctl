@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "loginctl $*" >> "$FAKE_DIR/calls.log"
+[ "$1" = enable-linger ] && mkdir -p "$SNODE_RUN/$(cat "$FAKE_DIR/users/$2")"
+exit 0
