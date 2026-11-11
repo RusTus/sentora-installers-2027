@@ -145,6 +145,11 @@ in_box 'sentora-smoke-test --keep' > "$OUT/smoke-test.txt" 2>&1
 grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
+say "Apache's status page (Server Admin > Apache Status reads it from this server)"
+in_box 'code=$(curl -s -o /tmp/st -w "%{http_code}" http://127.0.0.1/server-status?auto); echo "  http://127.0.0.1/server-status?auto: HTTP $code"
+    if [ "$code" = 200 ] && grep -q "^ServerUptime" /tmp/st; then echo "STATUS: PASSED"; else head -5 /tmp/st; echo "STATUS: FAILED"; fi' > "$OUT/apache-status.txt" 2>&1
+cat "$OUT/apache-status.txt"
+
 say "Root actions from the panel (zsudo's queue, as the panel's user)"
 in_box 'P=/etc/sentora/panel/bin/zsudo; ls -l $P | cut -d" " -f1,3,4
     if [ -u $P ]; then echo "ZSUDO: FAILED (still set-uid)"; exit 0; fi
@@ -180,6 +185,7 @@ say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
+if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
