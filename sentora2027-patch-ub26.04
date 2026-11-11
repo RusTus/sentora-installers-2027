@@ -15,11 +15,12 @@
 # Log: /var/log/sentora2027-patch-ub26.04.log
 #
 # Stopgaps in this version (2026-11-10):
-#   CVE-2026-98432  Linux kernel, IPv4 TCP handshake (use-after-free, CVSS 9.8). Ubuntu's fixed kernel
-#                   (7.0.0-43.43) was still in its test channel (-proposed) on 2026-11-10, which this
-#                   script does not use; until the server runs it, incoming TCP packets carrying IPv4
-#                   options are dropped (ordinary traffic never uses them; the filter Red Hat suggests).
-#                   It stays on across restarts and takes itself away once a fixed kernel runs.
+#   CVE-2026-98432  Linux kernel, IPv4 TCP handshake (use-after-free, CVSS 9.8). Fixed in Ubuntu's kernel
+#                   7.0.0-43, in the normal updates since 2026-11-10 (seen on the owner's Ubuntu 26.04.1
+#                   VM; before that only in the test channel, -proposed, which this script does not use).
+#                   The updates install it; until the server runs it (after the restart), incoming TCP
+#                   packets carrying IPv4 options are dropped (ordinary traffic never uses them; the
+#                   filter Red Hat suggests). The filter takes itself away once a fixed kernel runs.
 #
 # Checked on 2026-11-10 and already fixed by this system's own updates (step 1), so no stopgap:
 #   CVE-2026-46300  "Fragnesia": Linux kernel, ESP-in-TCP (espintcp). A user on the server (or a
