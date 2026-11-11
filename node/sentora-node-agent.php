@@ -35,7 +35,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '100';
+    const VERSION = '101';
     const V = 1;
     const SKEW = 300;
     const PORT_FIRST = 20000;
@@ -745,7 +745,7 @@ class snode
         }
         if ($cmd === 'status') {
             $s = self::State();
-            self::Out('Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
+            self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
             foreach (self::States($s) as $cid => $st) {
                 self::Out(sprintf('  %s  %-8s %-10s %s (%d MB)', self::Name($cid), $st['user'], $st['state'], $s['containers'][$cid]['domain'], $st['used_mb']));
             }

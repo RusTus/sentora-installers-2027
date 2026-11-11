@@ -157,6 +157,8 @@ $info = json_decode($n['nd_info_tx'], true);
 check($n['nd_seen_in'] >= time() - 5 && $info['podman'] === '5.6.0' && $info['cpus'] > 0 && $info['selinux'] === 'Enforcing', 'node online, its report kept', $n['nd_info_tx']);
 $r = req(1, '', array(), array('tab' => 'nodes'));
 check(strpos($r['html'], '>online<') !== false && strpos($r['html'], 'public address: 127.0.0.1') !== false, 'the page shows it online, with its address');
+preg_match("/const VERSION = '([^']+)'/", file_get_contents(getenv('DH_AGENT')), $vm);
+check(strpos($r['html'], 'agent ' . $vm[1]) !== false, 'and the version of its agent (' . $vm[1] . ')');
 // a message played back, tampered with, or from another key
 $k = dh::Keys();
 $sk = sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair());

@@ -155,6 +155,29 @@ wait_for 180 bash -c "docker exec $NAME runuser -u sdh3 -- env XDG_RUNTIME_DIR=/
 for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it again" || bad "after the restart: HTTP $C"
 
+say "Updating the node (sentora-node-update)"
+in_box 'rm -rf /root/src && mkdir /root/src'
+docker cp "$REPO/node/sentora2027-node-alma10" "$NAME:/root/src/sentora2027-node-alma10"
+docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/src/sentora-node-agent.php"
+# (a "newer" agent: the copy says version 999)
+in_box "sed -i \"s/^    const VERSION = '[^']*';/    const VERSION = '999';/\" /root/src/sentora-node-agent.php"
+C1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1); echo "$C1"
+echo "$C1" | grep -q -- '-> 999 (new)' && ok "--check shows the new agent" || bad "--check: $C1"
+U1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1); echo "$U1" | tail -4
+echo "$U1" | grep -q "^Done: this node is up to date (agent 999)" && ok "updated without asking" || bad "the update did not finish"
+in_box 'sentora-node-agent status' | grep -q "agent 999" && ok "the new agent runs" || bad "the new agent does not run"
+wait_for 60 panel online > /dev/null && ok "node online after the update" || bad "node not online after the update"
+grep -q '"agent":"999"' <(php -r 'require "'"$T"'/root/dryden/loader.inc.php"; echo $zdbh->query("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")->fetchColumn();' 2>/dev/null) \
+    && ok "the panel sees the new agent's version" || bad "the panel does not show agent 999"
+in_box 'grep -q local_certs /etc/caddy/Caddyfile' && ok "the node's settings were kept" || bad "Caddyfile lost its settings"
+for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && [[ "$(panel state "$CID")" == running* ]] && ok "the customer's app kept running behind its setup password" || bad "after the update: HTTP $C, $(panel state "$CID")"
+C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1)
+echo "$C2" | grep -q "Agent: up to date (version 999)" && echo "$C2" | grep -q "Node setup: up to date" && ok "--check: up to date" || bad "--check after: $C2"
+in_box 'echo "<?php syntax error" > /root/src/sentora-node-agent.php'
+U2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1)
+echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-node-agent status' | grep -q "agent 999" && ok "a damaged download changes nothing" || bad "damaged download: $U2"
+
 say "Deleting"
 panel act "$CID" delete > /dev/null
 wait_for 180 bash -c "php '$T/node_real.php' state $CID | grep -x deleted" > /dev/null && ok "deleted in the panel" || bad "not deleted: $(panel state "$CID")"
