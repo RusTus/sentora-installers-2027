@@ -111,6 +111,11 @@ function SentoraDiskImage() {
 # Everything in one place: a copy of this script in Sentora's folder, and a double-click file next to it
 # for each command (each asks for administrator rights itself and keeps its window open to read)
 $Launchers = [ordered]@{ 'Sentora Status.cmd' = '-Status'; 'Sentora Backup.cmd' = '-Backup \"%~dp0Backups\"'; 'Sentora Uninstall.cmd' = '-Uninstall' }
+# the panel's login page on the desktop of every user of this PC (Windows' shared Public Desktop)
+$PanelShortcut = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Sentora Panel.url'
+function WritePanelShortcut([string] $Url) {
+    Set-Content -LiteralPath $PanelShortcut -Value @('[InternetShortcut]', "URL=$Url") -Encoding ASCII
+}
 function WriteLaunchers([string] $Folder) {
     Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $Folder 'sentora2027-wsl.ps1') -Force
     foreach ($f in $Launchers.Keys) {
@@ -192,6 +197,8 @@ if ($Uninstall) {
         Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
         Say "the panel's line in the hosts file: removed"
     }
+    Remove-Item -LiteralPath $PanelShortcut -ErrorAction SilentlyContinue
+    Say "the Sentora Panel shortcut on the desktop: removed"
     # the double-click files and the script's copy in Sentora's folder (backups made there stay)
     foreach ($f in @($Launchers.Keys) + 'sentora2027-wsl.ps1') { Remove-Item -LiteralPath (Join-Path $folder $f) -ErrorAction SilentlyContinue }
     if ((Test-Path $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) { Remove-Item -LiteralPath $folder }
@@ -375,6 +382,7 @@ if ($DefenderExclusion -eq 'Yes' -and $vhdx) {
 }
 
 WriteLaunchers $InstallPath
+WritePanelShortcut "https://$PanelName"
 
 # the last thing on screen: how to log in (the installer's own summary above has scrolled away by now)
 $zpw = (InLinux "sed -n 's/^zadmin Password *: *//p' /root/passwords.txt" | Out-String).Trim()
@@ -387,6 +395,7 @@ Write-Host ("  {0,-12}" -f 'Password') -NoNewline; Write-Host $zpw -ForegroundCo
 Say ""
 Say "All the passwords this install made (MySQL, Matomo):  wsl -d Sentora -- cat /root/passwords.txt"
 Say "Check it:   wsl -d Sentora -- sentora-post-install-check    then    wsl -d Sentora -- sentora-smoke-test"
+Say "On every user's desktop: Sentora Panel (the login page)"
 Say "In ${InstallPath}:  Sentora Status, Sentora Backup, Sentora Uninstall (double-click)"
 Say "(No restart needed: Sentora already runs, and starts again with Windows.)"
 Start-Process "https://$PanelName"
