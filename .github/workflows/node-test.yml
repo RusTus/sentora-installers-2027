@@ -34,11 +34,22 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: sodium, pdo_sqlite, curl
+          extensions: sodium, pdo_sqlite, pdo_mysql, curl
           coverage: none
           ini-values: opcache.jit=disable
-      - name: The add-on's own tests
-        run: tests/docker_hosting/run.sh
+      - name: The add-on's own tests (SQLite, MySQL 8.4, MariaDB 10.11 and 11.8)
+        if: matrix.system == 'alma10'
+        run: |
+          tests/docker_hosting/run.sh
+          for db in mysql:8.4 mariadb:10.11 mariadb:11.8; do
+            echo "::group::$db"
+            docker run -d --name testdb -e MYSQL_ROOT_PASSWORD=t -e MARIADB_ROOT_PASSWORD=t -p 127.0.0.1:13306:3306 docker.io/library/$db > /dev/null
+            for _ in $(seq 1 60); do php -r 'new PDO("mysql:host=127.0.0.1;port=13306", "root", "t");' 2> /dev/null && break; sleep 2; done
+            DH_MYSQL="127.0.0.1;13306;root;t;dhtest" tests/docker_hosting/run.sh || fail=1
+            docker rm -f testdb > /dev/null
+            echo "::endgroup::"
+          done
+          exit ${fail:-0}
       - name: Real node
         run: |
           mkdir -p /tmp/mod && unzip -q sentora-repo/docker_hosting.zpp -d /tmp/mod

@@ -31,18 +31,40 @@ class TestPDO extends PDO
     }
 }
 
-$zdbh = new TestPDO('sqlite:' . getenv('DH_DB'));
-$zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$zdbh->exec('PRAGMA journal_mode=WAL');
-$zdbh->exec('PRAGMA busy_timeout=10000');
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_reseller_fk INT, ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_deleted_ts INT)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, vh_acc_fk INT, vh_name_vc TEXT, vh_type_in INT DEFAULT 1, vh_deleted_ts INT)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_dns (dn_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, dn_acc_fk INT, dn_name_vc TEXT, dn_vhost_fk INT, dn_type_vc TEXT, dn_host_vc TEXT, dn_ttl_in INT,
-    dn_target_vc TEXT, dn_texttarget_tx TEXT, dn_priority_in INT, dn_weight_in INT, dn_port_in INT, dn_created_ts INT, dn_deleted_ts INT)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_settings (so_name_vc TEXT PRIMARY KEY, so_value_tx TEXT)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_modules (mo_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, mo_folder_vc TEXT, mo_name_vc TEXT, mo_enabled_en TEXT)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_groups (ug_id_pk INTEGER PRIMARY KEY)");
-$zdbh->exec("CREATE TABLE IF NOT EXISTS x_permissions (pe_group_fk INT, pe_module_fk INT)");
+class MyPDO extends PDO
+{
+}
+
+if (getenv('DH_MYSQL')) {
+    // a real MySQL or MariaDB (DH_MYSQL = "host;port;user;password;database"): the SQL as it is
+    list($h, $p, $u, $pw, $db) = explode(';', getenv('DH_MYSQL'));
+    $zdbh = new MyPDO("mysql:host=$h;port=$p;dbname=$db;charset=utf8mb4", $u, $pw);
+    $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, ac_user_vc varchar(50), ac_reseller_fk int(6), ac_group_fk int(6),
+        ac_enabled_in int(1) DEFAULT 1, ac_deleted_ts int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, vh_acc_fk int(6), vh_name_vc varchar(255) CHARACTER SET latin1 COLLATE latin1_general_ci,
+        vh_type_in int(1) DEFAULT 1, vh_deleted_ts int(30)) ENGINE=MyISAM DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_dns (dn_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, dn_acc_fk int(6), dn_name_vc varchar(255), dn_vhost_fk int(6), dn_type_vc varchar(50),
+        dn_host_vc varchar(100), dn_ttl_in int(30), dn_target_vc varchar(2000), dn_texttarget_tx text, dn_priority_in int(50), dn_weight_in int(50), dn_port_in int(50), dn_created_ts int(30),
+        dn_deleted_ts int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_settings (so_name_vc varchar(50) PRIMARY KEY, so_value_tx text) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_modules (mo_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, mo_folder_vc varchar(255), mo_name_vc varchar(200), mo_enabled_en enum('true','false'))");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_groups (ug_id_pk int(6) unsigned NOT NULL PRIMARY KEY)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_permissions (pe_group_fk int(6), pe_module_fk int(6))");
+} else {
+    $zdbh = new TestPDO('sqlite:' . getenv('DH_DB'));
+    $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $zdbh->exec('PRAGMA journal_mode=WAL');
+    $zdbh->exec('PRAGMA busy_timeout=10000');
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_reseller_fk INT, ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_deleted_ts INT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, vh_acc_fk INT, vh_name_vc TEXT, vh_type_in INT DEFAULT 1, vh_deleted_ts INT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_dns (dn_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, dn_acc_fk INT, dn_name_vc TEXT, dn_vhost_fk INT, dn_type_vc TEXT, dn_host_vc TEXT, dn_ttl_in INT,
+        dn_target_vc TEXT, dn_texttarget_tx TEXT, dn_priority_in INT, dn_weight_in INT, dn_port_in INT, dn_created_ts INT, dn_deleted_ts INT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_settings (so_name_vc TEXT PRIMARY KEY, so_value_tx TEXT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_modules (mo_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, mo_folder_vc TEXT, mo_name_vc TEXT, mo_enabled_en TEXT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_groups (ug_id_pk INTEGER PRIMARY KEY)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_permissions (pe_group_fk INT, pe_module_fk INT)");
+}
 
 $security = array('server_crypto_key' => getenv('DH_SECRET') !== false ? getenv('DH_SECRET') : 'test-server-key-0123456789abcdef');
 
