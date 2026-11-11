@@ -11,8 +11,6 @@ on:
         description: Branch to build from
         default: master2027
   workflow_call:
-  push:   # TEMPORARY: test build from the work branch
-    branches: [claude/beautiful-fermi-acjk1d]
 
 permissions:
   contents: read
@@ -24,7 +22,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref || (github.event_name == 'push' && github.ref_name) || 'master2027' }}
+          ref: ${{ inputs.ref || 'master2027' }}
 
       - name: Inno Setup
         shell: pwsh
