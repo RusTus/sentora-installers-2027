@@ -87,7 +87,16 @@ function Wsl([string[]] $Arguments) {
     } finally { [Console]::OutputEncoding = $old }
 }
 function SentoraExists() { return (Wsl @('--list', '--quiet')) -match "(?m)^\s*$Name\s*$" }
-function InLinux([string] $Command) { & wsl.exe -d $Name -u root -- bash -lc $Command }
+# A command for root inside Sentora. Windows PowerShell 5.1 does not escape the quotes it passes to
+# wsl.exe, and "wsl --" hands the command to Linux's shell to read a second time, so quotes and $ came out
+# wrong. So the command travels as base64 (letters and digits only) into a file, and bash runs that file
+# (started with --exec: no second reading; its input stays this console, for the installer's questions).
+function InLinux([string] $Command) {
+    $file = '/root/.sentora-wsl-command'
+    $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("rm -f $file`n" + ($Command -replace "`r", '')))
+    & wsl.exe -d $Name -u root --exec /bin/sh -c "echo $b64 | base64 -d > $file"
+    & wsl.exe -d $Name -u root --exec /bin/bash -l $file
+}
 # the disk image of the Sentora WSL system (from the registry, where WSL keeps its systems)
 function SentoraDiskImage() {
     $key = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss' -ErrorAction SilentlyContinue |
@@ -297,7 +306,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
     $out = $null
     if ([System.TimeZoneInfo]::TryConvertWindowsIdToIanaId($tz, [ref]$out)) { $tzArg = "-t $out" }
 }
-& wsl.exe -d $Name -u root -- bash -lc "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName $tzArg"
+InLinux "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName $tzArg"
 $installed = (InLinux 'test -f /etc/sentora/panel/cnf/db.php && echo yes' | Out-String).Trim()
 if ($installed -ne 'yes') { Fail "Sentora's installer did not finish (its log is in /root inside Sentora: wsl -d Sentora)." }
 # (the installer may have restarted Linux at its end: it starts again here)
@@ -323,7 +332,7 @@ Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
 Say "hosts file: $PanelName points at this PC"
 if ($StartWithWindows -eq 'Yes') {
     # a WSL system runs while a program in it is attached: the task keeps one attached from startup on
-    $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Name -u root -- /bin/sh -c 'exec sleep infinity'"
+    $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Name -u root --exec /bin/sleep infinity"
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -331,7 +340,7 @@ if ($StartWithWindows -eq 'Yes') {
     Start-ScheduledTask -TaskName $TaskName
     Say "startup: Sentora starts with Windows (task '$TaskName')"
 } else {
-    & wsl.exe -d $Name -u root -- true
+    & wsl.exe -d $Name -u root --exec /bin/true
     Say "startup: not with Windows (start it with: wsl -d Sentora)"
 }
 $vhdx = SentoraDiskImage
