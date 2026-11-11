@@ -967,6 +967,8 @@ ask_admin() {
 if [[ -z "$PANEL_FQDN" ]]; then
     # The panel's name defaults to "sentora" under this server's own domain
     host_domain="$(hostname -d 2> /dev/null)"
+    # (a server whose own name has no domain: the network's search domain, as DHCP gives it)
+    [ -n "$host_domain" ] || host_domain=$(awk '$1 == "search" && $2 != "." {print $2; exit}' /etc/resolv.conf 2> /dev/null)
     PANEL_FQDN="sentora${host_domain:+.$host_domain}"
     PUBLIC_IP=${extern_ip:-$local_ip}
     while true; do
