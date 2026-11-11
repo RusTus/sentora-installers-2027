@@ -253,9 +253,12 @@ if ($Backup) {
     Step "Backing up the whole Sentora system to $file"
     Say "(Sentora's services are stopped for a moment, so the copy is consistent)"
     & wsl.exe --terminate $Name | Out-Null
-    & wsl.exe --export $Name $file
+    # (sockets, the live connection points of running programs such as Postfix, can not be in an archive and
+    # need not be: the programs make them again when Sentora starts; so their warnings are left out)
+    & wsl.exe --export $Name $file 2>&1 | ForEach-Object { "$_" -replace "`0", '' } | Where-Object { $_ -notmatch 'cannot archive socket' -and $_.Trim() -ne '' }
     if ($LASTEXITCODE -ne 0) { Fail "The backup did not work (wsl --export)." }
     Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Say "Sentora is starting again (a minute; the tray icon turns green when the panel answers)."
     Say "Done: $file ($([math]::Round((Get-Item $file).Length / 1GB, 1)) GB). To restore it: wsl --import Sentora <folder> `"$file`""
     exit 0
 }
