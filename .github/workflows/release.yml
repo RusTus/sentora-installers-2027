@@ -3,7 +3,8 @@
 #   from this repository's master2027: sentora-installers-2027.zip, sentora2027-install (picks the
 #     right installer), sentora2027-ub26.04,
 #     sentora2027-deb13 and sentora2027-alma10 (the installers for Ubuntu 26.04, Debian 13 and
-#     AlmaLinux 10), sentora-tls-check.sh
+#     AlmaLinux 10), sentora-tls-check.sh, sentora2027-wsl.ps1 and Sentora2027Setup.exe (Windows; the exe
+#     is built anew each run, so it is uploaded each time)
 #   from sentora-core-2027's master2027 (bin/, their only copy): sentora-migrate-export (the old
 #     server wgets it from here), sentora-smoke-test, sentora-web-probe
 # Not touched: the PHP bundles and testssl_sh-3_2_5.zip (uploaded by hand; sentora-tls-check.sh
@@ -43,9 +44,13 @@ jobs:
     if: ${{ !inputs.skip_tests }}
     uses: ./.github/workflows/install-test.yml
 
+  # Sentora2027Setup.exe (the Windows setup), built on a Windows machine (.github/workflows/windows-setup.yml)
+  windows-setup:
+    uses: ./.github/workflows/windows-setup.yml
+
   release:
-    needs: install-test
-    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') }}
+    needs: [install-test, windows-setup]
+    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') && needs.windows-setup.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out master2027
@@ -53,6 +58,12 @@ jobs:
         with:
           ref: master2027
           fetch-depth: 0
+
+      - name: The Windows setup (built by the windows-setup job)
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-setup
+          path: .
 
       - name: Build the files
         run: |
@@ -89,7 +100,7 @@ jobs:
           EOF
           mkdir -p old
           upload=""
-          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora2027-fedora sentora2027-wsl.ps1 sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
+          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora2027-fedora sentora2027-wsl.ps1 Sentora2027Setup.exe sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             sha256sum "$f"
             if [ "$FORCE" = "true" ]; then
               echo "$f: upload (forced)"; upload="$upload $f"; continue

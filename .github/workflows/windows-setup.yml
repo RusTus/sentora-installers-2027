@@ -1,0 +1,51 @@
+# Sentora2027Setup.exe: the Windows setup (windows/sentora2027-setup.iss), built with Inno Setup on a
+# Windows machine from this repository's master2027 (or the branch given) and kept as the run's
+# artifact "windows-setup". The release workflow runs it and puts the exe on the release; it can also
+# be run alone: Actions > Windows setup > Run workflow.
+name: Windows setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch to build from
+        default: master2027
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || 'master2027' }}
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup did not install' }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Sentora2027Setup.exe
+        shell: pwsh
+        run: |
+          # the version shown in Settings > Apps: the core's VERSION
+          $v = (Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/VERSION).Content.Trim()
+          if ($v -notmatch '^[0-9][0-9.]*$') { $v = '2027' }
+          & $env:ISCC "/DAppVersion=$v" windows\sentora2027-setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          Get-Item windows\output\Sentora2027Setup.exe | Format-List Name, Length
+          (Get-FileHash windows\output\Sentora2027Setup.exe -Algorithm SHA256).Hash
+
+      - name: Keep it
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: windows/output/Sentora2027Setup.exe
+          retention-days: 14

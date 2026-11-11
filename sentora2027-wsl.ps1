@@ -47,7 +47,9 @@ param(
     [switch] $Status,
     [string] $Backup,
     [switch] $Uninstall,
-    [switch] $Shortcuts
+    [switch] $Shortcuts,
+    [switch] $Yes,        # -Uninstall without asking (Sentora2027Setup.exe's uninstaller asked already)
+    [switch] $FromSetup   # run by Sentora2027Setup.exe: its window stays open at the end
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,7 +67,9 @@ $TaskName = 'Sentora (WSL)'
 
 function Say([string] $Text) { Write-Host "  $Text" }
 function Step([string] $Text) { Write-Host ""; Write-Host "-- $Text" -ForegroundColor Cyan }
-function Fail([string] $Text) { Write-Host ""; Write-Host "  $Text" -ForegroundColor Red; exit 1 }
+# (run by Sentora2027Setup.exe the window closes when the script ends: it waits, so the end can be read)
+function EndPause() { if ($FromSetup) { Write-Host ""; Read-Host "  Press Enter to close this window" | Out-Null } }
+function Fail([string] $Text) { Write-Host ""; Write-Host "  $Text" -ForegroundColor Red; EndPause; exit 1 }
 function Ask([string] $Question, [string] $Default) {
     $a = Read-Host "  $Question [$Default]"
     if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
@@ -264,6 +268,8 @@ if ($Backup) {
 }
 
 # --- -Shortcuts: the double-click files, the desktop shortcut and the tray icon for an installed Sentora ---
+# (Sentora2027Setup.exe run again on a PC where Sentora is installed: it sets these up again)
+if ($FromSetup -and (SentoraExists)) { Say "Sentora is installed here already: setting up its shortcuts again."; $Shortcuts = $true }
 if ($Shortcuts) {
     if (-not (SentoraExists)) { Fail "Sentora is not installed here." }
     $vhdx = SentoraDiskImage
@@ -274,6 +280,7 @@ if ($Shortcuts) {
     WritePanelShortcut "https://$panel"
     WriteTray $folder $panel
     Say "in ${folder}: Sentora Status, Sentora Backup, Sentora Uninstall; on every desktop: Sentora Panel; and the tray icon"
+    EndPause
     exit 0
 }
 
@@ -281,7 +288,7 @@ if ($Shortcuts) {
 if ($Uninstall) {
     Step "Removing Sentora from this PC"
     Write-Host "  This deletes the Sentora system with all its websites, mail and databases." -ForegroundColor Yellow
-    if ((Ask "Type REMOVE to go on" "no") -cne 'REMOVE') { Say "Nothing was removed."; exit 0 }
+    if (-not $Yes -and (Ask "Type REMOVE to go on" "no") -cne 'REMOVE') { Say "Nothing was removed."; exit 0 }
     $vhdx = SentoraDiskImage
     $folder = if ($vhdx) { Split-Path $vhdx } else { Split-Path $PSCommandPath }
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -331,6 +338,7 @@ Step "Checking WSL"
 if ($LASTEXITCODE -ne 0) {
     Say "WSL is not installed: installing it (Windows may ask for a restart; then run this script again)"
     & wsl.exe --install --no-distribution
+    if ($FromSetup) { Fail "WSL was installed. Restart Windows, then run Sentora2027Setup.exe again." }
     Fail "WSL was installed. Restart Windows, then run this script again."
 }
 & wsl.exe --update | Out-Null
@@ -501,3 +509,4 @@ Say "In the taskbar's tray: a dot, green while the panel answers (right-click: S
 Say "In ${InstallPath}:  Sentora Status, Sentora Backup, Sentora Uninstall (double-click)"
 Say "(No restart needed: Sentora already runs, and starts again with Windows.)"
 Start-Process "https://$PanelName"
+EndPause
