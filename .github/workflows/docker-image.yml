@@ -1,0 +1,59 @@
+# The Sentora 2027 Docker image (docker/ in this repository): built, started without --privileged,
+# installed on its first start, restarted, and checked with sentora-post-install-check and
+# sentora-smoke-test (.github/scripts/docker-test.sh). Actions > Docker image > Run workflow.
+name: Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: "docker run options to try, one set per line (empty: the documented ones)"
+        default: ""
+  push:
+    branches: [claude/beautiful-fermi-acjk1d]
+    paths: [docker/**, .github/scripts/docker-test.sh, .github/workflows/docker-image.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  variants:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.pick.outputs.list }}
+    steps:
+      - id: pick
+        env:
+          WANT: ${{ inputs.variants }}
+        run: |
+          if [ -z "$WANT" ]; then
+            WANT='--cgroupns=private --tmpfs /run --tmpfs /run/lock
+          --cgroupns=private --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN
+          --cgroupns=private --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN --cap-add SYS_ADMIN'
+          fi
+          echo "list=$(printf '%s\n' "$WANT" | sed 's/^ *//; /^$/d' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: variants
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        flags: ${{ fromJSON(needs.variants.outputs.list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The runner's Docker
+        run: |
+          docker info --format 'Docker {{.ServerVersion}}, cgroup {{.CgroupVersion}} ({{.CgroupDriver}}), security: {{.SecurityOptions}}'
+      - name: Build, first start, restart, check, smoke test
+        env:
+          DOCKER_FLAGS: ${{ matrix.flags }}
+        run: bash .github/scripts/docker-test.sh . results
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-${{ strategy.job-index }}
+          path: results
+          retention-days: 14

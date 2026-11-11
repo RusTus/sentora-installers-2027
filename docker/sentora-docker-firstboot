@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Sentora 2027 in Docker: install Sentora the first time the container starts, with the settings
+# given to docker run, so every container has its own passwords, keys and certificate. Run by
+# sentora-docker-firstboot.service; does nothing once /etc/sentora/.docker-installed exists.
+#
+#   SENTORA_DOMAIN  the panel's address, e.g. panel.example.com (needed)
+#   SENTORA_EMAIL   your email address, for server alerts (needed)
+#   SENTORA_IP      the server's IPv4 address, or public (default) or local
+#   TZ              time zone, e.g. America/Chicago (default UTC)
+#   ADMIN_NAME ADMIN_PHONE ADMIN_ADDRESS ADMIN_PROVINCE ADMIN_POSTALCODE ADMIN_COUNTRY
+#                   zadmin's profile (optional; changed later in the panel)
+#
+# Progress goes to the container's log (docker logs); passwords never do: they are in
+# /root/passwords.txt inside the container, readable by root only.
+set -uo pipefail
+umask 022   # (as on a server: the installer sets each file's own permissions)
+DONE=/etc/sentora/.docker-installed
+SCREEN=/root/sentora-install-screen.txt
+[ -f "$DONE" ] && exit 0
+say() { printf 'sentora: %s\n' "$*"; }
+
+# systemd does not hand docker run's -e settings to services: read them from PID 1
+while IFS= read -r -d '' kv; do
+    case "$kv" in SENTORA_*=*|ADMIN_*=*|TZ=*) export "${kv?}" ;; esac
+done < /proc/1/environ
+
+DOMAIN=$(printf '%s' "${SENTORA_DOMAIN:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+EMAIL=${SENTORA_EMAIL:-${ADMIN_EMAIL:-}}
+IP=${SENTORA_IP:-public}
+TZONE=${TZ:-UTC}
+missing=0
+if [[ ! "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$ ]]; then
+    say "SENTORA_DOMAIN is missing or not a host name: give the panel's address, e.g. -e SENTORA_DOMAIN=panel.example.com"
+    missing=1
+fi
+if [[ ! "$EMAIL" =~ ^[^@[:space:]]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$ ]]; then
+    say "SENTORA_EMAIL is missing or not an email address: give yours, e.g. -e SENTORA_EMAIL=you@example.com"
+    missing=1
+fi
+if [ ! -f "/usr/share/zoneinfo/$TZONE" ]; then
+    say "TZ=$TZONE is not a time zone (for example America/Chicago or Europe/Paris)"
+    missing=1
+fi
+if [ $missing -eq 1 ]; then
+    say "Nothing was installed. Remove this container and start a new one with the settings above."
+    exit 1
+fi
+
+say "Installing Sentora 2027 for https://$DOMAIN (about 10 minutes; this container's log shows each step)"
+export ADMIN_EMAIL="$EMAIL"
+export ADMIN_NAME="${ADMIN_NAME:-Administrator}" ADMIN_PHONE="${ADMIN_PHONE:--}" ADMIN_ADDRESS="${ADMIN_ADDRESS:--}"
+export ADMIN_PROVINCE="${ADMIN_PROVINCE:--}" ADMIN_POSTALCODE="${ADMIN_POSTALCODE:--}" ADMIN_COUNTRY="${ADMIN_COUNTRY:--}"
+cd /root || exit 1
+# (its screen ends with the passwords: root's eyes only from the start; tee keeps the file's mode)
+install -m 600 /dev/null "$SCREEN"
+# Only the step lines reach the log (the installer's last screen lists the passwords)
+bash /usr/local/share/sentora/sentora2027-deb13 -t "$TZONE" -d "$DOMAIN" -i "$IP" < /dev/null 2>&1 \
+    | tee "$SCREEN" | sed -u -n 's/\x1b\[[0-9;]*m//g; /^-- \[[0-9]*\/[0-9]*\] /p; /^  *Stopped:/p'
+if ! grep -q "Sentora is installed" "$SCREEN"; then
+    say "The installation did not finish. Its screen: docker exec <container> cat $SCREEN"
+    say "Its log: docker exec <container> sh -c 'cat /root/*_sentora_install.log'"
+    exit 1
+fi
+mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
+say "Sentora is installed: https://$DOMAIN"
+say "Log in as zadmin. Its password and every other one: docker exec <container> cat /root/passwords.txt"
+say "Then, inside the container: sentora-post-install-check"
