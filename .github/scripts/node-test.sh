@@ -165,7 +165,7 @@ C1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1);
 echo "$C1" | grep -q -- '-> 999 (new)' && ok "--check shows the new agent" || bad "--check: $C1"
 U1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1); echo "$U1" | tail -4
 echo "$U1" | grep -q "^Done: this node is up to date (agent 999)" && ok "updated without asking" || bad "the update did not finish"
-in_box 'sentora-node-agent status' | grep -q "agent 999" && ok "the new agent runs" || bad "the new agent does not run"
+in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "the new agent runs" || bad "the new agent does not run"
 wait_for 60 panel online > /dev/null && ok "node online after the update" || bad "node not online after the update"
 grep -q '"agent":"999"' <(php -r 'require "'"$T"'/root/dryden/loader.inc.php"; echo $zdbh->query("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")->fetchColumn();' 2>/dev/null) \
     && ok "the panel sees the new agent's version" || bad "the panel does not show agent 999"
@@ -176,7 +176,7 @@ C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1)
 echo "$C2" | grep -q "Agent: up to date (version 999)" && echo "$C2" | grep -q "Node setup: up to date" && ok "--check: up to date" || bad "--check after: $C2"
 in_box 'echo "<?php syntax error" > /root/src/sentora-node-agent.php'
 U2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1)
-echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-node-agent status' | grep -q "agent 999" && ok "a damaged download changes nothing" || bad "damaged download: $U2"
+echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "a damaged download changes nothing" || bad "damaged download: $U2"
 
 say "Deleting"
 panel act "$CID" delete > /dev/null

@@ -259,7 +259,7 @@ for a in "$@"; do case "$a" in --yes|-y) YES=1 ;; --check) CHECK=1 ;; -h|--help)
 T=$(mktemp -d /tmp/sentora-node-update.XXXXXX); trap 'rm -rf "$T"' EXIT
 curl -fsSL "$RAW_BASE/sentora2027-node-alma10" -o "$T/installer" && curl -fsSL "$RAW_BASE/sentora-node-agent.php" -o "$T/agent.php" \
     || { echo "Could not download the newest node files ($RAW_BASE)."; exit 1; }
-bash -n "$T/installer" && php -l "$T/agent.php" > /dev/null || { echo "The downloaded files are damaged: nothing changed."; exit 1; }
+bash -n "$T/installer" && php -l "$T/agent.php" > /dev/null 2>&1 || { echo "The downloaded files are damaged: nothing changed."; exit 1; }
 ver() { sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$1" 2> /dev/null | head -1; }
 same() { [ -f "$2" ] && [ "$(sha256sum < "$1")" = "$(sha256sum < "$2")" ]; }
 OLD=$(ver "$LIB/sentora-node-agent.php"); NEW=$(ver "$T/agent.php")
