@@ -310,7 +310,7 @@ class snode
         if ($uid < 0) {
             return 'no user ' . $user;
         }
-        if (is_dir(self::$run . '/' . $uid) && is_file(self::$run . '/' . $uid . '/bus')) {
+        if (is_dir(self::$run . '/' . $uid)) {
             return '';
         }
         $l = self::Run(array('loginctl', 'enable-linger', $user));
@@ -318,7 +318,7 @@ class snode
             return 'loginctl enable-linger: ' . self::Tail($l[1]);
         }
         self::Run(array('systemctl', 'start', 'user@' . $uid . '.service'), null, 60);
-        for ($i = 0; $i < 30 && !(is_dir(self::$run . '/' . $uid) && is_file(self::$run . '/' . $uid . '/bus')); $i++) {
+        for ($i = 0; $i < 30 && !is_dir(self::$run . '/' . $uid); $i++) {
             sleep(1);
         }
         if (!is_dir(self::$run . '/' . $uid)) {
