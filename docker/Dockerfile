@@ -19,8 +19,9 @@ RUN apt-get update -qq \
 
 COPY sentora2027-deb13 /usr/local/share/sentora/sentora2027-deb13
 COPY docker/sentora-docker-firstboot /usr/local/sbin/sentora-docker-firstboot
+COPY docker/sentora-docker-init /usr/local/sbin/sentora-docker-init
 COPY docker/sentora-docker-firstboot.service /etc/systemd/system/sentora-docker-firstboot.service
-RUN chmod 755 /usr/local/sbin/sentora-docker-firstboot \
+RUN chmod 755 /usr/local/sbin/sentora-docker-firstboot /usr/local/sbin/sentora-docker-init \
  && chmod 644 /usr/local/share/sentora/sentora2027-deb13 /etc/systemd/system/sentora-docker-firstboot.service \
  && systemctl enable sentora-docker-firstboot.service
 
@@ -34,4 +35,5 @@ LABEL org.opencontainers.image.title="Sentora 2027" \
       org.opencontainers.image.licenses="GPL-3.0"
 
 STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
+# (it starts the follower that shows the first start in docker logs, then runs systemd)
+CMD ["/usr/local/sbin/sentora-docker-init"]

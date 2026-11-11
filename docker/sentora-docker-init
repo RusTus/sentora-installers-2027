@@ -1,0 +1,14 @@
+#!/bin/sh
+# The container's first program. docker logs shows what PID 1 writes to its output, but systemd points
+# its own output to /dev/null as it starts. So a follower started here, before systemd, keeps Docker's
+# log and shows it everything written to /var/log/sentora-docker.log (the first start's steps; never
+# a password); then systemd takes over as PID 1.
+LOG=/var/log/sentora-docker.log
+[ -f "$LOG" ] || install -m 600 /dev/null "$LOG"
+# (into init.scope first, where systemd puts itself anyway: the top of the container's cgroup tree
+# must stay empty for systemd to hand out resources, so the follower must not be left there)
+if [ -w /sys/fs/cgroup/cgroup.procs ]; then
+    mkdir -p /sys/fs/cgroup/init.scope 2> /dev/null && echo $$ > /sys/fs/cgroup/init.scope/cgroup.procs 2> /dev/null
+fi
+tail -n 0 -F "$LOG" 2> /dev/null &
+exec /sbin/init "$@"
