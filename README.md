@@ -1,6 +1,6 @@
 # Sentora-2027 installer files
 
-Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04**, **Debian 13** and **AlmaLinux 10**.
+Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04**, **Debian 13**, **AlmaLinux 10**, **Rocky Linux 10**, **Red Hat Enterprise Linux 10**, **Fedora 45** and **Windows** (WSL).
 
 **Website:** [sentorareloaded2027.github.io](https://sentorareloaded2027.github.io): screenshots, the install command for every system, and the Windows setup.
 
@@ -9,6 +9,10 @@ Service configuration, database setup and build sources used by the Sentora-2027
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white)
 ![Debian](https://img.shields.io/badge/Debian-13-A81D33?logo=debian&logoColor=white)
 ![AlmaLinux](https://img.shields.io/badge/AlmaLinux-10-0F4266?logo=almalinux&logoColor=white)
+![Rocky Linux](https://img.shields.io/badge/Rocky_Linux-10-10B981?logo=rockylinux&logoColor=white)
+![RHEL](https://img.shields.io/badge/RHEL-10-EE0000?logo=redhat&logoColor=white)
+![Fedora](https://img.shields.io/badge/Fedora-45-51A2DA?logo=fedora&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-11_%2F_Server_2025-0078D4?logo=windows&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?logo=php&logoColor=white)
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
 
@@ -44,7 +48,7 @@ To build this repository's zip from a clone:
 git archive --prefix=sentora-installers-2027/ -o sentora-installers-2027.zip master2027
 ```
 
-To publish a new version, push to `master2027` and run **Actions > Release > Run workflow**. It builds `sentora-installers-2027.zip`, `sentora2027-ub26.04` and `sentora2027-deb13` from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. It also takes `sentora-migrate-export`, `sentora-smoke-test` and `sentora-web-probe` from the core and `sentora-tls-check.sh` from here, uploads only the files that changed, rewrites the release page (title `Sentora-<VERSION>`, What's new since the previous version and this README), and makes one release per version (tag `v<VERSION>`) with What's new, the whole change log and a copy of every file. The Debian 13 PHP bundles are built and put on the release by **Actions > PHP bundles > Run workflow** (in a Debian 13 container); the Ubuntu 26.04 bundles and `testssl_sh-3_2_5.zip` are still replaced by hand. The core zip has the same workflow in [sentora-core-2027](https://github.com/RusTus/sentora-core-2027).
+To publish a new version, push to `master2027` and run **Actions > Release > Run workflow**. It first installs Sentora from `master2027` of both repositories on Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10 and Fedora 45 (Actions > Install test; nothing is published unless all pass) and builds `Sentora2027Setup.exe` on a Windows machine. It builds `sentora-installers-2027.zip`, every installer (`sentora2027-install`, `-ub26.04`, `-deb13`, `-alma10`, `-fedora`, `-wsl.ps1`) from `master2027`, replaces the files of the same names on the `current` release and prints their SHA-256 in the job log. It also takes `sentora-migrate-export`, `sentora-smoke-test` and `sentora-web-probe` from the core and `sentora-tls-check.sh` from here, uploads only the files that changed, rewrites the release page (title `Sentora-<VERSION>`, What's new since the previous version and this README), and makes one release per version (tag `v<VERSION>`) with What's new, the whole change log and a copy of every file. The Debian 13 PHP bundles are built and put on the release by **Actions > PHP bundles > Run workflow** (in a Debian 13 container); the Ubuntu 26.04 bundles and `testssl_sh-3_2_5.zip` are still replaced by hand. The core zip has the same workflow in [sentora-core-2027](https://github.com/RusTus/sentora-core-2027).
 
 ## Installing
 
@@ -64,6 +68,8 @@ On Windows 11 (22H2 or newer) or Windows Server 2025, in PowerShell as administr
 Invoke-WebRequest -OutFile sentora2027-wsl.ps1 https://github.com/RusTus/sentora-installers-2027/releases/download/current/sentora2027-wsl.ps1
 powershell -ExecutionPolicy Bypass -File .\sentora2027-wsl.ps1
 ```
+
+Or the setup program: [Sentora2027Setup.exe](https://github.com/RusTus/sentora-installers-2027/releases/download/current/Sentora2027Setup.exe) (built from `windows/sentora2027-setup.iss` by **Actions > Windows setup** on every release). It runs the same script, registers **Sentora 2027** in Settings > Apps and the Start menu, updates in place when a newer one runs, and uninstalls everything from Settings > Apps (backups stay). Both ways leave Sentora Status, Backup and Uninstall in Sentora's folder, a Sentora Panel shortcut on every desktop and a tray icon (green while the panel answers). It is not signed: SmartScreen shows "Windows protected your PC" once (More info > Run anyway).
 
 Or each system's own installer. On a clean Ubuntu 26.04 server, as root:
 
