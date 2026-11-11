@@ -310,8 +310,12 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
     if ([System.TimeZoneInfo]::TryConvertWindowsIdToIanaId($tz, [ref]$out)) { $tzArg = "-t $out" }
 }
 InLinux "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName -i $ipArg $tzArg"
-$installed = (InLinux 'test -f /etc/sentora/panel/cnf/db.php && echo yes' | Out-String).Trim()
-if ($installed -ne 'yes') { Fail "Sentora's installer did not finish (its log is in /root inside Sentora: wsl -d Sentora)." }
+# finished = the panel's settings are there and the installer removed its "still installing" mark (it
+# does that at its very end; a Ctrl+C or a failed step leaves it)
+$installed = (InLinux 'test -f /etc/sentora/panel/cnf/db.php && test ! -e /etc/sentora/.installing && echo yes' | Out-String).Trim()
+if ($installed -ne 'yes') {
+    Fail "Sentora's installer did not finish (stopped, or a step failed; its log is in /root inside Sentora: wsl -d Sentora). Start again from a clean state: this script with -Uninstall, then run it again."
+}
 # (the installer may have restarted Linux at its end: it starts again here)
 & wsl.exe --terminate $Name | Out-Null
 
