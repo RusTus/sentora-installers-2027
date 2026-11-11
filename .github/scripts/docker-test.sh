@@ -82,6 +82,10 @@ if [ "$state" != installed ]; then
     echo "::error::the first start did not install Sentora (${state:-timed out}; first-start.log, install-screen.txt and install.log in the results)"
     exit 1
 fi
+# the progress must reach docker logs (what people watch), and no password may
+grep -q '^sentora: Sentora is installed' "$OUT/first-start.log" && grep -q '^-- \[' "$OUT/first-start.log" \
+    || { echo "::error::docker logs does not show the install's steps and its end"; exit 1; }
+echo "docker logs shows $(grep -c '^-- \[' "$OUT/first-start.log") steps and the end"
 # no password may reach the container's log
 in_box 'cat /root/passwords.txt' 2> /dev/null | grep -v '^Server IP\|^Panel URL' | awk -F' : ' 'NF > 1 {print $2}' \
     | awk '{print $NF}' | grep -E '^[^ ()]{8,}$' > "$OUT/.pw"

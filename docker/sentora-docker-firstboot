@@ -20,6 +20,11 @@ DONE=/etc/sentora/.docker-installed
 SCREEN=/root/sentora-install-screen.txt
 [ -f "$DONE" ] && exit 0
 say() { printf 'sentora: %s\n' "$*"; }
+# What docker logs shows is what PID 1 (systemd) writes to its own output; a service's "console"
+# does not reach it in a container without a terminal. So everything below goes there too
+# (and to the journal, through this service's own output).
+TEE_PID=''
+if [ -w /proc/1/fd/1 ]; then exec > >(tee -a /proc/1/fd/1) 2>&1; TEE_PID=$!; fi
 
 # systemd does not hand docker run's -e settings to services: read them from PID 1
 while IFS= read -r -d '' kv; do
@@ -95,5 +100,6 @@ say "Sentora is installed: https://$DOMAIN"
 say "Log in as zadmin. Its password and every other one: docker exec <container> cat /root/passwords.txt"
 say "Then, inside the container: sentora-post-install-check"
 [ -n "$BACKUP_NOTE" ] && say "$BACKUP_NOTE"
-# (last: whoever waits for this file then finds every line above in the log)
+# (last, once every line above has reached the log: whoever waits for this file finds them there)
+if [ -n "$TEE_PID" ]; then exec > /dev/null 2>&1; wait "$TEE_PID" 2> /dev/null; fi
 mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
