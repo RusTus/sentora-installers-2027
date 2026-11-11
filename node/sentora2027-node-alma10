@@ -105,6 +105,7 @@ if ! getcap /usr/bin/newuidmap | grep -q cap_setuid || ! getcap /usr/bin/newgidm
         || die "newuidmap/newgidmap have no capabilities (getcap): rootless containers can not run."
     say "   newuidmap/newgidmap had lost their capabilities: shadow-utils reinstalled."
 fi
+[ "$(systemctl is-enabled systemd-logind 2> /dev/null)" = masked ] && die "systemd-logind is masked on this system: each customer's containers run in their own user session, which needs it (systemctl unmask systemd-logind)."
 run systemctl start systemd-logind
 run systemctl enable --now chronyd
 

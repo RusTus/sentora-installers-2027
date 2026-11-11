@@ -29,6 +29,7 @@ wait_for() { # wait_for <seconds> <command...>: until the command prints somethi
     while [ "$(date +%s)" -lt "$end" ]; do out=$("$@" 2>/dev/null); case "$out" in ''|0) sleep 3 ;; *) echo "$out"; return 0 ;; esac; done
     return 1
 }
+diag() { panel log | tail -8; in_box 'journalctl -u sentora-node --no-pager | tail -15'; }
 state_is() { local s; s=$(panel state "$1"); case "$s" in "$2"*) echo "$s" ;; esac; }
 
 say "Stand-in panel with the add-on"
@@ -45,7 +46,7 @@ cleanup() {
     docker exec "$NAME" journalctl -u caddy --no-pager > "$OUT/caddy.log" 2>&1
     docker exec "$NAME" cat /var/log/sentora2027-node.log > "$OUT/node-install.log" 2>&1
     docker exec "$NAME" cat /etc/caddy/sentora/sites.caddy > "$OUT/sites.caddy" 2>&1
-    [ -n "${TEST_KEEP:-}" ] || { docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }
+    [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }
 }
 trap cleanup EXIT
 sleep 1
@@ -54,7 +55,8 @@ read -r KEY CODE < <(panel init)
 ok "panel ready, node added (code $CODE)"
 
 say "A fresh $IMAGE with systemd"
-printf 'FROM %s\nRUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" > "$W/Dockerfile"
+# (container images may mask systemd-logind; a server never does)
+printf 'FROM %s\nRUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all && (systemctl unmask systemd-logind.service || true)\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" > "$W/Dockerfile"
 docker build -q -t sentora-node-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
 mkdir -p "$W/home"
 # (/home on the runner's disk: rootless Podman's storage can not be overlay on the container's overlay)
@@ -132,10 +134,10 @@ say "Logs, limits, stop and start"
 panel act "$CID" logs > /dev/null
 L=$(wait_for 60 panel logs "$CID")
 echo "$L" | tail -3
-[ -n "$L" ] && ok "logs reach the panel" || bad "no logs"
+[ -n "$L" ] && ok "logs reach the panel" || { bad "no logs"; diag; }
 panel limits "$CID" 75 384 2 | grep -qx ok || bad "limits refused"
 for _ in $(seq 1 20); do MEMMAX=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/memory.max" | tr -d '\r'); [ "$MEMMAX" = 402653184 ] && break; sleep 3; done
-[ "$MEMMAX" = 402653184 ] && ok "new limits applied to the running container (384 MB)" || bad "memory.max after the change: '$MEMMAX'"
+[ "$MEMMAX" = 402653184 ] && ok "new limits applied to the running container (384 MB)" || { bad "memory.max after the change: '$MEMMAX'"; diag; }
 panel act "$CID" stop > /dev/null
 wait_for 120 state_is "$CID" stopped > /dev/null && ok "stopped" || bad "not stopped: $(panel state "$CID")"
 panel act "$CID" start > /dev/null
@@ -158,7 +160,7 @@ panel act "$CID" delete > /dev/null
 wait_for 180 bash -c "php '$T/node_real.php' state $CID | grep -x deleted" > /dev/null && ok "deleted in the panel" || bad "not deleted: $(panel state "$CID")"
 N=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps -a -q | wc -l; runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman volume ls -q | wc -l" | tr '\n' ' ')
 [ "$N" = "0 0 " ] && ok "container and its data gone from the node" || bad "left on the node (containers, volumes): $N"
-in_box 'grep -c kuma.example.test /etc/caddy/sentora/sites.caddy' | grep -qx 0 && ok "its site gone from Caddy" || bad "its site is still in Caddy"
+in_box 'grep -c kuma.example.test /etc/caddy/sentora/sites.caddy || true' | grep -qx 0 && ok "its site gone from Caddy" || bad "its site is still in Caddy"
 grep -q "PHP \(Warning\|Notice\|Deprecated\|Fatal\)" "$OUT/panel-web.log" && bad "the panel logged PHP problems" || ok "no PHP problems in the panel"
 in_box 'journalctl -u sentora-node --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecated\)"' && bad "the agent logged PHP problems" || ok "no PHP problems in the agent"
 
