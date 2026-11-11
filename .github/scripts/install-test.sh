@@ -175,6 +175,22 @@ in_box 'echo "$(date "+%b %d %H:%M:%S") imap(test@example.test): Error: sentora-
     [ $ok -eq 1 ] && echo "PROBLEMS: PASSED" || { tail -5 $P; echo "PROBLEMS: FAILED"; }' > "$OUT/problems-log.txt" 2>&1
 cat "$OUT/problems-log.txt"
 
+say "Hardening score (Server Monitor's card: the check queued by the panel's user, run by root)"
+in_box 'H=/var/sentora/logs/hardening.json; rm -f $H
+    runuser -u sentora -- /etc/sentora/panel/bin/zsudo hardening-check || { echo "HARDENING: FAILED (could not queue: $?)"; exit 0; }
+    for i in $(seq 1 150); do [ -s $H ] && break; sleep 2; done
+    [ -s $H ] || { echo "HARDENING: FAILED (no report after 300 s)"; tail -5 /var/sentora/logs/zsudo.log; exit 0; }
+    echo "  report written within $((i * 2)) s: $(stat -c "%a %U %G" $H)"
+    php -r '"'"'$j = json_decode(file_get_contents("/var/sentora/logs/hardening.json"), true);
+        if (!is_array($j) || !isset($j["score"], $j["checks"])) { echo "HARDENING: FAILED (not a report)\n"; exit; }
+        $by = array(); foreach ($j["checks"] as $c) { if ($c["status"] !== "ok") { $by[] = "  " . strtoupper($c["status"]) . " [" . $c["section"] . "] " . $c["text"]; } }
+        echo "  score " . $j["score"] . " / 100 from " . count($j["checks"]) . " checks\n" . implode("\n", $by) . "\n";
+        $h = json_decode(@file_get_contents("/var/sentora/logs/hardening-history.json"), true);
+        echo is_array($h) && count($h) > 0 ? "  history: " . count($h) . " result(s)\n" : "  no history\n";
+        if ($j["score"] > 0 && is_array($h) && count($h) > 0) { echo "HARDENING: PASSED\n"; } else { echo "HARDENING: FAILED\n"; }'"'"'
+    [ "$(stat -c "%a %U %G" $H)" = "640 root sentora" ] || echo "HARDENING: FAILED (owner or mode)"' > "$OUT/hardening.txt" 2>&1
+cat "$OUT/hardening.txt"
+
 say "ModSecurity through the Web Hardening add-on (on, attacks, watch only, off)"
 docker cp "$INST/sentora-repo/php_hardening.zpp" "$NAME:/root/php_hardening.zpp"
 docker cp "$INST/.github/scripts/modsec-test.sh" "$NAME:/root/modsec-test.sh"
@@ -200,6 +216,7 @@ if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check ha
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
+if ! grep -q 'HARDENING: PASSED' "$OUT/hardening.txt" || grep -q 'HARDENING: FAILED' "$OUT/hardening.txt"; then echo "::error::$SYS: the hardening report was not written as it should (hardening.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
