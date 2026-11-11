@@ -2,6 +2,10 @@
 
 Service configuration, database setup and build sources used by the Sentora-2027 installers for **Ubuntu 26.04**, **Debian 13** and **AlmaLinux 10**.
 
+**Website:** [sentorareloaded2027.github.io](https://sentorareloaded2027.github.io): screenshots, the install command for every system, and the Windows setup.
+
+[![Website](https://img.shields.io/badge/website-sentorareloaded2027.github.io-1f7fae)](https://sentorareloaded2027.github.io)
+
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white)
 ![Debian](https://img.shields.io/badge/Debian-13-A81D33?logo=debian&logoColor=white)
 ![AlmaLinux](https://img.shields.io/badge/AlmaLinux-10-0F4266?logo=almalinux&logoColor=white)
