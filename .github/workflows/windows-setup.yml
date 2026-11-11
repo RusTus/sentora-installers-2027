@@ -10,10 +10,14 @@ on:
       ref:
         description: Branch to build from
         default: master2027
+      test_release:
+        description: Also put it on the test release "windows-setup-test" (a public link for trying it before a real release)
+        type: boolean
+        default: false
   workflow_call:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -49,3 +53,17 @@ jobs:
           name: windows-setup
           path: windows/output/Sentora2027Setup.exe
           retention-days: 14
+
+      - name: The test release (only when asked)
+        if: ${{ inputs.test_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'windows-setup-test'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --prerelease --latest=false --target master2027 --title 'Windows setup (test build)' --notes 'A test build of Sentora2027Setup.exe, for trying it before a release. The released one is on the current release.'
+          }
+          gh release upload $tag windows\output\Sentora2027Setup.exe --clobber --repo $env:GITHUB_REPOSITORY
+          "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/Sentora2027Setup.exe"
