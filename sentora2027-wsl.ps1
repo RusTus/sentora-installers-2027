@@ -375,11 +375,18 @@ if ($DefenderExclusion -eq 'Yes' -and $vhdx) {
 }
 
 WriteLaunchers $InstallPath
-Say "in ${InstallPath}: Sentora Status, Sentora Backup and Sentora Uninstall (double-click; each asks for administrator rights)"
 
-Step "Done"
-Say "Panel:  https://$PanelName  (user zadmin; the passwords are in /root/passwords.txt inside Sentora:"
-Say "        wsl -d Sentora -- cat /root/passwords.txt)"
-Say "Check:  wsl -d Sentora -- sentora-post-install-check   and   wsl -d Sentora -- sentora-smoke-test"
-Say "Later:  in ${InstallPath}: Sentora Status, Sentora Backup, Sentora Uninstall (or this script with -Status, -Backup <folder>, -Uninstall)"
+# the last thing on screen: how to log in (the installer's own summary above has scrolled away by now)
+$zpw = (InLinux "sed -n 's/^zadmin Password *: *//p' /root/passwords.txt" | Out-String).Trim()
+Write-Host ""
+Write-Host "  Sentora is ready                                                      " -ForegroundColor White -BackgroundColor DarkGreen
+Write-Host ""
+Write-Host ("  {0,-12}" -f 'Panel') -NoNewline; Write-Host "https://$PanelName" -ForegroundColor White
+Write-Host ("  {0,-12}" -f 'Username') -NoNewline; Write-Host 'zadmin' -ForegroundColor White
+Write-Host ("  {0,-12}" -f 'Password') -NoNewline; Write-Host $zpw -ForegroundColor Yellow
+Say ""
+Say "All the passwords this install made (MySQL, Matomo):  wsl -d Sentora -- cat /root/passwords.txt"
+Say "Check it:   wsl -d Sentora -- sentora-post-install-check    then    wsl -d Sentora -- sentora-smoke-test"
+Say "In ${InstallPath}:  Sentora Status, Sentora Backup, Sentora Uninstall (double-click)"
+Say "(No restart needed: Sentora already runs, and starts again with Windows.)"
 Start-Process "https://$PanelName"
