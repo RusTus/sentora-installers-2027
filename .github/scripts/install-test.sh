@@ -145,6 +145,18 @@ in_box 'sentora-smoke-test --keep' > "$OUT/smoke-test.txt" 2>&1
 grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped early; its last lines:)"; tail -20 "$OUT/smoke-test.txt"; }
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
+say "Root actions from the panel (zsudo's queue, as the panel's user)"
+in_box 'P=/etc/sentora/panel/bin/zsudo; ls -l $P | cut -d" " -f1,3,4
+    if [ -u $P ]; then echo "ZSUDO: FAILED (still set-uid)"; exit 0; fi
+    runuser -u sentora -- $P service apache2 "reload;id" > /dev/null 2>&1; rc=$?
+    [ $rc -eq 2 ] && echo "  a forbidden action: refused (2)" || { echo "ZSUDO: FAILED (a forbidden action got $rc)"; exit 0; }
+    rm -f /var/sentora/logs/daemon-panel-run.log
+    runuser -u sentora -- $P daemon-run || { echo "ZSUDO: FAILED (could not queue: $?)"; exit 0; }
+    for i in $(seq 1 60); do [ -s /var/sentora/logs/daemon-panel-run.log ] && break; sleep 2; done
+    if [ -s /var/sentora/logs/daemon-panel-run.log ]; then echo "  daemon-run queued by the panel'"'"'s user, run by root within $((i * 2)) s"; echo "ZSUDO: PASSED"
+    else echo "ZSUDO: FAILED (the queued daemon-run did not run)"; systemctl status sentora-zsudo.path sentora-zsudo.service --no-pager 2>&1 | tail -20; ls -la /var/lib/sentora/zsudo/queue; fi' > "$OUT/zsudo-test.txt" 2>&1
+cat "$OUT/zsudo-test.txt"
+
 say "ModSecurity through the Web Hardening add-on (on, attacks, watch only, off)"
 docker cp "$INST/sentora-repo/php_hardening.zpp" "$NAME:/root/php_hardening.zpp"
 docker cp "$INST/.github/scripts/modsec-test.sh" "$NAME:/root/modsec-test.sh"
@@ -168,6 +180,7 @@ say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
+if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
 [ $ok -eq 1 ] && echo "$SYS: installed, post-install check without FAIL, smoke test passed, ModSecurity works"

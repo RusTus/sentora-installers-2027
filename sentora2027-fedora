@@ -1245,18 +1245,15 @@ chmod 644 /etc/sentora/update.conf
 chmod 700 /var/lib/sentora/sessions /var/lib/sentora/tmp /var/lib/sentora/roundcube /var/lib/sentora/module-uploads
 
 #--- Prepare zsudo (the panel and daemon use it to reload Apache and run root tasks)
-# zsudo only runs a fixed list of actions (see bin/zsudo.c in the core); only root and
-# the panel's user may execute it - not the hosted sites. Its source is part of the core,
-# so sentora-update builds it again when an update changes it (it remembers the source's
-# SHA-256 in /etc/sentora/zsudo.sha256)
-if cc -O2 -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c; then
-    chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo
-    chmod 4750 $PANEL_PATH/panel/bin/zsudo
-    sha256sum $PANEL_PATH/panel/bin/zsudo.c | cut -d' ' -f1 > /etc/sentora/zsudo.sha256
-else
-    echo -e "\nERROR: zsudo did not compile. Sentora will not be able to reload Apache."
-    echo "Check $PANEL_PATH/panel/bin/zsudo.c and build-essential, then run:"
-    echo "  cc -o $PANEL_PATH/panel/bin/zsudo $PANEL_PATH/panel/bin/zsudo.c && chown root:$PANEL_USER $PANEL_PATH/panel/bin/zsudo && chmod 4750 $PANEL_PATH/panel/bin/zsudo"
+# zsudo only accepts a fixed list of actions (see bin/zsudo.c in the core) and is not set-uid: it
+# leaves the request in a queue only the panel's user may write, and a root service
+# (sentora-zsudo.path / .service) checks it against the same list again and runs it. Only root and
+# the panel's user may execute it - not the hosted sites. sentora-zsudo-setup builds it and sets up
+# the queue and the service; sentora-update runs it again when an update changes zsudo's source.
+if ! bash $PANEL_PATH/panel/bin/sentora-zsudo-setup "$PANEL_USER"; then
+    echo -e "\nERROR: zsudo was not set up. Sentora will not be able to reload Apache from the panel."
+    echo "Check $PANEL_PATH/panel/bin/zsudo.c and the C compiler, then run:"
+    echo "  bash $PANEL_PATH/panel/bin/sentora-zsudo-setup $PANEL_USER"
 fi
 
 #--- Resolv.conf protect
@@ -2255,7 +2252,7 @@ chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
 chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup 2> /dev/null
-chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 4750 $PANEL_PATH/panel/bin/zsudo
+chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
 # daemon makes them, so a break-in to the panel can not plant code root would run
@@ -2324,6 +2321,8 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
     fc httpd_sys_rw_content_t "$PANEL_PATH/panel/etc/tmp(/.*)?"
     fc httpd_sys_rw_content_t "$PANEL_PATH/panel/etc/apps/matomo/(tmp|config)(/.*)?"
     fc httpd_sys_rw_content_t "/var/lib/sentora(/.*)?"
+    # the panel reads sentora-update's view of a run (only root writes it): Panel Update's page
+    fc httpd_sys_content_t "/var/lib/sentora-update(/.*)?"
     fc httpd_sys_content_t "$PANEL_CONF/apache(/.*)?"
     fc httpd_config_t "$PANEL_CONF/apache/.*\.conf"
     fc cert_t "$PANEL_CONF/ssl(/.*)?"
@@ -2348,7 +2347,8 @@ if [ "$SELINUX_ON" = 1 ] && command -v semanage > /dev/null 2>&1; then
     fc httpd_log_t "/var/lib/sentora/(sentora|phpmyadmin)-auth\.log"
     # Dovecot's other logs (Fedora labels only dovecot.log for it)
     fc dovecot_var_log_t "/var/log/dovecot-(info|debug)\.log"
-    restorecon -RF "$PANEL_PATH" "$PANEL_DATA" /var/lib/sentora > /dev/null 2>&1
+    install -d -o root -g root -m 755 /var/lib/sentora-update
+    restorecon -RF "$PANEL_PATH" "$PANEL_DATA" /var/lib/sentora /var/lib/sentora-update > /dev/null 2>&1
     # files made by this installer before here, which got the label of their folder, not their own
     restorecon -RF /var/log/dovecot.log /var/log/dovecot-info.log /var/log/dovecot-debug.log /var/log/clamav \
         /run/clamav-milter /run/spamass-milter > /dev/null 2>&1
