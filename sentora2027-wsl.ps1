@@ -299,6 +299,9 @@ InLinux 'for i in $(seq 1 60); do s=$(systemctl is-system-running 2>/dev/null); 
 if ($LASTEXITCODE -ne 0) { Fail "systemd did not start inside Sentora (wsl -d Sentora, then: systemctl status)." }
 
 Step "Sentora's installer (inside Linux; it asks the rest of its questions there)"
+# the installer takes the panel's name and address together: the address the internet sees (as a server's
+# install suggests) when Sentora is reached from the network, this PC's own address when only from here
+$ipArg = if ($Reach -eq 'Network') { 'public' } else { 'local' }
 $tz = (Get-TimeZone).Id
 # (Windows' time zone as Linux names it: PowerShell 7 knows the conversion; otherwise the installer asks)
 $tzArg = ''
@@ -306,7 +309,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
     $out = $null
     if ([System.TimeZoneInfo]::TryConvertWindowsIdToIanaId($tz, [ref]$out)) { $tzArg = "-t $out" }
 }
-InLinux "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName $tzArg"
+InLinux "apt-get -qq update >/dev/null && apt-get -qq -y install wget ca-certificates >/dev/null; cd /root && wget -q -O sentora2027-install $Release/sentora2027-install && ADMIN_EMAIL='$AdminEmail' bash sentora2027-install -d $PanelName -i $ipArg $tzArg"
 $installed = (InLinux 'test -f /etc/sentora/panel/cnf/db.php && echo yes' | Out-String).Trim()
 if ($installed -ne 'yes') { Fail "Sentora's installer did not finish (its log is in /root inside Sentora: wsl -d Sentora)." }
 # (the installer may have restarted Linux at its end: it starts again here)
