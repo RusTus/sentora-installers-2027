@@ -146,7 +146,8 @@ foreach ($n in 'Status', 'Backup', 'Uninstall') {
 [void] $menu.Items.Add('-')
 $menu.Items.Add('Hide this icon (until the next logon)').add_Click({ $script:tray.Visible = $false; [System.Windows.Forms.Application]::Exit() })
 $script:tray.ContextMenuStrip = $menu
-$script:tray.add_MouseDoubleClick({ Start-Process $script:panel })
+# one click (left button) opens the panel's login page; the right button opens the menu
+$script:tray.add_MouseClick({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Start-Process $script:panel } })
 function PanelUp {
     $c = New-Object System.Net.Sockets.TcpClient
     try { return ($c.ConnectAsync('127.0.0.1', 443).Wait(1500) -and $c.Connected) } catch { return $false } finally { $c.Close() }
