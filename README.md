@@ -71,6 +71,8 @@ powershell -ExecutionPolicy Bypass -File .\sentora2027-wsl.ps1
 
 Or the setup program: [Sentora2027Setup.exe](https://github.com/RusTus/sentora-installers-2027/releases/download/current/Sentora2027Setup.exe) (built from `windows/sentora2027-setup.iss` by **Actions > Windows setup** on every release). It runs the same script, registers **Sentora 2027** in Settings > Apps and the Start menu, updates in place when a newer one runs, and uninstalls everything from Settings > Apps (backups stay). Both ways leave Sentora Status, Backup and Uninstall in Sentora's folder, a Sentora Panel shortcut on every desktop and a tray icon (green while the panel answers). It is not signed: SmartScreen shows "Windows protected your PC" once (More info > Run anyway).
 
+Or Docker: the ready-made image `ghcr.io/rustus/sentora2027` (Debian 13 inside; `docker/` in this repository) installs Sentora the first time a container starts, so every container gets its own passwords. It runs without `--privileged`, and is built, installed, checked and smoke-tested by **Actions > Docker image** on every release, and published only when it passes. The command and what each option is for: the core's README, [In Docker](https://github.com/RusTus/sentora-core-2027#in-docker).
+
 Or each system's own installer. On a clean Ubuntu 26.04 server, as root:
 
 ```bash
