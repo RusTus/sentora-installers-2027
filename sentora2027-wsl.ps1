@@ -286,6 +286,15 @@ if ($Shortcuts) {
 
 # --- -Uninstall --------------------------------------------------------------------------------------
 if ($Uninstall) {
+    # installed with Sentora2027Setup.exe: its uninstaller does all of it (this script and the Settings > Apps
+    # entry), so nothing of the setup is left behind
+    $here = if (SentoraDiskImage) { Split-Path (SentoraDiskImage) } else { Split-Path $PSCommandPath }
+    $unins = Join-Path $here 'unins000.exe'
+    if (-not $Yes -and (Test-Path -LiteralPath $unins)) {
+        Say "Sentora was installed with Sentora2027Setup.exe: its uninstaller (the same as Settings > Apps) removes it."
+        Start-Process -FilePath $unins
+        exit 0
+    }
     Step "Removing Sentora from this PC"
     Write-Host "  This deletes the Sentora system with all its websites, mail and databases." -ForegroundColor Yellow
     if (-not $Yes -and (Ask "Type REMOVE to go on" "no") -cne 'REMOVE') { Say "Nothing was removed."; exit 0 }
@@ -310,8 +319,11 @@ if ($Uninstall) {
     foreach ($f in @($Launchers.Keys) + 'sentora2027-wsl.ps1') { Remove-Item -LiteralPath (Join-Path $folder $f) -ErrorAction SilentlyContinue }
     if ((Test-Path $folder) -and -not (Get-ChildItem -LiteralPath $folder -Force)) { Remove-Item -LiteralPath $folder }
     Say "Sentora's double-click files in ${folder}: removed (a Backups folder there stays)"
-    Say "The startup task and the Defender exclusion (if any) are removed too. WSL itself stays installed;"
-    Say "the settings this script put in $env:USERPROFILE\.wslconfig stay (a copy from before: .wslconfig.sentora-orig)."
+    # the WSL settings: as they were before Sentora (or none, when Sentora made the file)
+    $cfg = Join-Path $env:USERPROFILE '.wslconfig'
+    if (Test-Path -LiteralPath "$cfg.sentora-orig") { Move-Item -LiteralPath "$cfg.sentora-orig" -Destination $cfg -Force; Say "$cfg`: put back as it was before Sentora" }
+    elseif (Test-Path -LiteralPath $cfg) { Remove-Item -LiteralPath $cfg; Say "$cfg`: removed (Sentora had made it)" }
+    Say "The startup task and the Defender exclusion (if any) are removed too. WSL itself stays installed."
     exit 0
 }
 
