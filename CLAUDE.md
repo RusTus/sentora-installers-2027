@@ -46,7 +46,7 @@ released together.
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
-## Where we are (handoff, 2026-11-10, after release 2027.70)
+## Where we are (handoff, 2026-11-11, after release 2027.71)
 
 Read this first in a new session; the CHANGELOG has every change in detail.
 
@@ -75,8 +75,10 @@ switch SELinux off ("less secure, not done"). **AppArmor (Debian, Ubuntu, since 
 program go in `preconf/apparmor/local/<profile>` (installers repo), which the installers' `aa_sentora` writes into
 /etc/apparmor.d/local/<profile> between `# BEGIN Sentora` / `# END Sentora` and reloads. So far: BIND (usr.sbin.named)
 and ProFTPD (proftpd, Ubuntu only). MySQL and ClamAV need nothing. Find what a program needs with its profile in
-complain mode (`aa-complain`, reboot, use it, then `journalctl -k -b | grep apparmor=`). Tested on the owner's
-Ubuntu VM (enforcing, smoke 26/26, nothing refused); Debian only on GitHub so far. Servers installed before keep
+complain mode (`aa-complain`, reboot, use it, then `journalctl -k -b | grep apparmor=`). Released in 2027.71 and tested with
+fresh installs on the owner's VMs (2026-11-11): Ubuntu 26.04 100 OK / 0 FAIL, smoke 26/26 (BIND, MySQL, ProFTPD,
+ClamAV confined); Debian 13 96 OK / 0 FAIL, smoke 26/26 (BIND, ClamAV confined); nothing refused. (Ubuntu's own
+systemd-detect-virt profile logs refusals at boot: the system's, not Sentora's; the check counts only Sentora's services.) Servers installed before keep
 AppArmor off (the post-install check warns): no update step switches it on yet.
 
 **PHP bundles:** built on GitHub by Actions > PHP bundles (system ubuntu26.04, debian13 or alma10;
@@ -119,6 +121,7 @@ the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer 
 releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
 Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26. On the owner's Fedora 45 VM (2026-11-10, release 2027.70): post-install check 91 OK / 0 FAIL, smoke test 26/26 with SOGo, 7 minutes.
 
+**Released 2027.71 (2026-11-11):** AppArmor on for Debian and Ubuntu (see SELinux/AppArmor above).
 **Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
 systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
 
