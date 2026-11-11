@@ -9,6 +9,7 @@
 #     server wgets it from here), sentora-smoke-test, sentora-web-probe
 # Not touched: the PHP bundles and testssl_sh-3_2_5.zip (uploaded by hand; sentora-tls-check.sh
 # checks the testssl zip against its SHA-256).
+# Then the Docker image, tested and published (.github/workflows/docker-image.yml).
 # Run it from Actions > Release > Run workflow.
 #
 # A file is uploaded only when its content differs from the one on the release. git archive stamps
@@ -202,3 +203,16 @@ jobs:
                   --title "Sentora-$VERSION" --notes-file version-notes.md --latest=false
               echo "$TAG: made, with $(ls version-files | wc -l) files"
           fi
+
+  # The Docker image (ghcr.io/rustus/sentora2027): once the core's release of this version is out, it is
+  # built, installs itself on its first start, is checked and smoke-tested, and only then published
+  # (.github/workflows/docker-image.yml)
+  docker-image:
+    needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    uses: ./.github/workflows/docker-image.yml
+    with:
+      publish: true
+    permissions:
+      contents: read
+      packages: write

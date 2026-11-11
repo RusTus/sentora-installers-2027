@@ -3,13 +3,14 @@
 # given to docker run, so every container has its own passwords, keys and certificate. Run by
 # sentora-docker-firstboot.service; does nothing once /etc/sentora/.docker-installed exists.
 #
-#   SENTORA_DOMAIN  the panel's address, e.g. panel.example.com (needed)
+#   SENTORA_DOMAIN  the panel's address, e.g. panel.example.com (default: docker run --hostname)
 #   SENTORA_EMAIL   your email address, for server alerts (needed)
 #   SENTORA_IP      the server's IPv4 address, or public (default) or local
 #   TZ              time zone, e.g. America/Chicago (default UTC)
 #   ADMIN_NAME ADMIN_PHONE ADMIN_ADDRESS ADMIN_PROVINCE ADMIN_POSTALCODE ADMIN_COUNTRY
 #                   zadmin's profile (optional; changed later in the panel)
 #
+# FTP's passive ports are 61000-61099 in a container (see below).
 # Progress goes to the container's log (docker logs); passwords never do: they are in
 # /root/passwords.txt inside the container, readable by root only.
 set -uo pipefail
@@ -24,13 +25,14 @@ while IFS= read -r -d '' kv; do
     case "$kv" in SENTORA_*=*|ADMIN_*=*|TZ=*) export "${kv?}" ;; esac
 done < /proc/1/environ
 
-DOMAIN=$(printf '%s' "${SENTORA_DOMAIN:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+# (the panel's address: SENTORA_DOMAIN, or else the name given with docker run --hostname)
+DOMAIN=$(printf '%s' "${SENTORA_DOMAIN:-$(hostname -f 2> /dev/null || hostname)}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 EMAIL=${SENTORA_EMAIL:-${ADMIN_EMAIL:-}}
 IP=${SENTORA_IP:-public}
 TZONE=${TZ:-UTC}
 missing=0
 if [[ ! "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}$ ]]; then
-    say "SENTORA_DOMAIN is missing or not a host name: give the panel's address, e.g. -e SENTORA_DOMAIN=panel.example.com"
+    say "No panel address: start the container with the panel's name, e.g. --hostname panel.example.com"
     missing=1
 fi
 if [[ ! "$EMAIL" =~ ^[^@[:space:]]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$ ]]; then
@@ -60,6 +62,14 @@ if ! grep -q "Sentora is installed" "$SCREEN"; then
     say "The installation did not finish. Its screen: docker exec <container> cat $SCREEN"
     say "Its log: docker exec <container> sh -c 'cat /root/*_sentora_install.log'"
     exit 1
+fi
+# FTP's passive ports: a range Docker can publish (-p 61000-61099:61000-61099). Sentora's own
+# 60000-65535 overlaps the ports Linux uses for its outgoing connections (32768-60999), so a host
+# often has one of them in use and Docker can't publish the range; 100 ports = 100 transfers at once.
+FTPCONF=/etc/sentora/configs/proftpd/proftpd-mysql.conf
+if [ -f "$FTPCONF" ]; then
+    sed -i 's/^PassivePorts[[:space:]].*/PassivePorts\t\t\t61000 61099/' "$FTPCONF"
+    systemctl restart proftpd 2> /dev/null
 fi
 mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
 say "Sentora is installed: https://$DOMAIN"

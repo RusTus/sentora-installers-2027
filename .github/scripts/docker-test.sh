@@ -35,7 +35,7 @@ say "Starting it: docker run $FLAGS"
 docker rm -f "$NAME" > /dev/null 2>&1
 # shellcheck disable=SC2086
 docker run -d --name "$NAME" $FLAGS -h "$DOMAIN" \
-    -e SENTORA_DOMAIN="$DOMAIN" -e SENTORA_EMAIL=admin@example.com -e SENTORA_IP=local -e TZ=UTC \
+    -e SENTORA_EMAIL=admin@example.com -e SENTORA_IP=local -e TZ=UTC \
     "$IMAGE" > /dev/null || { echo "::error::the container did not start"; exit 1; }
 docker inspect "$NAME" --format 'privileged: {{.HostConfig.Privileged}}  caps: {{.HostConfig.CapAdd}}  security: {{.HostConfig.SecurityOpt}}' | tee "$OUT/container-config.txt"
 
@@ -83,6 +83,8 @@ echo "no password in the container's log"
 
 in_box 'head -c 32 /etc/sentora/panel/VERSION' | tr -cd 'A-Za-z0-9._-' > "$OUT/version.txt"
 echo "installed: Sentora-$(cat "$OUT/version.txt")"
+in_box "grep -h '^PassivePorts' /etc/sentora/configs/proftpd/proftpd-mysql.conf" | tee "$OUT/ftp-passive.txt"
+grep -qE '61000[[:space:]]+61099' "$OUT/ftp-passive.txt" || { echo "::error::FTP's passive ports are not 61000-61099"; exit 1; }
 
 say "Restarting the container (services must come back by themselves)"
 docker restart "$NAME" > /dev/null

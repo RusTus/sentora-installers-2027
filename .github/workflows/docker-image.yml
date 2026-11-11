@@ -28,7 +28,7 @@ env:
   # the documented way to run it: no --privileged; its own cgroup namespace, writable only there
   # (systemd needs it); NET_ADMIN for fail2ban's bans inside the container's own network; the ports
   # (DNS's 53 left out: the runner's own resolver has it, as on many hosts)
-  DOCUMENTED: --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN -p 80:80 -p 443:443 -p 21:21 -p 60000-65535:60000-65535 -p 25:25 -p 465:465 -p 587:587 -p 110:110 -p 143:143 -p 993:993 -p 995:995 -p 4190:4190
+  DOCUMENTED: --restart unless-stopped --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN -p 80:80 -p 443:443 -p 21:21 -p 61000-61099:61000-61099 -p 25:25 -p 465:465 -p 587:587 -p 110:110 -p 143:143 -p 993:993 -p 995:995 -p 4190:4190
   IMAGE_NAME: ghcr.io/rustus/sentora2027
 
 jobs:
@@ -61,6 +61,20 @@ jobs:
       - name: The runner's Docker
         run: |
           docker info --format 'Docker {{.ServerVersion}}, cgroup {{.CgroupVersion}} ({{.CgroupDriver}}), security: {{.SecurityOptions}}'
+      # (a release: the core's release of the same version must be out first, as the first start
+      # installs the core's current release; both repositories' releases run at about the same time)
+      - name: Wait for the core's release of this version
+        if: ${{ inputs.publish && matrix.flags == env.DOCUMENTED }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          want=$(gh api repos/RusTus/sentora-core-2027/contents/VERSION?ref=master2027 --jq .content | base64 -d | tr -cd '0-9.')
+          echo "core master2027: $want"; echo "$want" > want-version.txt
+          for _ in $(seq 1 90); do
+            gh release view "v$want" --repo RusTus/sentora-core-2027 > /dev/null 2>&1 && { echo "core release v$want is out"; exit 0; }
+            sleep 40
+          done
+          echo "::error::the core's release v$want did not appear within an hour"; exit 1
       - name: Build, first start, restart, check, smoke test
         env:
           DOCKER_FLAGS: ${{ matrix.flags }}
@@ -73,6 +87,7 @@ jobs:
         run: |
           VERSION=$(cat results/version.txt)
           [[ "$VERSION" =~ ^2027\.[0-9]+$ ]] || { echo "::error::no version from the test container ($VERSION)"; exit 1; }
+          [ "$VERSION" = "$(cat want-version.txt)" ] || { echo "::error::the container installed $VERSION, not $(cat want-version.txt)"; exit 1; }
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           for tag in "$VERSION" latest; do
             docker tag sentora2027:test "$IMAGE_NAME:$tag"
