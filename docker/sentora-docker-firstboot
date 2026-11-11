@@ -91,8 +91,9 @@ if mountpoint -q /backup; then
         BACKUP_NOTE="The nightly backup into /backup could not be switched on: do it in Admin > Backup Config > Off-server backup (no server, folder /backup)."
     fi
 fi
-mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
 say "Sentora is installed: https://$DOMAIN"
 say "Log in as zadmin. Its password and every other one: docker exec <container> cat /root/passwords.txt"
 say "Then, inside the container: sentora-post-install-check"
 [ -n "$BACKUP_NOTE" ] && say "$BACKUP_NOTE"
+# (last: whoever waits for this file then finds every line above in the log)
+mkdir -p /etc/sentora && date -u '+%Y-%m-%dT%H:%M:%SZ' > "$DONE"
