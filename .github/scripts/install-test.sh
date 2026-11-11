@@ -162,6 +162,19 @@ in_box 'P=/etc/sentora/panel/bin/zsudo; ls -l $P | cut -d" " -f1,3,4
     else echo "ZSUDO: FAILED (the queued daemon-run did not run)"; systemctl status sentora-zsudo.path sentora-zsudo.service --no-pager 2>&1 | tail -20; ls -la /var/lib/sentora/zsudo/queue; fi' > "$OUT/zsudo-test.txt" 2>&1
 cat "$OUT/zsudo-test.txt"
 
+say "Problems log (errors from the logs the panel can not read; never a password)"
+in_box 'echo "$(date "+%b %d %H:%M:%S") imap(test@example.test): Error: sentora-install-test problem line" >> /var/log/dovecot.log
+    echo "$(date "+%b %d %H:%M:%S") auth: Error: sentora-install-test password=Secret123 must never be copied" >> /var/log/dovecot.log
+    php -q /etc/sentora/panel/bin/daemon.php > /var/sentora/logs/daemon-last-run.log 2>&1
+    P=/var/sentora/logs/problems.log; ls -l $P | cut -d" " -f1,3,4
+    ok=1
+    grep -q "sentora-install-test problem line" $P && echo "  the test error is in it" || { echo "  the test error is NOT in it"; ok=0; }
+    grep -q "Secret123" $P && { echo "  a password line was copied"; ok=0; } || echo "  the password line was not copied"
+    [ "$(stat -c "%a %U %G" $P)" = "640 root sentora" ] || { echo "  its owner or mode is wrong"; ok=0; }
+    grep -q "ran daemon-run" /var/sentora/logs/zsudo.log && echo "  zsudo.log records the queued daemon-run" || { echo "  zsudo.log has no record"; ok=0; }
+    [ $ok -eq 1 ] && echo "PROBLEMS: PASSED" || { tail -5 $P; echo "PROBLEMS: FAILED"; }' > "$OUT/problems-log.txt" 2>&1
+cat "$OUT/problems-log.txt"
+
 say "ModSecurity through the Web Hardening add-on (on, attacks, watch only, off)"
 docker cp "$INST/sentora-repo/php_hardening.zpp" "$NAME:/root/php_hardening.zpp"
 docker cp "$INST/.github/scripts/modsec-test.sh" "$NAME:/root/modsec-test.sh"
@@ -186,6 +199,7 @@ ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
+if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
