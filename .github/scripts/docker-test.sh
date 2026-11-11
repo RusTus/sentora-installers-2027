@@ -48,6 +48,8 @@ start_and_install() { # log-file-suffix
         -e SENTORA_EMAIL=admin@example.com -e SENTORA_IP=local -e TZ=UTC \
         "$IMAGE" > /dev/null || { echo "::error::the container did not start"; exit 1; }
     docker inspect "$NAME" --format 'privileged: {{.HostConfig.Privileged}}  caps: {{.HostConfig.CapAdd}}  security: {{.HostConfig.SecurityOpt}}' | tee "$OUT/container-config.txt"
+    sleep 5; echo "PID 1's outputs: $(in_box 'ls -l /proc/1/fd/0 /proc/1/fd/1 /proc/1/fd/2 2>&1 | sed "s/.*fd/fd/"' | tr '\n' ';')"
+    echo "docker logs so far: $(docker logs "$NAME" 2>&1 | wc -l) lines"
     say "First start: Sentora installs itself"
     START=$(date +%s); state=''
     for _ in $(seq 1 450); do   # (up to 60 minutes)
