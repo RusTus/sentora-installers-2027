@@ -78,7 +78,14 @@ say "Starting Uptime Kuma for client1"
 CID=$(panel deploy uptime-kuma kuma)
 [[ "$CID" =~ ^[0-9]+$ ]] || { bad "deploy refused: $CID"; exit 1; }
 ok "panel queued container $CID"
-if wait_for 900 state_is "$CID" running > /dev/null; then ok "running (panel): $(panel state "$CID")"; else bad "not running after 15 minutes: $(panel state "$CID")"; fi
+running_or_error() { local s; s=$(panel state "$1"); case "$s" in running*|error*) echo "$s" ;; esac; }
+S=$(wait_for 900 running_or_error "$CID")
+if [[ "$S" == running* ]]; then ok "running (panel): $S"; else
+    bad "not running: $(panel state "$CID")"
+    panel log | tail -5
+    in_box 'getcap /usr/bin/newuidmap /usr/bin/newgidmap; grep sdh /etc/subuid /etc/subgid; loginctl list-users; ls -la /run/user; journalctl -u sentora-node --no-pager | tail -20'
+    exit 1
+fi
 in_box 'id sdh3' && ok "customer user sdh3" || bad "no user sdh3"
 in_box 'getent passwd sdh3 | cut -d: -f7' | grep -qx /sbin/nologin && ok "sdh3 can not log in" || bad "sdh3 has a login shell"
 in_box 'grep -q "^sdh3:" /etc/subuid && grep -q "^sdh3:" /etc/subgid' && ok "sdh3 has its own subordinate IDs" || bad "no subuid/subgid for sdh3"

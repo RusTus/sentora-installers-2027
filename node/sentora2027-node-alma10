@@ -86,7 +86,7 @@ else
     if command -v crb > /dev/null 2>&1; then run crb enable; else run dnf config-manager --set-enabled crb; fi
 fi
 rpm -q epel-release > /dev/null 2>&1 || die "EPEL could not be added (see $LOG)."
-run dnf -y install podman php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux \
+run dnf -y install podman php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus \
     || die "Could not install the packages (see $LOG)."
 php -r 'exit(function_exists("sodium_crypto_box_seal") && function_exists("curl_init") ? 0 : 1);' || die "PHP lacks sodium or curl (see $LOG)."
 if ! command -v caddy >/dev/null 2>&1; then
@@ -97,6 +97,15 @@ if ! command -v caddy >/dev/null 2>&1; then
     fi
 fi
 command -v caddy >/dev/null 2>&1 || die "Caddy is not there after installing it."
+# rootless Podman maps each customer's IDs with newuidmap/newgidmap, which need their file capabilities
+# (some server images lose them): put them back from the package when missing
+if ! getcap /usr/bin/newuidmap | grep -q cap_setuid || ! getcap /usr/bin/newgidmap | grep -q cap_setgid; then
+    run dnf -y reinstall shadow-utils
+    getcap /usr/bin/newuidmap | grep -q cap_setuid && getcap /usr/bin/newgidmap | grep -q cap_setgid \
+        || die "newuidmap/newgidmap have no capabilities (getcap): rootless containers can not run."
+    say "   newuidmap/newgidmap had lost their capabilities: shadow-utils reinstalled."
+fi
+run systemctl start systemd-logind
 run systemctl enable --now chronyd
 
 say "2/6 Limits for the customers' containers (cgroups)..."

@@ -287,15 +287,43 @@ class snode
                 }
             }
         }
+        $e = self::Session($user);
+        if ($e !== '') {
+            return $e;
+        }
+        // (its containers with --restart start again after a restart of the server)
+        if (!is_file(self::$home . '/' . $user . '/.config/systemd/user/default.target.wants/podman-restart.service')) {
+            $r = self::AsUser($user, array('systemctl', '--user', 'enable', 'podman-restart.service'));
+            if ($r[0] !== 0) {
+                return 'podman-restart: ' . self::Tail($r[1]);
+            }
+        }
+        return '';
+    }
+
+    /**
+     * The user's own systemd session (it lingers: it runs without a login, and starts with the server).
+     */
+    static function Session($user)
+    {
+        $uid = self::Uid($user);
+        if ($uid < 0) {
+            return 'no user ' . $user;
+        }
+        if (is_dir(self::$run . '/' . $uid) && is_file(self::$run . '/' . $uid . '/bus')) {
+            return '';
+        }
+        $l = self::Run(array('loginctl', 'enable-linger', $user));
+        if ($l[0] !== 0) {
+            return 'loginctl enable-linger: ' . self::Tail($l[1]);
+        }
+        self::Run(array('systemctl', 'start', 'user@' . $uid . '.service'), null, 60);
+        for ($i = 0; $i < 30 && !(is_dir(self::$run . '/' . $uid) && is_file(self::$run . '/' . $uid . '/bus')); $i++) {
+            sleep(1);
+        }
         if (!is_dir(self::$run . '/' . $uid)) {
-            self::Run(array('loginctl', 'enable-linger', $user));
-            for ($i = 0; $i < 30 && !is_dir(self::$run . '/' . $uid); $i++) {
-                sleep(1);
-            }
-            if (!is_dir(self::$run . '/' . $uid)) {
-                return 'the user\'s session did not start (' . self::$run . '/' . $uid . ')';
-            }
-            self::AsUser($user, array('systemctl', '--user', 'enable', '--now', 'podman-restart.service'));
+            $st = self::Run(array('systemctl', 'status', '--no-pager', '--lines', '5', 'user@' . $uid . '.service'), null, 30);
+            return 'the user\'s session did not start (' . self::$run . '/' . $uid . '): ' . self::Tail($st[1]);
         }
         return '';
     }
@@ -313,6 +341,10 @@ class snode
 
     static function Podman($user, array $args, $timeout = 600)
     {
+        $e = self::Session($user);
+        if ($e !== '') {
+            return array(125, $e);
+        }
         return self::AsUser($user, array_merge(array('podman'), $args), $timeout);
     }
 

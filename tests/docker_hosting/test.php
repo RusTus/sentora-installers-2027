@@ -258,7 +258,7 @@ check(strpos($o, 'create container ' . $c1['dc_id_pk'] . ': ok') !== false && st
 $cl = calls();
 check(strpos($cl, 'useradd --create-home --home-dir ' . getenv('SNODE_HOME') . '/sdh3 --shell /sbin/nologin') !== false && substr_count($cl, 'useradd') === 1, 'one Linux user for the customer (sdh3), no login', $cl);
 check(strpos(file_get_contents(getenv('SNODE_SUBID') . '/subuid'), 'sdh3:100000:65536') !== false, 'its own subordinate IDs');
-check(strpos($cl, 'loginctl enable-linger sdh3') !== false && strpos($cl, 'systemctl --user enable --now podman-restart.service (as sdh3)') !== false, 'lingering, and its containers start again after a restart');
+check(strpos($cl, 'loginctl enable-linger sdh3') !== false && strpos($cl, 'systemctl --user enable podman-restart.service (as sdh3)') !== false, 'lingering, and its containers start again after a restart');
 $args = file(getenv('FAKE_DIR') . '/podman/sdh3/c/sdh-' . $c1['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
 $a = implode(' ', $args);
 check(strpos($a, '--cpus 0.50 --memory 256m --memory-swap 256m --pids-limit 1024') !== false && strpos($a, '--publish 127.0.0.1:20000:3001') !== false
