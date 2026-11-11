@@ -46,7 +46,7 @@ released together.
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
-## Where we are (handoff, 2026-11-11, after release 2027.72)
+## Where we are (handoff, 2026-11-11, after release 2027.73)
 
 Read this first in a new session; the CHANGELOG has every change in detail.
 
@@ -121,9 +121,13 @@ the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer 
 releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
 Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26. On the owner's Fedora 45 VM (2026-11-10, release 2027.70): post-install check 91 OK / 0 FAIL, smoke test 26/26 with SOGo, 7 minutes.
 
+**Released 2027.73 (2026-11-11):** Sentora2027Setup.exe (Inno Setup, `windows/sentora2027-setup.iss` in the installers repo, built by
+Actions > Windows setup on every release; `test_release` puts a test build on the `windows-setup-test` release for a public link):
+Sentora 2027 in Settings > Apps and the Start menu, the same PowerShell script inside (-FromSetup, -Yes), updates in place (fixed AppId),
+uninstalls cleanly (.wslconfig put back). Tested on the owner's Windows 11 VM. **Website:** SentoraReloaded2027/SentoraReloaded2027.github.io
+(https://sentorareloaded2027.github.io, one index.html on `main`, GitHub Pages); only tested facts on it.
 **Released 2027.72 (2026-11-11):** Windows (WSL) fixes from the owner's first run, login block, double-click Status/Backup/Uninstall,
 Sentora Panel desktop shortcut, tray icon (green while port 443 answers, one click opens the panel), no disk alerts for read-only disks.
-On master2027 since: backups leave out the "cannot archive sockets" warnings.
 **Released 2027.71 (2026-11-11):** AppArmor on for Debian and Ubuntu (see SELinux/AppArmor above).
 **Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
 systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
