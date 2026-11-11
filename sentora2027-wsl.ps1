@@ -24,6 +24,7 @@
       -Backup <folder>         the whole Sentora system in one file (wsl --export); a Windows scheduled
                                task can run it nightly. Sentora's own backups (Admin > Backup Config) work too.
       -Uninstall               removes the Sentora WSL system and everything this script added to Windows
+      -Shortcuts               (again) the double-click files, the desktop shortcut and the tray icon
 
     Note: SELinux and AppArmor do not run inside WSL, and Windows updates restart the PC (and Sentora
     with it). For production hosting a Linux server (or a virtual machine) is the better home.
@@ -45,7 +46,8 @@ param(
     [ValidateSet('Yes', 'No')] [string] $DefenderExclusion,
     [switch] $Status,
     [string] $Backup,
-    [switch] $Uninstall
+    [switch] $Uninstall,
+    [switch] $Shortcuts
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,13 +113,92 @@ function SentoraDiskImage() {
 # Everything in one place: a copy of this script in Sentora's folder, and a double-click file next to it
 # for each command (each asks for administrator rights itself and keeps its window open to read)
 $Launchers = [ordered]@{ 'Sentora Status.cmd' = '-Status'; 'Sentora Backup.cmd' = '-Backup \"%~dp0Backups\"'; 'Sentora Uninstall.cmd' = '-Uninstall' }
+# The tray icon (written to Sentora's folder as sentora-tray.ps1, started at every user's logon): green when
+# the panel answers on this PC (port 443), red when it does not. It only looks; it changes nothing.
+$TrayScript = @'
+param([string] $PanelName = 'localhost', [string] $Folder = $PSScriptRoot)
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$created = $false
+$mutex = New-Object System.Threading.Mutex($true, 'Local\SentoraTray', [ref] $created)
+if (-not $created) { exit }
+function Dot([System.Drawing.Color] $Color) {
+    $bmp = New-Object System.Drawing.Bitmap 16, 16
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush $Color), 2, 2, 12, 12)
+    $g.DrawEllipse((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(110, 0, 0, 0)), 1), 2, 2, 12, 12)
+    $g.Dispose()
+    return [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+}
+$script:green = Dot ([System.Drawing.Color]::FromArgb(46, 160, 67))
+$script:red = Dot ([System.Drawing.Color]::FromArgb(207, 34, 46))
+$script:tray = New-Object System.Windows.Forms.NotifyIcon
+$script:panel = "https://$PanelName"
+$script:folder = $Folder
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$menu.Items.Add('Open the panel').add_Click({ Start-Process $script:panel })
+[void] $menu.Items.Add('-')
+foreach ($n in 'Status', 'Backup', 'Uninstall') {
+    $item = $menu.Items.Add($n)
+    $item.Tag = Join-Path $Folder "Sentora $n.cmd"
+    $item.add_Click({ param($s) if (Test-Path -LiteralPath $s.Tag) { Start-Process -FilePath $s.Tag } })
+}
+[void] $menu.Items.Add('-')
+$menu.Items.Add('Hide this icon (until the next logon)').add_Click({ $script:tray.Visible = $false; [System.Windows.Forms.Application]::Exit() })
+$script:tray.ContextMenuStrip = $menu
+$script:tray.add_MouseDoubleClick({ Start-Process $script:panel })
+function PanelUp {
+    $c = New-Object System.Net.Sockets.TcpClient
+    try { return ($c.ConnectAsync('127.0.0.1', 443).Wait(1500) -and $c.Connected) } catch { return $false } finally { $c.Close() }
+}
+$script:last = $null
+function Check {
+    $up = PanelUp
+    if ($up) { $script:tray.Icon = $script:green; $script:tray.Text = 'Sentora: the panel is up' }
+    else { $script:tray.Icon = $script:red; $script:tray.Text = 'Sentora: the panel does not answer' }
+    if ($null -ne $script:last -and $up -ne $script:last) {
+        $msg = if ($up) { 'The panel is up again.' } else { 'The panel stopped answering.' }
+        $script:tray.ShowBalloonTip(5000, 'Sentora', $msg, [System.Windows.Forms.ToolTipIcon]::Info)
+    }
+    $script:last = $up
+}
+$script:tray.Visible = $true
+Check
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 30000
+$timer.add_Tick({ Check })
+$timer.Start()
+[System.Windows.Forms.Application]::Run()
+$script:tray.Dispose()
+'@
+$TrayLink = Join-Path ([Environment]::GetFolderPath('CommonStartup')) 'Sentora tray.lnk'
+function WriteTray([string] $Folder, [string] $Panel) {
+    $file = Join-Path $Folder 'sentora-tray.ps1'
+    Set-Content -LiteralPath $file -Value $TrayScript -Encoding UTF8
+    # every user's logon starts it without a window (conhost --headless: no console flashing up)
+    $ws = New-Object -ComObject WScript.Shell
+    $lnk = $ws.CreateShortcut($TrayLink)
+    $lnk.TargetPath = Join-Path $env:WINDIR 'System32\conhost.exe'
+    $lnk.Arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$file`" -PanelName $Panel"
+    $lnk.Save()
+    # and now, for whoever is logged in: through Explorer, so it runs as that user, not as administrator
+    Start-Process explorer.exe -ArgumentList "`"$TrayLink`""
+}
+function RemoveTray([string] $Folder) {
+    Remove-Item -LiteralPath $TrayLink -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*sentora-tray.ps1*' } | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null }
+    Remove-Item -LiteralPath (Join-Path $Folder 'sentora-tray.ps1') -ErrorAction SilentlyContinue
+}
+
 # the panel's login page on the desktop of every user of this PC (Windows' shared Public Desktop)
 $PanelShortcut = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Sentora Panel.url'
 function WritePanelShortcut([string] $Url) {
     Set-Content -LiteralPath $PanelShortcut -Value @('[InternetShortcut]', "URL=$Url") -Encoding ASCII
 }
 function WriteLaunchers([string] $Folder) {
-    Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $Folder 'sentora2027-wsl.ps1') -Force
+    $copy = Join-Path $Folder 'sentora2027-wsl.ps1'
+    if ($PSCommandPath -ne $copy) { Copy-Item -LiteralPath $PSCommandPath -Destination $copy -Force }
     foreach ($f in $Launchers.Keys) {
         $line = '@powershell -NoProfile -Command "Start-Process powershell -Verb RunAs -ArgumentList ''-NoExit -ExecutionPolicy Bypass -File \"%~dp0sentora2027-wsl.ps1\" ' + $Launchers[$f] + '''"'
         Set-Content -LiteralPath (Join-Path $Folder $f) -Value $line -Encoding ASCII
@@ -178,6 +259,20 @@ if ($Backup) {
     exit 0
 }
 
+# --- -Shortcuts: the double-click files, the desktop shortcut and the tray icon for an installed Sentora ---
+if ($Shortcuts) {
+    if (-not (SentoraExists)) { Fail "Sentora is not installed here." }
+    $vhdx = SentoraDiskImage
+    $folder = if ($vhdx) { Split-Path $vhdx } else { Fail "Sentora's folder was not found." }
+    $line = Get-Content $HostsFile -ErrorAction SilentlyContinue | Where-Object { $_ -match '#\s*Sentora$' } | Select-Object -First 1
+    $panel = if ($line) { ($line -split '\s+')[1] } else { Ask "The panel's name" 'localhost' }
+    WriteLaunchers $folder
+    WritePanelShortcut "https://$panel"
+    WriteTray $folder $panel
+    Say "in ${folder}: Sentora Status, Sentora Backup, Sentora Uninstall; on every desktop: Sentora Panel; and the tray icon"
+    exit 0
+}
+
 # --- -Uninstall --------------------------------------------------------------------------------------
 if ($Uninstall) {
     Step "Removing Sentora from this PC"
@@ -197,6 +292,7 @@ if ($Uninstall) {
         Set-Content -Path $HostsFile -Value $lines -Encoding ASCII
         Say "the panel's line in the hosts file: removed"
     }
+    RemoveTray $folder
     Remove-Item -LiteralPath $PanelShortcut -ErrorAction SilentlyContinue
     Say "the Sentora Panel shortcut on the desktop: removed"
     # the double-click files and the script's copy in Sentora's folder (backups made there stay)
@@ -383,6 +479,7 @@ if ($DefenderExclusion -eq 'Yes' -and $vhdx) {
 
 WriteLaunchers $InstallPath
 WritePanelShortcut "https://$PanelName"
+WriteTray $InstallPath $PanelName
 
 # the last thing on screen: how to log in (the installer's own summary above has scrolled away by now)
 $zpw = (InLinux "sed -n 's/^zadmin Password *: *//p' /root/passwords.txt" | Out-String).Trim()
@@ -396,6 +493,7 @@ Say ""
 Say "All the passwords this install made (MySQL, Matomo):  wsl -d Sentora -- cat /root/passwords.txt"
 Say "Check it:   wsl -d Sentora -- sentora-post-install-check    then    wsl -d Sentora -- sentora-smoke-test"
 Say "On every user's desktop: Sentora Panel (the login page)"
+Say "In the taskbar's tray: a dot, green while the panel answers (right-click: Status, Backup, Uninstall)"
 Say "In ${InstallPath}:  Sentora Status, Sentora Backup, Sentora Uninstall (double-click)"
 Say "(No restart needed: Sentora already runs, and starts again with Windows.)"
 Start-Process "https://$PanelName"
