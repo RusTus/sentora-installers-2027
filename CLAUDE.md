@@ -46,7 +46,7 @@ released together.
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
-## Where we are (handoff, 2026-11-11, after release 2027.71)
+## Where we are (handoff, 2026-11-11, after release 2027.72)
 
 Read this first in a new session; the CHANGELOG has every change in detail.
 
@@ -121,17 +121,20 @@ the OpenSSL 4 patch in build-sentora-sogo.sh). FEDORA_VERSIONS in the installer 
 releases: a new Fedora needs its bundles built and the install test passing. Rocky Linux 10 and
 Fedora 45 are in the install test (five systems). Tested on GitHub: Fedora and Rocky 0 FAIL, smoke 26/26. On the owner's Fedora 45 VM (2026-11-10, release 2027.70): post-install check 91 OK / 0 FAIL, smoke test 26/26 with SOGo, 7 minutes.
 
+**Released 2027.72 (2026-11-11):** Windows (WSL) fixes from the owner's first run, login block, double-click Status/Backup/Uninstall,
+Sentora Panel desktop shortcut, tray icon (green while port 443 answers, one click opens the panel), no disk alerts for read-only disks.
+On master2027 since: backups leave out the "cannot archive sockets" warnings.
 **Released 2027.71 (2026-11-11):** AppArmor on for Debian and Ubuntu (see SELinux/AppArmor above).
 **Released 2027.70 (2026-11-10):** Fedora 45, the WSL script and ModSecurity are on the `current` release; all five
 systems passed the install test (with the ModSecurity attack test, which uses the smoke test's kept site).
 
 **Windows (WSL), first real run 2026-11-11:** the owner's Windows 11 23H2 VM (VMware, nested virtualization), Debian 13 inside:
 installed in 14 minutes, post-install check 91 OK / 0 FAIL (WARNs: no SELinux/AppArmor in WSL, self-signed), smoke test 26/26.
-Fixed on the way (on master2027, not yet released): Windows PowerShell 5.1 mangled the quotes of commands passed to
+Fixed on the way (released in 2027.72): Windows PowerShell 5.1 mangled the quotes of commands passed to
 wsl.exe (InLinux now sends base64 into a file run with --exec), the installer needs -d with -i, the script checks the
 installer really finished (/etc/sentora/.installing gone), ends with a short login block, leaves double-click Status /
 Backup / Uninstall files in Sentora's folder; read-only disks (WSL's kernel headers) no longer raise disk alerts.
-**Next (the owner's list):** the restart test on Windows (Sentora back after a reboot with nobody logged in). Debian VM confirmed 2027.65 (smoke 26/26).
+Restart test passed (panel answered from another PC after a reboot). **Next (the owner's list):** open; ask the owner. Debian VM confirmed 2027.65 (smoke 26/26).
 
 **Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
