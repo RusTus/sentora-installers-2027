@@ -150,6 +150,9 @@ mkdir -p /etc/caddy/sentora
     [ -n "$EMAIL" ] && echo "	email $EMAIL"
     # (install test only: certificates from Caddy's own local authority, as the test has no public name)
     [ "${SNODE_TEST_LOCAL_CERTS:-}" = 1 ] && echo "	local_certs"
+    # Caddy must not try to put its own certificate authority into this server's trust store: it would
+    # need sudo (which SELinux rightly refuses, and the node does not need it)
+    echo "	skip_install_trust"
     echo "	admin localhost:2019"
     echo "}"
     echo ""

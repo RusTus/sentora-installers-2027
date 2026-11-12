@@ -169,7 +169,7 @@ in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok 
 wait_for 60 panel online > /dev/null && ok "node online after the update" || bad "node not online after the update"
 grep -q '"agent":"999"' <(php -r 'require "'"$T"'/root/dryden/loader.inc.php"; echo $zdbh->query("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")->fetchColumn();' 2>/dev/null) \
     && ok "the panel sees the new agent's version" || bad "the panel does not show agent 999"
-in_box 'grep -q local_certs /etc/caddy/Caddyfile' && ok "the node's settings were kept" || bad "Caddyfile lost its settings"
+in_box "grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile" && ok "the node's settings were kept" || bad "Caddyfile lost its settings"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && [[ "$(panel state "$CID")" == running* ]] && ok "the customer's app kept running behind its setup password" || bad "after the update: HTTP $C, $(panel state "$CID")"
 C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1)
