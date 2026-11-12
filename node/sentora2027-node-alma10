@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Sentora Node installer for AlmaLinux 10, Rocky Linux 10 and Red Hat Enterprise Linux 10: makes this
-# server a Docker Hosting node of a Sentora-2027 panel (the panel's Docker Hosting add-on, page
-# "Nodes and apps", gives the exact command with its keys and a one-time code). Run it as root on a
-# server of its own (not the panel's), with nothing else on it:
+# server a Docker Hosting node of a Sentora-2027 panel. Run it as root on a server of its own (not the
+# panel's), with nothing else on it:
 #
 #   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node/sentora2027-node-alma10 -o sentora2027-node
-#   sudo bash sentora2027-node --panel https://panel.example.com --key v1.... --code 1....
+#   sudo bash sentora2027-node
 #
-# Options:  --no-tls-check   the panel has a self-signed certificate (safe: every message from the
-#                            panel is signed with its key, which is in --key)
+# It asks for the panel's address, shows the panel's code to check against the panel (Docker Hosting >
+# Nodes and apps), and ends with this node's key: paste it in the panel's "Add a node". (Or the older
+# way: the command the panel shows, with --panel, --key and --code.)
+#
+# Options:  --panel URL      the panel's address (asked for when not given)
+#           --panel-code C   the panel's code (asked to check when not given)
+#           --no-tls-check   the panel has a self-signed certificate (found by itself when needed;
+#                            safe: every message from the panel is signed with its key)
 #           --email ADDRESS  for Let's Encrypt's notices about the containers' certificates
 #           --agent FILE     use this agent instead of downloading it (tests)
 #           --update         bring an installed node up to date (what sentora-node-update runs):
@@ -34,13 +39,14 @@ set -u
 LOG=/var/log/sentora2027-node.log
 RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node
 LIB=/usr/local/lib/sentora-node
-PANEL='' KEY='' CODE='' EMAIL='' AGENT='' TLS='' UPDATE=0
+PANEL='' KEY='' CODE='' EMAIL='' AGENT='' TLS='' UPDATE=0 PANELCODE='' MODE=enroll
 CONF=/etc/sentora-node/install.conf
 while [ $# -gt 0 ]; do
     case "$1" in
         --panel) PANEL=${2:-}; shift ;;
         --key) KEY=${2:-}; shift ;;
         --code) CODE=${2:-}; shift ;;
+        --panel-code) PANELCODE=${2:-}; shift ;;
         --email) EMAIL=${2:-}; shift ;;
         --agent) AGENT=${2:-}; shift ;;
         --no-tls-check) TLS=--no-tls-check ;;
@@ -64,11 +70,20 @@ if [ "$UPDATE" = 1 ]; then
         v=$(sed -n 's/^EMAIL=//p' "$CONF" | head -1); [ -z "$EMAIL" ] && EMAIL=$v
         [ "$(sed -n 's/^LOCAL_CERTS=//p' "$CONF" | head -1)" = 1 ] && SNODE_TEST_LOCAL_CERTS=1
     fi
-else
-    [ -n "$PANEL" ] && [ -n "$KEY" ] && [ -n "$CODE" ] || die "Needs --panel, --key and --code: copy the whole command from the panel (Docker Hosting > Nodes and apps)."
+elif [ -n "$KEY" ] || [ -n "$CODE" ]; then
+    MODE=pair
+    [ -n "$PANEL" ] && [ -n "$KEY" ] && [ -n "$CODE" ] || die "Needs --panel, --key and --code together: copy the whole command from the panel (Docker Hosting > Nodes and apps)."
     case "$PANEL" in https://*|http://*) ;; *) die "--panel must start with https://" ;; esac
     [[ "$KEY" =~ ^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$ ]] || die "--key is not right: copy the command from the panel again."
     [[ "$CODE" =~ ^[0-9]{1,9}\.[0-9a-f]{32}$ ]] || die "--code is not right: copy the command from the panel again."
+else
+    if [ -z "$PANEL" ] && [ ! -f /etc/sentora-node/node.json ]; then
+        echo "Where is your Sentora panel? Type its IP address or its name, as this server can reach it"
+        read -r -p "(for example 172.16.1.250 or panel.example.com): " PANEL
+    fi
+    case "$PANEL" in ''|https://*|http://*) ;; *) PANEL="https://$PANEL" ;; esac
+    PANEL=${PANEL%/}
+    [ -f /etc/sentora-node/node.json ] || [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
 fi
 if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then die "--email is not an email address."; fi
 [ -r /etc/os-release ] || die "This system does not say what it is (/etc/os-release)."
@@ -103,11 +118,12 @@ else
     if command -v crb > /dev/null 2>&1; then run crb enable; else run dnf config-manager --set-enabled crb; fi
 fi
 rpm -q epel-release > /dev/null 2>&1 || die "EPEL could not be added (see $LOG)."
-run dnf -y install podman php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus \
+run dnf -y install podman skopeo php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core \
     || die "Could not install the packages (see $LOG)."
 if [ "$UPDATE" = 1 ]; then
     # the node's own programs to their newest versions (the system's other updates: sentora2027-patch-alma10 or dnf)
-    run dnf -y upgrade --refresh podman crun conmon passt containers-common caddy php-cli php-common php-sodium \
+    run dnf -y install skopeo dnf-plugins-core
+    run dnf -y upgrade --refresh podman skopeo crun conmon passt containers-common caddy php-cli php-common php-sodium \
         || say "   Some of the node's packages could not be updated (see $LOG): going on."
 fi
 php -r 'exit(function_exists("sodium_crypto_box_seal") && function_exists("curl_init") ? 0 : 1);' || die "PHP lacks sodium or curl (see $LOG)."
@@ -199,9 +215,12 @@ EOF
 chmod 755 /usr/local/sbin/sentora-node-agent
 if [ -f /etc/sentora-node/node.json ]; then
     say "   Already linked to a panel (/etc/sentora-node/node.json): kept. To link it again, run sentora-node-uninstall first."
-else
+elif [ "$MODE" = pair ]; then
     /usr/local/sbin/sentora-node-agent pair --panel "$PANEL" --key "$KEY" --code "$CODE" $TLS 2>&1 | tee -a "$LOG"
     [ "${PIPESTATUS[0]}" -eq 0 ] || die "Not linked to the panel (see above)."
+else
+    # the node makes its own keys; the person installing checks the panel's code (no fake panel)
+    /usr/local/sbin/sentora-node-agent enroll --panel "$PANEL" $TLS ${PANELCODE:+--panel-code "$PANELCODE"} || die "No node key was made (see above)."
 fi
 { echo "# Settings this node was installed with (read by sentora-node-update)"; [ -n "$EMAIL" ] && echo "EMAIL=$EMAIL"; [ "${SNODE_TEST_LOCAL_CERTS:-}" = 1 ] && echo "LOCAL_CERTS=1"; } > "$CONF"
 chmod 600 "$CONF"
@@ -228,7 +247,7 @@ cat > /usr/local/sbin/sentora-node-uninstall <<'EOF'
 # --purge also deletes every customer's containers, data and Linux user (sdh*), and the containers' sites.
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 systemctl disable --now sentora-node 2>/dev/null
-rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent /usr/local/sbin/sentora-node-update
+rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent /usr/local/sbin/sentora-node-update /usr/local/sbin/sentora-node-sysupdate /root/sentora-node-key.txt
 rm -rf /etc/sentora-node /usr/local/lib/sentora-node
 if [ "${1:-}" = --purge ]; then
     for u in $(awk -F: '$1 ~ /^sdh[0-9]+$/ {print $1}' /etc/passwd); do
@@ -243,6 +262,39 @@ rm -f /usr/local/sbin/sentora-node-uninstall
 echo "Sentora Node agent removed."
 EOF
 chmod 755 /usr/local/sbin/sentora-node-uninstall
+cat > /usr/local/sbin/sentora-node-sysupdate <<'SYSUPDATE_EOF'
+#!/bin/bash
+# Sentora Node: this server's own updates, for the panel (Docker Hosting > Nodes and apps), which asks
+# for them through the agent. The result goes to /var/lib/sentora-node/sysupdate.json.
+#   --check     count the waiting updates (all, security) and whether a restart is needed
+#   --security  install the security updates      --all   install all updates
+set -u
+S=/var/lib/sentora-node/sysupdate.json
+mkdir -p /var/lib/sentora-node && chmod 700 /var/lib/sentora-node
+exec 9> /run/sentora-node-sysupdate.lock
+flock -n 9 || exit 0
+put() { php -r '$f = $argv[1]; $o = json_decode((string) @file_get_contents($f), true); $o = is_array($o) ? $o : array();
+    file_put_contents($f . ".new", json_encode(array_merge($o, json_decode($argv[2], true)))); rename($f . ".new", $f);' "$S" "$1"; }
+check() {
+    local all sec reboot=0
+    all=$(dnf -q --refresh check-update 2> /dev/null | grep -cE '^[A-Za-z0-9_.+-]+\.(x86_64|aarch64|noarch|i686)[[:space:]]')
+    sec=$(dnf -q updateinfo list --security --available 2> /dev/null | grep -cE '[[:space:]][A-Za-z0-9_.+-]+-[0-9]')
+    dnf -q needs-restarting -r > /dev/null 2>&1; [ $? -eq 1 ] && reboot=1
+    put "{\"updates\": ${all:-0}, \"security\": ${sec:-0}, \"reboot\": $reboot, \"checked_at\": $(date +%s)}"
+}
+case "${1:---check}" in
+    --check) check ;;
+    --security|--all)
+        kind=${1#--}
+        put "{\"running\": \"$kind\"}"
+        if [ "$kind" = security ]; then dnf -y upgrade --refresh --security >> /var/log/sentora-node-sysupdate.log 2>&1; else dnf -y upgrade --refresh >> /var/log/sentora-node-sysupdate.log 2>&1; fi
+        ok=$?
+        put "{\"running\": \"\", \"last_at\": $(date +%s), \"last_ok\": $([ $ok -eq 0 ] && echo 1 || echo 0), \"last_kind\": \"$kind\"}"
+        check ;;
+    *) echo "sentora-node-sysupdate --check|--security|--all"; exit 2 ;;
+esac
+SYSUPDATE_EOF
+chmod 700 /usr/local/sbin/sentora-node-sysupdate
 cat > /usr/local/sbin/sentora-node-update <<'UPDATE_EOF'
 #!/bin/bash
 # Sentora Node: bring this node up to date, like sentora-update on the panel. Downloads the newest node
@@ -293,6 +345,16 @@ fi
 say ""
 if [ "$UPDATE" = 1 ]; then
     say "Done: this node is up to date (agent $(sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$LIB/sentora-node-agent.php" | head -1)), still a node of $PANEL."
+elif [ "$MODE" = enroll ] && [ -f /root/sentora-node-key.txt ]; then
+    NODEKEY=$(grep -oE 'SN1(-[A-Z0-9]{4}){6}' /root/sentora-node-key.txt | head -1)
+    say "Done: this server is ready to be a node of $PANEL."
+    say ""
+    say "Last step, in the panel: Docker Hosting > Nodes and apps > Add a node."
+    say "Give the node a name and paste this node key:"
+    say ""
+    say "    $NODEKEY"
+    say ""
+    say "(The key is also in /root/sentora-node-key.txt. The node shows online a few seconds after you add it.)"
 else
     say "Done: this server is a node of $PANEL. The panel shows it online in a few seconds."
 fi

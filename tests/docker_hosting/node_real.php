@@ -1,6 +1,13 @@
 <?php
 // Driver for .github/scripts/node-test.sh: the stand-in panel's side of a real node test.
-//   node_real.php init                  install the add-on, accounts, a domain, shares; add a node: prints "<key> <code>"
+//   node_real.php init                  install the add-on, accounts, a domain, shares: prints the panel's code
+//   node_real.php addkey <name> <key>   add the node with the key its installer showed
+//   node_real.php nodeact <what>        node-update, sys-security, sys-all, check-updates, ...
+//   node_real.php settings <email> <0|1 local certs>
+//   node_real.php info <field>          a field of the node's report (gone when removed)
+//   node_real.php remove                remove the node
+//   node_real.php field <id> <column>   a column of a container
+//   node_real.php lastjob <action>      the newest job of that kind: state and result
 //   node_real.php online                prints 1 when the node called within the last 2 minutes
 //   node_real.php deploy <app> <name>   client1 starts an app at <name>.example.test: prints its ID
 //   node_real.php state <id>            prints its state and note
@@ -31,8 +38,30 @@ switch ($a[1]) {
         $all = array_keys(dh_catalog::Apps());
         dh::SetGrant(1, 2, array('count' => 5, 'cpu' => 400, 'mem' => 4096, 'disk' => 20480, 'apps' => $all)) || die(dh::$why . "\n");
         dh::SetGrant(2, 3, array('count' => 3, 'cpu' => 200, 'mem' => 2048, 'disk' => 10240, 'apps' => $all)) || die(dh::$why . "\n");
-        $code = dh::AddNode('node1', 1);
-        echo dh::PanelKey() . ' ' . $code . "\n";
+        echo dh::Fingerprint() . "\n";
+        break;
+    case 'addkey':
+        echo dh::AddNodeKey($a[2], $a[3], 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'nodeact':
+        echo dh::NodeAct(1, $a[2], 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'settings':
+        echo dh::SetNodeSettings(1, $a[2], $a[3] === '1', 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'info':
+        $n = dh::Node(1);
+        echo $n ? dh::Info($n)[$a[2]] . "\n" : "gone\n";
+        break;
+    case 'remove':
+        echo dh::RemoveNode(1, 1) ? dh::$why . "\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'field':
+        $c = dh::Container((int) $a[2]);
+        echo $c ? $c[$a[3]] . "\n" : "deleted\n";
+        break;
+    case 'lastjob':
+        echo $zdbh->query("SELECT jb_state_vc || ' ' || COALESCE(jb_result_tx, '') FROM x_dh_jobs WHERE jb_action_vc = " . $zdbh->quote($a[2]) . " ORDER BY jb_id_pk DESC LIMIT 1")->fetchColumn() . "\n";
         break;
     case 'online':
         $n = dh::Node(1);

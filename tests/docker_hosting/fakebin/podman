@@ -6,17 +6,40 @@ echo "podman[${FAKE_USER:-root}] $*" >> "$FAKE_DIR/calls.log"
 [ "$XDG_RUNTIME_DIR" = "$SNODE_RUN/$(cat "$FAKE_DIR/users/$FAKE_USER")" ] || { echo "wrong XDG_RUNTIME_DIR $XDG_RUNTIME_DIR" >&2; exit 125; }
 P=$FAKE_DIR/podman/$FAKE_USER; mkdir -p "$P/c" "$P/v"
 last=${!#}
+reg() { local f="$FAKE_DIR/registry/$(echo "$1" | tr '/:' '__')"; if [ -f "$f" ]; then cat "$f"; else echo "id-$(echo "$1" | tr '/:' '__')-1 sha256:$(printf '1%.0s' $(seq 1 64))"; fi; }
+mkdir -p "$P/i"
 case "$1" in
-  container) [ "$2" = exists ] && [ -d "$P/c/$3" ]; exit $? ;;
-  pull) case "$last" in *nopull*) echo "Error: initializing source: manifest unknown"; exit 125 ;; esac; echo sha256:abc; exit 0 ;;
+  container)
+    case "$2" in
+      exists) [ -d "$P/c/$3" ]; exit $? ;;
+      inspect)
+        [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }
+        case "$*" in
+          *.ImageName*) tail -1 "$P/c/$last/args"; exit 0 ;;
+          *.Image*) cat "$P/c/$last/imageid"; exit 0 ;;
+          *State.Status*) cat "$P/c/$last/state"; exit 0 ;;
+        esac ;;
+    esac ;;
+  pull) case "$last" in *nopull*) echo "Error: initializing source: manifest unknown"; exit 125 ;; esac; reg "$last" > "$P/i/$(echo "$last" | tr '/:' '__')"; echo sha256:abc; exit 0 ;;
+  image)
+    f="$P/i/$(echo "$last" | tr '/:' '__')"
+    case "$*" in
+      *prune*) exit 0 ;;
+      *RepoDigests*) [ -f "$f" ] || exit 125; echo "[\"${last%%:*}@$(cut -d' ' -f2 "$f")\"]"; exit 0 ;;
+      *Id*) [ -f "$f" ] || exit 125; cut -d' ' -f1 "$f"; exit 0 ;;
+    esac ;;
+  rename) [ -d "$P/c/$2" ] && [ ! -e "$P/c/$3" ] || exit 125; mv "$P/c/$2" "$P/c/$3"; exit 0 ;;
   create)
     name=''; args=("$@"); for ((i=0; i<${#args[@]}; i++)); do
       [ "${args[$i]}" = --name ] && name=${args[$((i+1))]}
       [ "${args[$i]}" = --volume ] && { v=${args[$((i+1))]}; mkdir -p "$P/v/${v%%:*}"; }
     done
     [ -d "$P/c/$name" ] && { echo "Error: name in use"; exit 125; }
-    mkdir -p "$P/c/$name"; printf '%s\n' "$@" > "$P/c/$name/args"; echo created > "$P/c/$name/state"; echo id123; exit 0 ;;
-  start) [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }; [ -f "$FAKE_DIR/start-fail" ] && { echo "Error: crun: OCI runtime error"; exit 126; }; echo running > "$P/c/$last/state"; echo "$last"; exit 0 ;;
+    mkdir -p "$P/c/$name"; printf '%s\n' "$@" > "$P/c/$name/args"; echo created > "$P/c/$name/state"
+    f="$P/i/$(echo "$last" | tr '/:' '__')"; [ -f "$f" ] && cut -d' ' -f1 "$f" > "$P/c/$name/imageid" || echo none > "$P/c/$name/imageid"; echo id123; exit 0 ;;
+  start) [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }; [ -f "$FAKE_DIR/start-fail" ] && { echo "Error: crun: OCI runtime error"; exit 126; }
+    # an image that crashes at once (for the update's rollback)
+    if [ -f "$FAKE_DIR/crash-id" ] && [ "$(cat "$P/c/$last/imageid")" = "$(cat "$FAKE_DIR/crash-id")" ]; then echo exited > "$P/c/$last/state"; else echo running > "$P/c/$last/state"; fi; echo "$last"; exit 0 ;;
   stop) [ -d "$P/c/$last" ] || exit 125; echo exited > "$P/c/$last/state"; exit 0 ;;
   restart) [ -d "$P/c/$last" ] || exit 125; echo running > "$P/c/$last/state"; exit 0 ;;
   update) [ -d "$P/c/$last" ] || exit 125; echo "$*" >> "$P/c/$last/updates"; exit 0 ;;

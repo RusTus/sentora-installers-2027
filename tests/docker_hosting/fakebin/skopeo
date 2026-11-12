@@ -1,0 +1,5 @@
+#!/bin/bash
+# fake skopeo inspect --no-tags --format {{.Digest}} docker://IMAGE: the "registry" is $FAKE_DIR/registry
+echo "skopeo $*" >> "$FAKE_DIR/calls.log"
+img=${!#}; img=${img#docker://}; f="$FAKE_DIR/registry/$(echo "$img" | tr '/:' '__')"
+if [ -f "$f" ]; then cut -d' ' -f2 "$f"; else echo "sha256:$(printf '1%.0s' $(seq 1 64))"; fi
