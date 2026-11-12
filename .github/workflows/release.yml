@@ -76,6 +76,9 @@ jobs:
           git show master2027:sentora2027-wsl.ps1 > sentora2027-wsl.ps1
           git show master2027:sentora2027-install > sentora2027-install
           git show master2027:sentora-tls-check.sh > sentora-tls-check.sh
+          # each installer's values for the settings of its Linux system (sentora-update fills them in
+          # on servers installed before a setting existed: the core's bin/sentora-platform-fill)
+          bash .github/scripts/platform-settings.sh platform-settings.json
           for f in sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             wget -nv -O "$f" "https://raw.githubusercontent.com/RusTus/sentora-core-2027/master2027/bin/$f"
             [ "$(head -c 2 "$f")" = '#!' ] || { echo "$f did not download"; exit 1; }
@@ -101,7 +104,7 @@ jobs:
           EOF
           mkdir -p old
           upload=""
-          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora2027-fedora sentora2027-wsl.ps1 Sentora2027Setup.exe sentora-tls-check.sh sentora-migrate-export sentora-smoke-test sentora-web-probe; do
+          for f in sentora-installers-2027.zip sentora2027-install sentora2027-ub26.04 sentora2027-deb13 sentora2027-alma10 sentora2027-fedora sentora2027-wsl.ps1 Sentora2027Setup.exe sentora-tls-check.sh platform-settings.json sentora-migrate-export sentora-smoke-test sentora-web-probe; do
             sha256sum "$f"
             if [ "$FORCE" = "true" ]; then
               echo "$f: upload (forced)"; upload="$upload $f"; continue

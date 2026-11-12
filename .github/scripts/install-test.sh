@@ -175,6 +175,23 @@ in_box 'echo "$(date "+%b %d %H:%M:%S") imap(test@example.test): Error: sentora-
     [ $ok -eq 1 ] && echo "PROBLEMS: PASSED" || { tail -5 $P; echo "PROBLEMS: FAILED"; }' > "$OUT/problems-log.txt" 2>&1
 cat "$OUT/problems-log.txt"
 
+say "This system's settings for servers installed before a setting existed (sentora-platform-fill)"
+( cd "$INST" && bash .github/scripts/platform-settings.sh "$OUT/platform-settings.json" ) > /dev/null
+docker cp "$OUT/platform-settings.json" "$NAME:/root/platform-settings.json"
+in_box 'F=/etc/sentora/panel/bin/sentora-platform-fill; J=/root/platform-settings.json
+    out=$(php -q $F --dry-run $J); echo "  fresh install: $out"
+    echo "$out" | grep -q "all as its installer sets them" || { echo "PLATFORM: FAILED (the file and the installer differ)"; exit 0; }
+    # as on a server installed before: each of this system'"'"'s own values back to the default
+    n=$(cd /etc/sentora/panel && php -r '"'"'require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php";
+        $j = json_decode(file_get_contents("/root/platform-settings.json"), true)["systems"][ctrl_options::GetSystemOption("php_bundle_tag")];
+        $n = 0; foreach ($j as $k => $v) { if (isset(sys_platform::$settings[$k]) && sys_platform::$settings[$k][0] !== $v && $k !== "php_bundle_tag") {
+            ctrl_options::SetSystemOption($k, sys_platform::$settings[$k][0], false); $n++; } } echo $n;'"'"')
+    echo "  $n setting(s) put back to the default"
+    php -q $F $J | tail -1 | sed "s/^/  /"
+    out=$(php -q $F --dry-run $J)
+    echo "$out" | grep -q "all as its installer sets them" && echo "PLATFORM: PASSED" || { echo "$out"; echo "PLATFORM: FAILED"; }' > "$OUT/platform-settings.txt" 2>&1
+cat "$OUT/platform-settings.txt"
+
 say "Hardening score (Server Monitor's card: the check queued by the panel's user, run by root)"
 in_box 'H=/var/sentora/logs/hardening.json; rm -f $H
     runuser -u sentora -- /etc/sentora/panel/bin/zsudo hardening-check || { echo "HARDENING: FAILED (could not queue: $?)"; exit 0; }
@@ -216,6 +233,7 @@ if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check ha
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
+if ! grep -q 'PLATFORM: PASSED' "$OUT/platform-settings.txt"; then echo "::error::$SYS: this system's settings were not filled in as its installer sets them (platform-settings.txt)"; ok=0; fi
 if ! grep -q 'HARDENING: PASSED' "$OUT/hardening.txt" || grep -q 'HARDENING: FAILED' "$OUT/hardening.txt"; then echo "::error::$SYS: the hardening report was not written as it should (hardening.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
