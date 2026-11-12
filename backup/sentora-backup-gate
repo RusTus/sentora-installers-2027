@@ -39,8 +39,14 @@ inside() { # path -> prints the real path, or fails
 DATE_RE='^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$'
 if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
     OUT=(rsync --server)
-    dot=0
+    dot=0 want=''
     for a in "${ARGS[@]:2}"; do
+        if [ -n "$want" ]; then
+            # (the path of an option given as the next word: --link-dest PATH)
+            r=$(inside "$a") || refuse "a path outside the area: $want $a"
+            OUT+=("$r"); want=''
+            continue
+        fi
         if [ $dot -eq 1 ]; then
             r=$(inside "$a") || refuse "a path outside the area: $a"
             OUT+=("$r")
@@ -51,6 +57,8 @@ if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
             --link-dest=*|--compare-dest=*|--copy-dest=*)
                 r=$(inside "${a#*=}") || refuse "a path outside the area: $a"
                 OUT+=("${a%%=*}=$r") ;;
+            --link-dest|--compare-dest|--copy-dest)
+                want=$a; OUT+=("$a") ;;
             --daemon*|--config*|--rsh*|--rsync-path*|--log-file*|--write-batch*|--read-batch*|--only-write-batch*|--temp-dir*|-T*|--backup-dir*|--partial-dir*|--remove-*|--files-from*|--exclude-from*|--include-from*|--filter*)
                 refuse "option $a" ;;
             --*=*|--*) OUT+=("$a") ;;
@@ -58,7 +66,7 @@ if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
             *) refuse "unexpected argument $a" ;;
         esac
     done
-    [ $dot -eq 1 ] || refuse "rsync without a path"
+    [ $dot -eq 1 ] && [ -z "$want" ] || refuse "rsync without a path"
     note "rsync ${ARGS[*]:2}"
     cd "$BASE" || exit 1
     exec "${OUT[@]}"

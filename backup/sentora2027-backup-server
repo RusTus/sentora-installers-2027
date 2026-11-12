@@ -181,7 +181,7 @@ case "$FAMILY" in
     deb)
         PKG=apt
         PKG_INSTALL="apt-get -y -o Dpkg::Options::=--force-confold install"
-        PACKAGES="openssh-server rsync chrony ca-certificates curl"
+        PACKAGES="openssh-server rsync chrony ca-certificates curl nftables dbus"
         SSH_SERVICE=ssh
         CHRONY_SERVICE=chrony ;;
     el|fedora)
