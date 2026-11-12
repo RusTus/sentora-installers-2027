@@ -31,8 +31,9 @@
 #      one-time code (new keys, made here; the secret ones never leave this server) and runs as the
 #      service sentora-node. It calls the panel; nothing is opened on this server for the panel.
 #
-# Update: sentora-node-update --yes (the newest agent and installer from master2027, and the node's
-#         own packages: Podman, Caddy, PHP; the customers' containers keep running).
+# Update: sentora-node-update --yes (Sentora's own software only: the newest agent and installer from
+#         master2027; Podman, Caddy, PHP and the rest come with the system's updates; the customers'
+#         containers keep running). A package the new version needs and the node lacks is still added.
 # Uninstall: sentora-node-uninstall (keeps the customers' containers unless --purge).
 # Log: /var/log/sentora2027-node.log
 set -u
@@ -120,12 +121,6 @@ fi
 rpm -q epel-release > /dev/null 2>&1 || die "EPEL could not be added (see $LOG)."
 run dnf -y install podman skopeo php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core \
     || die "Could not install the packages (see $LOG)."
-if [ "$UPDATE" = 1 ]; then
-    # the node's own programs to their newest versions (the system's other updates: sentora2027-patch-alma10 or dnf)
-    run dnf -y install skopeo dnf-plugins-core
-    run dnf -y upgrade --refresh podman skopeo crun conmon passt containers-common caddy php-cli php-common php-sodium \
-        || say "   Some of the node's packages could not be updated (see $LOG): going on."
-fi
 php -r 'exit(function_exists("sodium_crypto_box_seal") && function_exists("curl_init") ? 0 : 1);' || die "PHP lacks sodium or curl (see $LOG)."
 if ! command -v caddy >/dev/null 2>&1; then
     # Caddy from EPEL; when EPEL does not have it, from Caddy's own repository (its COPR)
@@ -299,9 +294,10 @@ cat > /usr/local/sbin/sentora-node-update <<'UPDATE_EOF'
 #!/bin/bash
 # Sentora Node: bring this node up to date, like sentora-update on the panel. Downloads the newest node
 # installer and agent (master2027 of sentora-installers-2027), shows what changes, and runs the
-# installer with --update: every step again, the node's own packages (Podman, Caddy, PHP) to their
-# newest, the new agent (the old one comes back when the new one does not start). The node stays
-# linked; the customers' containers keep running.
+# installer with --update: every step again and the new agent (the old one comes back when the new
+# one does not start). Only Sentora's own software: Podman, Caddy, PHP and the rest of the system are
+# updated by the system's updates (sentora-node-sysupdate). The node stays linked; the customers'
+# containers keep running.
 #   sentora-node-update           ask before updating
 #   sentora-node-update --yes     update without asking
 #   sentora-node-update --check   only show whether there is something new
@@ -320,7 +316,7 @@ same() { [ -f "$2" ] && [ "$(sha256sum < "$1")" = "$(sha256sum < "$2")" ]; }
 OLD=$(ver "$LIB/sentora-node-agent.php"); NEW=$(ver "$T/agent.php")
 if same "$T/agent.php" "$LIB/sentora-node-agent.php"; then echo "Agent: up to date (version ${OLD:-?})."; else echo "Agent: ${OLD:-?} -> ${NEW:-?} (new)"; fi
 if same "$T/installer" "$LIB/installer"; then echo "Node setup: up to date."; else echo "Node setup: new (its steps run again)."; fi
-echo "The node's own packages (Podman, Caddy, PHP) are brought to their newest too."
+echo "(Only Sentora's own software; Podman, Caddy, PHP and the rest come with the system's updates.)"
 [ "$CHECK" = 1 ] && exit 0
 if [ "$YES" != 1 ]; then read -r -p "Update this node now? [y/N] " r; case "$r" in y|Y|yes) ;; *) echo "Nothing changed."; exit 0 ;; esac; fi
 bash "$T/installer" --update --agent "$T/agent.php"
