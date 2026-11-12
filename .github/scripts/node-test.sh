@@ -131,6 +131,14 @@ echo "$PROBE" | tail -5
 if echo "$PROBE" | grep -q '^probed'; then
     echo "$PROBE" | grep -q '^reached' && bad "a container reached the node's 127.0.0.1 ($(echo "$PROBE" | grep '^reached' | tr '\n' ' '))" || ok "a container can not reach the node's 127.0.0.1 (apps, Caddy's admin)"
 else bad "the probe container did not run"; fi
+# the cloud's metadata address (it can hand out the server's own keys) is refused to the apps
+UIDS=$(in_box "nft list set inet sentora_node apps" 2>&1); SDH3=$(in_box "id -u sdh3")
+echo "$UIDS" | grep -qw "$SDH3" && ok "the customer's user is in the node's fence (nftables set)" || { bad "sdh3 ($SDH3) is not in the fence"; echo "$UIDS"; }
+META=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman run --rm docker.io/library/busybox:1 sh -c 'wget -q -T 5 -O /dev/null http://169.254.169.254/ 2>&1; echo exit=\$?'" 2>&1)
+echo "$META" | tail -2
+echo "$META" | grep -q '^exit=0' && bad "an app reached 169.254.169.254 (the cloud's metadata)" || ok "an app can not reach 169.254.169.254 (the cloud's metadata)"
+ROOTMETA=$(in_box "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 -H Metadata:true 'http://169.254.169.254/metadata/instance?api-version=2021-02-01'" 2>&1)
+echo "  (for comparison, root on the node gets: HTTP $ROOTMETA)"
 panel act "$CID" public > /dev/null
 for _ in $(seq 1 20); do C=$(code ''); case "$C" in 200|302) break ;; esac; sleep 3; done
 case "$C" in 200|302) ok "open to the public: the app answers without a password ($C)" ;; *) bad "public: HTTP $C" ;; esac

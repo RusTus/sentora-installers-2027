@@ -119,7 +119,7 @@ else
     if command -v crb > /dev/null 2>&1; then run crb enable; else run dnf config-manager --set-enabled crb; fi
 fi
 rpm -q epel-release > /dev/null 2>&1 || die "EPEL could not be added (see $LOG)."
-run dnf -y install podman skopeo php-cli php-sodium curl policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core \
+run dnf -y install podman skopeo php-cli php-sodium curl nftables policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core \
     || die "Could not install the packages (see $LOG)."
 php -r 'exit(function_exists("sodium_crypto_box_seal") && function_exists("curl_init") ? 0 : 1);' || die "PHP lacks sodium or curl (see $LOG)."
 if ! command -v caddy >/dev/null 2>&1; then
@@ -194,7 +194,7 @@ rm -f "$LIB/sentora-node-agent.php.new"
 if [ -n "$AGENT" ]; then
     cp "$AGENT" "$LIB/sentora-node-agent.php.new" || die "No agent at $AGENT."
 else
-    curl -fsSL "${SNODE_RAW_BASE:-$RAW_BASE}/sentora-node-agent.php" -o "$LIB/sentora-node-agent.php.new" || die "Could not download the agent."
+    curl -fsSL --proto =https,file --proto-redir =https "${SNODE_RAW_BASE:-$RAW_BASE}/sentora-node-agent.php" -o "$LIB/sentora-node-agent.php.new" || die "Could not download the agent."
 fi
 php -l "$LIB/sentora-node-agent.php.new" >> "$LOG" 2>&1 || { rm -f "$LIB/sentora-node-agent.php.new"; die "The agent is damaged (see $LOG): nothing changed."; }
 # the one that ran before is kept, to go back to when the new one does not start
@@ -308,7 +308,7 @@ YES=0 CHECK=0
 for a in "$@"; do case "$a" in --yes|-y) YES=1 ;; --check) CHECK=1 ;; -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) echo "Unknown option: $a"; exit 1 ;; esac; done
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 T=$(mktemp -d /tmp/sentora-node-update.XXXXXX); trap 'rm -rf "$T"' EXIT
-curl -fsSL "$RAW_BASE/sentora2027-node-alma10" -o "$T/installer" && curl -fsSL "$RAW_BASE/sentora-node-agent.php" -o "$T/agent.php" \
+curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora2027-node-alma10" -o "$T/installer" && curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora-node-agent.php" -o "$T/agent.php" \
     || { echo "Could not download the newest node files ($RAW_BASE)."; exit 1; }
 bash -n "$T/installer" && php -l "$T/agent.php" > /dev/null 2>&1 || { echo "The downloaded files are damaged: nothing changed."; exit 1; }
 ver() { sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$1" 2> /dev/null | head -1; }

@@ -40,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '106';
+    const VERSION = '107';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -60,6 +60,8 @@ class snode
     static $disk = array();
     static $diskAt = 0;
     static $sysCheckAt = 0;
+    static $fence = null;
+    static $fenceAt = 0;
 
     static function Init()
     {
@@ -704,6 +706,10 @@ class snode
                 if ($e !== '') {
                     return array(false, $e);
                 }
+                $fe = self::Fence();
+                if ($fe !== '') {
+                    self::Out($fe);
+                }
                 foreach ($s['containers'] as $k => $c) {
                     if ($k !== $key && (int) $c['hostport'] === $d['hostport']) {
                         return array(false, 'refused: port ' . $d['hostport'] . ' is taken');
@@ -831,6 +837,10 @@ class snode
             chmod(dirname($file), 0755);
         }
         self::WriteFile($file, $t, 0644);
+        // (it holds the setup passwords' hashes: root and Caddy read it, nobody else)
+        if (@chgrp($file, 'caddy')) {
+            @chmod($file, 0640);
+        }
         $v = self::Run(array('caddy', 'validate', '--config', self::$caddy . '/Caddyfile', '--adapter', 'caddyfile'), null, 60);
         $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', 'caddy'), null, 60) : $v;
         if ($r[0] !== 0) {
@@ -1074,9 +1084,52 @@ class snode
      * One call to the panel: the report and results out, the jobs in, done; then again while there were jobs.
      * Returns the seconds to wait before the next call.
      */
+    /**
+     * The apps may not reach the cloud's metadata address (169.254.169.254 and the rest of link-local):
+     * on a rented server it can hand out the server's own keys. The customers' Linux users (sdh*) are
+     * in an nftables set; their traffic (Podman's network runs as them) to link-local is refused.
+     * Written again when the users change, and every hour (a firewall reload could remove it).
+     */
+    static function Fence($force = false)
+    {
+        $uids = array();
+        foreach ((array) @file(getenv('SNODE_PASSWD') ?: '/etc/passwd', FILE_IGNORE_NEW_LINES) as $l) {
+            $p = explode(':', (string) $l);
+            if (count($p) > 2 && preg_match('/^sdh\d{1,9}$/', $p[0]) && ctype_digit($p[2])) {
+                $uids[] = (int) $p[2];
+            }
+        }
+        sort($uids);
+        if (!$force && self::$fence === $uids && time() - self::$fenceAt < 3600) {
+            return '';
+        }
+        $t = "table inet sentora_node {}\ndelete table inet sentora_node\ntable inet sentora_node {\n"
+            . "\tset apps { type uid;" . ($uids ? ' elements = { ' . implode(', ', $uids) . ' };' : '') . " }\n"
+            . "\tchain out {\n\t\ttype filter hook output priority filter; policy accept;\n"
+            . "\t\tmeta skuid @apps ip daddr 169.254.0.0/16 reject\n"
+            . "\t\tmeta skuid @apps ip6 daddr { fe80::/10, fd00:ec2::254/128 } reject\n\t}\n}\n";
+        $f = self::$state . '/fence.nft';
+        if (!is_dir(self::$state)) {
+            mkdir(self::$state, 0700, true);
+        }
+        self::WriteFile($f, $t);
+        $r = self::Run(array('nft', '-f', $f), null, 30);
+        self::$fenceAt = time();
+        if ($r[0] === 0) {
+            self::$fence = $uids;
+            return '';
+        }
+        // (no nft here: said once an hour)
+        return 'fence: ' . self::Tail($r[1]);
+    }
+
     static function Once()
     {
         $cfg = self::$cfg;
+        $fe = self::Fence();
+        if ($fe !== '') {
+            self::Out($fe);
+        }
         $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
         $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
         $s = self::State();

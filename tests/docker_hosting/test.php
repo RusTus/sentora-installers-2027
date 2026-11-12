@@ -730,6 +730,53 @@ check((int) val("SELECT COUNT(*) FROM x_dh_containers WHERE dc_deleted_in IS NUL
 $r = req(2, 'Grant', array('inAcc' => '4', 'inOff' => '1'));
 check(strpos($r['text'], 'taken back') !== false, 'a share not in use can be taken back');
 
+section('a node speaks only for its own apps; linking messages are limited');
+// a second node, linked with keys this test holds (as if it were broken into)
+$xs = sodium_crypto_sign_keypair();
+$xb = sodium_crypto_box_keypair();
+$zdbh->prepare("INSERT INTO x_dh_nodes (nd_name_vc, nd_signpk_vc, nd_boxpk_vc, nd_code_vc, nd_codeexp_in, nd_seen_in, nd_ip_vc, nd_info_tx, nd_accepting_in, nd_created_in)
+    VALUES ('rogue', :s, :b, '', 0, :t, '127.0.0.1', '{}', 0, :t)")->execute(array(':s' => dh_proto::B64(sodium_crypto_sign_publickey($xs)), ':b' => dh_proto::B64(sodium_crypto_box_publickey($xb)), ':t' => time()));
+$xid = (int) $zdbh->lastInsertId();
+$zdbh->prepare("INSERT INTO x_dh_containers (dc_acc_fk, dc_node_fk, dc_app_vc, dc_cpu_in, dc_mem_in, dc_disk_in, dc_port_in, dc_domain_vc, dc_state_vc, dc_want_vc, dc_created_in)
+    VALUES (3, 1, 'uptime-kuma', 50, 256, 1024, 29999, 'victim.example.com', 'running', 'running', :t)")->execute(array(':t' => time()));
+$victim = (int) $zdbh->lastInsertId();
+check($victim > 0, '(an app of node 1 to aim at)');
+$vrow = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $victim));
+$before = (int) val("SELECT COUNT(*) FROM x_dh_jobs");
+list($c) = post(dh_proto::Pack(dh_proto::Msg('poll', $xid, array('states' => array((string) $victim => array('state' => 'exited', 'used_mb' => 999999, 'user' => 'sdh' . $vrow['dc_acc_fk'])))), sodium_crypto_sign_secretkey($xs), $k['box_pk']));
+$after = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $victim));
+check($c === 200 && (int) val("SELECT COUNT(*) FROM x_dh_jobs") === $before && $after['dc_state_vc'] === $vrow['dc_state_vc'] && (int) $after['dc_used_in'] === (int) $vrow['dc_used_in'],
+    'another node reporting node 1\'s app: no delete queued, its state and disk use untouched');
+// a job of the rogue node naming node 1's app (as an old panel could have queued): its result changes nothing
+$jid = dh::Queue($xid, $victim, 'delete', array('cid' => $victim, 'user' => 'sdh' . $vrow['dc_acc_fk'], 'domain' => ''));
+list($c) = post(dh_proto::Pack(dh_proto::Msg('poll', $xid, array('results' => array(array('id' => $jid, 'ok' => true, 'out' => 'deleted')))), sodium_crypto_sign_secretkey($xs), $k['box_pk']));
+$after = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $victim));
+check($c === 200 && $after['dc_deleted_in'] === null && $after['dc_state_vc'] !== 'deleted', 'its "deleted" for node 1\'s app is ignored: the app and its DNS record stay');
+$zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_node_fk = " . $xid);
+$zdbh->exec("DELETE FROM x_dh_nodes WHERE nd_id_pk = " . $xid);
+$zdbh->exec("DELETE FROM x_dh_containers WHERE dc_id_pk = " . $victim);
+// linking messages need no known key: at most 300 from one address in 10 minutes
+$hs = sodium_crypto_sign_keypair();
+$hello = function () use ($hs, $k) {
+    return post(dh_proto::Pack(dh_proto::Msg('hello', 0, array('claim' => bin2hex(random_bytes(15)), 'sign_pk' => dh_proto::B64(sodium_crypto_sign_publickey($hs)),
+        'box_pk' => dh_proto::B64(sodium_crypto_box_publickey(sodium_crypto_box_keypair())))), sodium_crypto_sign_secretkey($hs), $k['box_pk']));
+};
+list($c) = $hello();
+check($c === 200, 'a node waiting to be added is answered');
+$ins = $zdbh->prepare("INSERT INTO x_dh_nonces (nn_nonce_vc, nn_time_in, nn_ip_vc, nn_link_in) VALUES (:n, :t, '127.0.0.1', 1)");
+for ($i = 0; $i < 300; $i++) {
+    $ins->execute(array(':n' => bin2hex(random_bytes(16)), ':t' => time()));
+}
+list($c) = $hello();
+check($c === 400, 'after 300 from the same address in 10 minutes: refused');
+$logs = (int) val("SELECT COUNT(*) FROM x_dh_log WHERE lg_what_vc = 'pair-refused'");
+list($c) = post(dh_proto::Pack(dh_proto::Msg('pair', 0, array('code' => '1.' . str_repeat('0', 32), 'sign_pk' => dh_proto::B64(sodium_crypto_sign_publickey($hs)),
+    'box_pk' => dh_proto::B64(sodium_crypto_box_publickey(sodium_crypto_box_keypair())))), sodium_crypto_sign_secretkey($hs), $k['box_pk']));
+check($c === 400 && (int) val("SELECT COUNT(*) FROM x_dh_log WHERE lg_what_vc = 'pair-refused'") === $logs, 'and nothing more lands in the log');
+$zdbh->exec("UPDATE x_dh_nonces SET nn_time_in = nn_time_in - 700 WHERE nn_link_in = 1");
+list($c) = $hello();
+check($c === 200, '10 minutes later it is answered again');
+
 section('the rest');
 $r = req(1, 'Settings', array('inApps' => array('gitea')));
 $r = req(1, 'AddNode', array('inName' => 'node3', 'inUrl' => 'https://panel.example:2083'));
