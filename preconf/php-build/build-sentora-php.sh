@@ -13,10 +13,10 @@
 # Then attach the .tar.gz to the sentora-installers-2027 GitHub release for new installs, or see
 # README in this folder to update a running server.
 #
-# PHP 8.1 (a step for old apps on their way to a supported PHP) also gets the add-ons PHP 7.1 and 7.4
-# have, each its own file in lib/php/extensions and switched on by bin/sentora-php-addons only when it
-# loads: apcu, redis, memcached, imagick, imap. ADDONS=1 builds them for another version too (imap is
-# part of PHP up to 8.3 only).
+# PHP 8.1 and newer also get the add-ons PHP 7.1 and 7.4 have, each its own file in lib/php/extensions:
+# apcu, redis, memcached, imagick, imap (imap is part of PHP up to 8.3 only). 8.1 keeps the versions it
+# was first built with, switched on by bin/sentora-php-addons when they load; 8.2 and newer get today's
+# PECL releases, left off until the administrator switches one on in PHP Versions > Extensions.
 #
 # Every bundle also has Snuffleupagus (the PHP hardening extension, snuffleupagus.sh), switched off:
 # the PHP Hardening add-on switches it on, with its rules.
@@ -134,8 +134,23 @@ for t in phpize php-config; do sed "s|$PREFIX|$P|g" "$P/bin/$t" > "$SPT/$t"; chm
 sp_build "$WORK" "$SPT/phpize" "$SPT/php-config" || exit 1
 cd "$SRC"
 
-# --- add-ons (PHP 8.1, or ADDONS=1): PECL extensions and imap on the system's own libraries --------
-ADDONS="${ADDONS:-$([ "$MM" = 8.1 ] && echo 1 || echo 0)}"
+# --- add-ons (PHP 8.1 and newer, or ADDONS=1): PECL extensions and imap on the system's own libraries
+# PHP 8.1 keeps the versions it was first built with (switched on by sentora-php-addons); 8.2 and
+# newer get today's and leave them off: the administrator switches each on in PHP Versions > Extensions
+ADDONS="${ADDONS:-$([ "$(printf '%s\n8.1\n' "$MM" | sort -V | head -1)" = 8.1 ] && echo 1 || echo 0)}"
+if [ "$MM" = 8.1 ]; then
+    PECL_SET='apcu-5.1.21.tgz 1033530448696ee7cadec85050f6df5135fb1330072ef2a74569392acfecfbc1
+redis-5.3.7.tgz b958166ccda4f40bd17c6998f9e2239021ae644467cd8ad5c15def420aad65b0
+memcached-3.2.0.tgz 2a41143a7b29f4a962a3805b77aa207a99e4566e2d314ce98a051cd24d6e9636
+imagick-3.7.0.tgz 5a364354109029d224bcbb2e82e15b248be9b641227f45e63425c06531792d3e'
+    AUTO_ON=1
+else
+    PECL_SET='apcu-5.1.28.tgz ca9c1820810a168786f8048a4c3f8c9e3fd941407ad1553259fb2e30b5f057bf
+redis-6.3.0.tgz 0d5141f634bd1db6c1ddcda053d25ecf2c4fc1c395430d534fd3f8d51dd7f0b5
+memcached-3.4.0.tgz c163434eb0da97c8f45c7ad41d979d381f8b81c49402b1b90b063987fb37972e
+imagick-3.8.1.tgz 3a3587c0a524c17d0dad9673a160b90cd776e836838474e173b549ed864352ee'
+    AUTO_ON=0
+fi
 ADDON_LIST=""
 if [ "$ADDONS" = 1 ]; then
     TOOLS="$WORK/tools"; mkdir -p "$TOOLS" "$WORK/pecl"
@@ -145,12 +160,7 @@ if [ "$ADDONS" = 1 ]; then
         wget -nv -O "$WORK/pecl/$f" "https://pecl.php.net/get/$f"
         [ "$(sha256sum "$WORK/pecl/$f" | cut -d' ' -f1)" = "$sum" ] || { echo "$f does not match its SHA-256. Stopping."; exit 1; }
         tar -xf "$WORK/pecl/$f" -C "$WORK/pecl"
-    done <<'EOF_PECL'
-apcu-5.1.21.tgz 1033530448696ee7cadec85050f6df5135fb1330072ef2a74569392acfecfbc1
-redis-5.3.7.tgz b958166ccda4f40bd17c6998f9e2239021ae644467cd8ad5c15def420aad65b0
-memcached-3.2.0.tgz 2a41143a7b29f4a962a3805b77aa207a99e4566e2d314ce98a051cd24d6e9636
-imagick-3.7.0.tgz 5a364354109029d224bcbb2e82e15b248be9b641227f45e63425c06531792d3e
-EOF_PECL
+    done <<< "$PECL_SET"
     addon() {   # name, source folder, configure options...
         local name="$1" dir="$2"; shift 2
         echo "Building the $name add-on (log: $WORK/addon-$name.log)"
@@ -158,14 +168,19 @@ EOF_PECL
             > "$WORK/addon-$name.log" 2>&1 || { tail -25 "$WORK/addon-$name.log"; exit 1; }
         ADDON_LIST="$ADDON_LIST $name"
     }
-    addon apcu "$WORK/pecl/apcu-5.1.21" --enable-apcu
-    addon redis "$WORK/pecl/redis-5.3.7" --enable-redis
-    addon memcached "$WORK/pecl/memcached-3.2.0" --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
-    addon imagick "$WORK/pecl/imagick-3.7.0" --with-imagick=/usr
+    pdir() { ls -d "$WORK/pecl/$1"-[0-9]* | head -1; }
+    addon apcu "$(pdir apcu)" --enable-apcu
+    addon redis "$(pdir redis)" --enable-redis
+    addon memcached "$(pdir memcached)" --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
+    addon imagick "$(pdir imagick)" --with-imagick=/usr
     # (imap left PHP in 8.4; c-client is in /usr/lib, OpenSSL found through pkg-config)
     [ -d "$SRC/ext/imap" ] && [ -e /usr/include/c-client/c-client.h ] && addon imap "$SRC/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
-    cat > "$P/bin/sentora-php-addons" <<'EOF_ADDONS'
+    cat > "$P/bin/sentora-php-addons" <<EOF_HEAD
 #!/bin/bash
+# (1: this script switches the add-ons on; 0: PHP Versions > Extensions does, when asked)
+AUTO_ON=$AUTO_ON
+EOF_HEAD
+    cat >> "$P/bin/sentora-php-addons" <<'EOF_ADDONS'
 # Switch on this PHP's add-on extensions (apcu, redis, memcached, imagick, imap) that load on this
 # server, after installing the system libraries they use; one that does not load stays off, so PHP
 # itself always starts. Run as root by the installer and sentora-php-install; safe to run again.
@@ -182,7 +197,9 @@ EXT=$("$P/bin/php-config" --extension-dir)
 mkdir -p "$P/etc/conf.d"
 for e in apcu redis memcached imagick imap; do
     ini="$P/etc/conf.d/30-$e.ini"
-    if [ -f "$EXT/$e.so" ] && "$P/bin/php" -n -d extension_dir="$EXT" -d extension="$e.so" \
+    if [ -f "$EXT/$e.so" ] && [ "$AUTO_ON" != 1 ]; then
+        echo "  $e: available (switch it on in PHP Versions > Extensions)"
+    elif [ -f "$EXT/$e.so" ] && "$P/bin/php" -n -d extension_dir="$EXT" -d extension="$e.so" \
         -r "exit(extension_loaded('$e') ? 0 : 1);" > /dev/null 2>&1; then
         echo "extension=$e.so" > "$ini"
         echo "  $e: on"
