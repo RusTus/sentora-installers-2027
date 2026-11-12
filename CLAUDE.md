@@ -46,6 +46,7 @@ released together.
 - An add-on works on every supported system (Ubuntu, Debian, AlmaLinux/Rocky/RHEL, Fedora) unless a real
   security reason stops it (owner, 2026-11-12): paths, packages and services from x_settings, not one distribution's.
 - Changing the panel's own host name stays an SSH-only command (sentora-change-domain).
+- Defaults Sentora sets (php.ini, Apache) must leave room for the administrator's own settings (owner, 2026-11-12): defaults go where the administrator's settings win (php.ini and server-wide Apache, before Apache Config's global and per-domain custom blocks; a site's .user.ini), never as php_admin_value (only the safety fences: open_basedir, temp folders); on existing servers a value changes only while it is still at the old default.
 - When something is less secure, it is not done that way.
 - Only ask questions when the answer is really needed.
 - The panel stays neutral to the Linux distribution: commands, paths, service names, users and
