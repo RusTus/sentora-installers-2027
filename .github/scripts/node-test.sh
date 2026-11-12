@@ -1,10 +1,10 @@
 #!/bin/bash
 # Docker Hosting node test: a real AlmaLinux 10 (or Rocky Linux 10) in a container with systemd is made
-# a node with node/sentora2027-node-alma10, linked to a stand-in panel (tests/docker_hosting) running
+# a node with node/sentora2027-node, linked to a stand-in panel (tests/docker_hosting) running
 # the add-on, and must then really run an app: rootless Podman as the customer's own user, its limits
 # held by the kernel, Caddy in front (HTTPS, setup password first, then public), restarted with the
 # "server", deleted with its data.
-#   .github/scripts/node-test.sh <module folder> <results folder> [alma10|rocky10]
+#   .github/scripts/node-test.sh <module folder> <results folder> [alma10|rocky10|fedora45|debian13|ubuntu26.04]
 # Needs docker that can run privileged containers with cgroup v2, php (pdo_sqlite, curl, sodium).
 # The container has no SELinux (the runner's kernel has none): the installer's SELinux step is not tested here.
 set -uo pipefail
@@ -13,8 +13,11 @@ mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 T=$REPO/tests/docker_hosting
 case "$SYS" in
-    alma10) IMAGE=quay.io/almalinuxorg/almalinux:10 ;;
-    rocky10) IMAGE=quay.io/rockylinux/rockylinux:10 ;;
+    alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; PKGS=dnf ;;
+    rocky10) IMAGE=quay.io/rockylinux/rockylinux:10; PKGS=dnf ;;
+    fedora45) IMAGE=quay.io/fedora/fedora:45; PKGS=dnf ;;
+    debian13) IMAGE=docker.io/library/debian:13; PKGS=apt ;;
+    ubuntu26.04) IMAGE=docker.io/library/ubuntu:26.04; PKGS=apt ;;
     *) echo "unknown system $SYS"; exit 2 ;;
 esac
 NAME=sentora-node-test
@@ -56,7 +59,12 @@ ok "panel ready (its code: $FP)"
 
 say "A fresh $IMAGE with systemd"
 # (container images may mask systemd-logind; a server never does)
-printf 'FROM %s\nRUN dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all && (systemctl unmask systemd-logind.service || true)\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" > "$W/Dockerfile"
+if [ "$PKGS" = apt ]; then
+    RUNLINE='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install systemd systemd-sysv dbus procps hostname iproute2 tzdata curl ca-certificates && rm -rf /var/lib/apt/lists/*'
+else
+    RUNLINE='dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all'
+fi
+printf 'FROM %s\nRUN %s && (systemctl unmask systemd-logind.service || true)\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" "$RUNLINE" > "$W/Dockerfile"
 docker build -q -t sentora-node-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
 mkdir -p "$W/home"
 # (/home on the runner's disk: rootless Podman's storage can not be overlay on the container's overlay)
@@ -65,7 +73,7 @@ docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 
 say "Installing the node"
-docker cp "$REPO/node/sentora2027-node-alma10" "$NAME:/root/sentora2027-node"
+docker cp "$REPO/node/sentora2027-node" "$NAME:/root/sentora2027-node"
 docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/sentora-node-agent.php"
 START=$(date +%s)
 # (the node makes its own key; the panel's code is given as the person installing would confirm it)
@@ -82,6 +90,9 @@ wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "no
 in_box '[ ! -e /root/sentora-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
 in_box 'stat -c %a /etc/sentora-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
 in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
+PF=$(in_box 'cat /etc/sentora-node/platform.conf' 2>&1)
+echo "$PF" | grep -qE '^FAMILY=(el|fedora|deb)$' && echo "$PF" | grep -q '^PHP_BIN=/' && echo "$PF" | grep -q '^CADDY_SERVICE=caddy$' \
+    && ok "this system's names kept for the agent: $(echo "$PF" | grep -E '^(FAMILY|PKG|MAC)=' | tr '\n' ' ')" || bad "platform.conf: $PF"
 in_box 'cat /etc/systemd/system/user@.service.d/sentora-delegate.conf' | grep -q 'Delegate=cpu cpuset io memory pids' && ok "cgroup controllers handed to the customers' users" || bad "no Delegate drop-in"
 
 say "Starting Uptime Kuma for client1"
@@ -232,6 +243,7 @@ for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 
 say "Updating the node (sentora-node-update)"
 in_box 'rm -rf /root/src && mkdir /root/src'
+docker cp "$REPO/node/sentora2027-node" "$NAME:/root/src/sentora2027-node"
 docker cp "$REPO/node/sentora2027-node-alma10" "$NAME:/root/src/sentora2027-node-alma10"
 docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/src/sentora-node-agent.php"
 # (a "newer" agent: the copy says version 999)
@@ -247,6 +259,9 @@ grep -q '"agent":"999"' <(php -r 'require "'"$T"'/root/dryden/loader.inc.php"; e
 in_box "grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile" && ok "the node's settings were kept" || bad "Caddyfile lost its settings"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && [[ "$(panel state "$CID")" == running* ]] && ok "the customer's app kept running behind its setup password" || bad "after the update: HTTP $C, $(panel state "$CID")"
+# (older nodes' sentora-node-update still fetch the old installer name: it must hand over to the new one)
+U3=$(in_box 'SNODE_RAW_BASE=file:///root/src bash /root/src/sentora2027-node-alma10 --update --agent /root/src/sentora-node-agent.php' 2>&1)
+echo "$U3" | grep -q "^Done: this node is up to date (agent 999)" && ok "the old installer name hands over to the new one" || bad "old installer name: $(echo "$U3" | tail -5)"
 C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1)
 echo "$C2" | grep -q "Agent: up to date (version 999)" && echo "$C2" | grep -q "Node setup: up to date" && ok "--check: up to date" || bad "--check after: $C2"
 in_box 'echo "<?php syntax error" > /root/src/sentora-node-agent.php'

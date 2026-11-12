@@ -117,7 +117,7 @@ $r = req(1, 'AddNode', array('inName' => 'bad name;rm'));
 check(strpos($r['text'], 'Give the node a name') !== false, 'a bad node name is refused');
 $r = req(1, 'AddNode', array('inName' => 'node1'));
 check(preg_match('/--key (v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+) --code (\d+\.[0-9a-f]{32})/', $r['command'], $m) === 1, 'install command with the panel\'s keys and a code', $r['command']);
-check(strpos($r['html'], 'sentora2027-node-alma10') !== false && strpos($r['html'], '--panel &#039;https://panel.example&#039;') !== false, 'the command is shown with the installer and the panel\'s address');
+check(strpos($r['html'], 'node/sentora2027-node ') !== false && strpos($r['html'], '--panel &#039;https://panel.example&#039;') !== false, 'the command is shown with the installer and the panel\'s address');
 $key = $m[1];
 $code = $m[2];
 check(val("SELECT nd_code_vc FROM x_dh_nodes") === hash('sha256', explode('.', $code)[1]), 'only the code\'s hash is kept');

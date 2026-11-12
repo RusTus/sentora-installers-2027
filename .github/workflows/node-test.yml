@@ -1,5 +1,5 @@
-# Docker Hosting node test: a real AlmaLinux 10 (and Rocky Linux 10) in a container with systemd is made a
-# node with node/sentora2027-node-alma10 and linked to a stand-in panel running the add-on
+# Docker Hosting node test: a real AlmaLinux 10, Rocky Linux 10, Fedora 45, Debian 13 and Ubuntu 26.04 in a container
+# with systemd is made a node with node/sentora2027-node and linked to a stand-in panel running the add-on
 # (sentora-repo/docker_hosting.zpp); it must then really run an app (rootless Podman as the customer's
 # user, limits held, Caddy with the setup password, public, restart, delete). Also runs the add-on's
 # own tests (tests/docker_hosting/run.sh). Results kept 14 days.
@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [alma10, rocky10]
+        system: [alma10, rocky10, fedora45, debian13, ubuntu26.04]
     steps:
       - uses: actions/checkout@v5
       - name: PHP for the stand-in panel

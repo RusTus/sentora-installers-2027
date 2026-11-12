@@ -28,6 +28,8 @@
  * Paths for tests: SNODE_ETC (/etc/sentora-node), SNODE_STATE (/var/lib/sentora-node),
  * SNODE_CADDY (/etc/caddy), SNODE_RUN (/run/user), SNODE_HOME (/home), SNODE_SUBID (/etc: subuid,
  * subgid), SNODE_USERPATH (PATH of the customers' commands), SNODE_KEYFILE (/root/sentora-node-key.txt).
+ * What differs between systems (Caddy's folder, service and group, the no-login shell) comes from
+ * /etc/sentora-node/platform.conf, written by the installer for its system (P()).
  *
  * @package Sentora
  * @license GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
@@ -40,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '109';
+    const VERSION = '110';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -62,12 +64,27 @@ class snode
     static $sysCheckAt = 0;
     static $fence = null;
     static $fenceAt = 0;
+    static $platform = array();
+
+    /**
+     * A name that differs between systems, from platform.conf (KEY=value lines, written by the
+     * installer for its system), or the given default.
+     */
+    static function P($key, $default)
+    {
+        return isset(self::$platform[$key]) && self::$platform[$key] !== '' ? self::$platform[$key] : $default;
+    }
 
     static function Init()
     {
         self::$etc = getenv('SNODE_ETC') ?: '/etc/sentora-node';
+        foreach ((array) @file(self::$etc . '/platform.conf', FILE_IGNORE_NEW_LINES) as $l) {
+            if (preg_match('/^([A-Z_]{1,32})=([A-Za-z0-9_.\/@:+-]{0,200})$/', (string) $l, $m)) {
+                self::$platform[$m[1]] = $m[2];
+            }
+        }
         self::$state = getenv('SNODE_STATE') ?: '/var/lib/sentora-node';
-        self::$caddy = getenv('SNODE_CADDY') ?: '/etc/caddy';
+        self::$caddy = getenv('SNODE_CADDY') ?: self::P('CADDY_DIR', '/etc/caddy');
         self::$run = getenv('SNODE_RUN') ?: '/run/user';
         self::$home = getenv('SNODE_HOME') ?: '/home';
         umask(077);
@@ -341,7 +358,7 @@ class snode
     {
         $uid = self::Uid($user);
         if ($uid < 0) {
-            $r = self::Run(array('useradd', '--create-home', '--home-dir', self::$home . '/' . $user, '--shell', '/sbin/nologin', '--comment', 'Sentora Docker Hosting', $user));
+            $r = self::Run(array('useradd', '--create-home', '--home-dir', self::$home . '/' . $user, '--shell', self::P('NOLOGIN', '/sbin/nologin'), '--comment', 'Sentora Docker Hosting', $user));
             if ($r[0] !== 0) {
                 return 'useradd: ' . trim($r[1]);
             }
@@ -686,11 +703,11 @@ class snode
         $old = is_file($file) ? (string) file_get_contents($file) : '';
         if ($old !== $t) {
             self::WriteFile($file, $t, 0644);
-            $v = self::Run(array('caddy', 'validate', '--config', $file, '--adapter', 'caddyfile'), null, 60);
-            $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', 'caddy'), null, 60) : $v;
+            $v = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'validate', '--config', $file, '--adapter', 'caddyfile'), null, 60);
+            $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', self::P('CADDY_SERVICE', 'caddy')), null, 60) : $v;
             if ($r[0] !== 0) {
                 self::WriteFile($file, $old, 0644);
-                self::Run(array('systemctl', 'reload', 'caddy'), null, 60);
+                self::Run(array('systemctl', 'reload', self::P('CADDY_SERVICE', 'caddy')), null, 60);
                 return array(false, 'settings: ' . self::Tail($r[1]));
             }
         }
@@ -863,18 +880,18 @@ class snode
         }
         self::WriteFile($file, $t, 0644);
         // (it holds the setup passwords' hashes: root and Caddy read it, nobody else)
-        if (@chgrp($file, 'caddy')) {
+        if (@chgrp($file, self::P('CADDY_GROUP', 'caddy'))) {
             @chmod($file, 0640);
         }
-        $v = self::Run(array('caddy', 'validate', '--config', self::$caddy . '/Caddyfile', '--adapter', 'caddyfile'), null, 60);
-        $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', 'caddy'), null, 60) : $v;
+        $v = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'validate', '--config', self::$caddy . '/Caddyfile', '--adapter', 'caddyfile'), null, 60);
+        $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', self::P('CADDY_SERVICE', 'caddy')), null, 60) : $v;
         if ($r[0] !== 0) {
             if ($old === null) {
                 @unlink($file);
             } else {
                 self::WriteFile($file, $old, 0644);
             }
-            self::Run(array('systemctl', 'reload', 'caddy'), null, 60);
+            self::Run(array('systemctl', 'reload', self::P('CADDY_SERVICE', 'caddy')), null, 60);
             return 'proxy: ' . self::Tail($r[1]);
         }
         return '';
@@ -895,11 +912,12 @@ class snode
         $cpus = preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
         $home = is_dir(self::$home) ? self::$home : '/';
         $p = self::Run(array('podman', '--version'), null, 20);
-        $c = self::Run(array('caddy', 'version'), null, 20);
+        $c = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'version'), null, 20);
         $se = self::Run(array('getenforce'), null, 10);
         return array('cpus' => max(1, (int) $cpus), 'mem_mb' => $mem, 'disk_total_mb' => (int) (disk_total_space($home) / 1048576), 'disk_free_mb' => (int) (disk_free_space($home) / 1048576),
             'os' => $os, 'kernel' => php_uname('r'), 'podman' => $p[0] === 0 ? trim(str_replace('podman version', '', $p[1])) : 'missing',
-            'caddy' => $c[0] === 0 ? strtok(trim($c[1]), ' ') : 'missing', 'agent' => self::VERSION, 'selinux' => $se[0] === 0 ? trim($se[1]) : '')
+            'caddy' => $c[0] === 0 ? strtok(trim($c[1]), ' ') : 'missing', 'agent' => self::VERSION, 'selinux' => $se[0] === 0 ? trim($se[1]) : '',
+            'apparmor' => is_file('/sys/module/apparmor/parameters/enabled') ? (trim((string) @file_get_contents('/sys/module/apparmor/parameters/enabled')) === 'Y' ? 'on' : 'off') : '')
             + self::SysInfo();
     }
 
