@@ -161,6 +161,8 @@ fail2ban-client set <jail> unbanip <address>
 | `preconf/goaccess/` | GoAccess source, built at install |
 | `preconf/php-build/` | Scripts to build and update the extra PHP versions |
 | `sentora-repo/` | The add-on module repository (QuickFig, Apps, Payment Plans, PHP-Adminer, Webalizer Stats, Visitor Stats, Log Forwarder), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
+| `node/` | Docker Hosting's node installer (`sentora2027-node`, every supported system) and its agent |
+| `backup/` | The Sentora backup server installer (`sentora2027-backup-server`) and its gate, for the panel's off-server backup |
 | `feedback-server/` | The feedback server (PHP and SQLite; upload its `public_html/` as a website): panels' daily customer-feedback reports, the Sentora-2027 add-ons' download counts and their ratings and comments from Repo Browser, and a statistics page; see its [README](feedback-server/README.md) |
 | `feedback-endpoint.txt` | Where panels send that report: the statistics server's address, read by every panel once a day (none: nothing is sent) |
 
