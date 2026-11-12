@@ -5,6 +5,10 @@ name: Backup server test
 
 on:
   workflow_dispatch:
+    inputs:
+      core_ref:
+        description: 'sentora-core-2027 branch for the panel side (sentora-backup-common)'
+        default: master2027
   push:
     branches: [master2027, docker-hosting]
     paths:
@@ -25,10 +29,16 @@ jobs:
         system: [alma10, rocky10, fedora45, debian13, ubuntu26.04]
     steps:
       - uses: actions/checkout@v5
+      - name: The core (the panel's side)
+        uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-core-2027
+          ref: ${{ inputs.core_ref || 'master2027' }}
+          path: core
       - name: rsync on the runner
         run: command -v rsync || sudo apt-get install -y rsync
       - name: Backup server
-        run: .github/scripts/backup-server-test.sh results ${{ matrix.system }}
+        run: CORE=$PWD/core .github/scripts/backup-server-test.sh results ${{ matrix.system }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:

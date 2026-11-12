@@ -93,6 +93,29 @@ in_box 'sshd -t' && ok "SSH's settings are valid" || bad "sshd -t failed"
 in_box 'stat -c "%U %a" /etc/ssh/sentora-backup/authorized_keys' | grep -qx 'root 644' && ok "the keys file belongs to root (the backup user can not add keys)" || bad "keys file: $(in_box 'stat -c "%U %a" /etc/ssh/sentora-backup/authorized_keys')"
 in_box 'stat -c "%U %a" /srv/sentora-backups' | grep -qx 'sentora-backup 700' && ok "the copies' folder: the backup user's only" || bad "folder: $(in_box 'stat -c "%U %a" /srv/sentora-backups')"
 
+if [ -n "${CORE:-}" ] && [ -f "$CORE/bin/sentora-backup-common" ]; then
+    say "The panel's side (the core's sentora-backup-common)"
+    printf 'OB_ENABLED=true\nOB_SERVER=%s\nOB_PORT=22\nOB_USER=sentora-backup\nOB_PATH=/\nOB_KEEP=3\nOB_HOSTKEY=%s\n' "$IP" "$FP" > "$W/settings"
+    PANELSIDE='. "$CORE/bin/sentora-backup-common"
+        BASE="$(rpath)/panel9"; BASE=${BASE//\/\//\/}
+        pin_hostkey || exit 9
+        is_gate && echo gate
+        there_ready "$BASE"
+        there_begin "$BASE" 2026-11-12 && echo begun
+        rsync -aHR --numeric-ids -e "$SSH" "$SRC/./manifest.json" "$(rhost):$BASE/2026-11-12.partial/" && echo copied
+        there_finish "$BASE" 2026-11-12 3 && echo finished
+        there_latest "$BASE" && echo latest
+        echo "count $(there_count "$BASE")"'
+    o=$(CORE="$CORE" SRC="$W/src" SENTORA_OFFSITE_SETTINGS="$W/settings" SENTORA_OFFSITE_KEY="$W/k1" SENTORA_OFFSITE_KNOWN="$W/panel_known" bash -c "$PANELSIDE" 2>&1)
+    echo "$o" | sed 's/^/    /'
+    for w in gate ready begun copied finished latest "count 1"; do echo "$o" | grep -qx "$w" || bad "the panel's side: no '$w'"; done
+    echo "$o" | grep -qx "count 1" && ok "the panel's own steps work through the gate (its key checked)"
+    grep -q "$IP" "$W/panel_known" && ok "the backup server's key is kept once it matched" || bad "no key kept"
+    printf 'OB_SERVER=%s\nOB_PORT=22\nOB_USER=sentora-backup\nOB_PATH=/\nOB_HOSTKEY=SHA256:%s\n' "$IP" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" > "$W/settings2"
+    o=$(CORE="$CORE" SENTORA_OFFSITE_SETTINGS="$W/settings2" SENTORA_OFFSITE_KEY="$W/k1" SENTORA_OFFSITE_KNOWN="$W/panel_known2" bash -c '. "$CORE/bin/sentora-backup-common"; pin_hostkey; echo "rc=$?"' 2>&1)
+    echo "$o" | grep -q "rc=1" && echo "$o" | grep -q "not the one set in the panel" && ok "another key than the panel's fingerprint: refused" || bad "wrong fingerprint: $o"
+fi
+
 say "A second panel"
 "${SSH2[@]}" "$B" sentora-backup hello > /dev/null 2>&1 && bad "an unknown key got in" || ok "a key not added: refused"
 in_box "sentora-backup-server add --key '$(cat "$W/k2.pub")'" > "$W/add.txt" 2>&1
