@@ -253,7 +253,8 @@ check((int) $c2['dc_dns_fk'] === 0 && (int) $c2['dc_port_in'] === 20001, 'no rec
 $r = req(3, 'Deploy', array_merge($base, array('inName' => 'kuma3')));
 check(strpos($r['text'], 'no containers left') !== false, 'its count is used up');
 $r = req(3);
-check(strpos($r['html'], 'point kuma2.example.com (A record)') !== false, 'told to add the record itself where it was not added');
+check(strpos($r['html'], 'add an A record for kuma2.example.com pointing to 127.0.0.1') !== false, 'told to add the record itself where it was not added (with the node\'s address)');
+check(strpos($r['html'], 'Web address of the app') !== false && strpos($r['html'], 'id="dh-url"') !== false, 'the form explains the address and shows where the app will be');
 
 section('the node does the jobs');
 $o = agent('once');
@@ -409,9 +410,11 @@ $r = req(2, 'Grant', array('inAcc' => '4', 'inOff' => '1'));
 check(strpos($r['text'], 'taken back') !== false, 'a share not in use can be taken back');
 
 section('the rest');
-$r = req(1, 'Settings', array('inApps' => array('gitea'), 'inUrl' => 'https://panel.example:2083'));
+$r = req(1, 'Settings', array('inApps' => array('gitea')));
+$r = req(1, 'AddNode', array('inName' => 'node3', 'inUrl' => 'https://panel.example:2083'));
+check(strpos($r['command'], "--panel 'https://panel.example:2083'") !== false, 'the panel address typed when adding a node goes into its command');
 check(dh::Get('apps') === 'gitea' && dh::PanelUrl() === 'https://panel.example:2083', 'apps offered and the panel\'s address saved');
-$r = req(1, 'Settings', array('inApps' => array('gitea'), 'inUrl' => 'https://x.example/path"'));
+$r = req(1, 'AddNode', array('inName' => 'node4', 'inUrl' => 'https://x.example/path"'));
 check(strpos($r['text'], 'nothing after it') !== false, 'a bad panel address is refused');
 check(dh::Grant(2)['apps'] === array('gitea') && dh::Grant(1)['apps'] === array('gitea'), 'an app taken away is not offered any more (down the tree too)');
 $r = req(1, 'Node', array('inId' => '1', 'inIp' => '10.0.0.1', 'inAccepting' => '1'));
