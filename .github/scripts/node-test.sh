@@ -125,7 +125,7 @@ PIDS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) p
 say "Caddy in front"
 code() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.test:443:127.0.0.1 $1 https://kuma.example.test/"; }
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
-[ "$C" = 401 ] && ok "HTTPS asks for the setup password (401)" || bad "without the setup password: HTTP $C (want 401)"
+[ "$C" = 401 ] && ok "HTTPS asks for the setup password (401)" || { bad "without the setup password: HTTP $C (want 401)"; in_box "caddy version; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -5; sed -n 1,20p /etc/caddy/sentora/sites.caddy; journalctl -u caddy --no-pager | tail -8; journalctl -u sentora-node --no-pager | grep -iE \"caddy|proxy|sites\" | tail -5"; }
 PW=$(panel setup "$CID")
 for _ in $(seq 1 40); do C=$(code "-u setup:$PW"); case "$C" in 200|302) break ;; esac; sleep 3; done   # (502 while the app still starts)
 case "$C" in 200|302) ok "with the setup password: the app answers ($C)" ;; *) bad "with the setup password: HTTP $C" ;; esac
