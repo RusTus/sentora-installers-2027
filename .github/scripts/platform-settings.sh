@@ -49,6 +49,13 @@ for inst in sys.argv[3:]:
     if not tag:
         sys.exit(inst + ': sets no php_bundle_tag')
     systems[tag] = dict(sorted(vals.items()))
-json.dump({'systems': systems}, open(out, 'w'), indent=1, sort_keys=True)
-print(out + ': ' + ', '.join('%s %d' % (t, len(v)) for t, v in systems.items()))
+# Sentora's paths for the AppArmor profiles that need them (preconf/apparmor/local: sentora-apparmor
+# on servers installed before these files came with the installer)
+import os
+aa = {}
+d = 'preconf/apparmor/local'
+for p in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+    aa[p] = open(os.path.join(d, p)).read()
+json.dump({'systems': systems, 'apparmor_local': aa}, open(out, 'w'), indent=1, sort_keys=True)
+print(out + ': ' + ', '.join('%s %d' % (t, len(v)) for t, v in systems.items()) + '; AppArmor: ' + ', '.join(aa))
 EOF

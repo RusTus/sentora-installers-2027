@@ -1185,6 +1185,7 @@ ln -sf $PANEL_PATH/panel/bin/sentora-update /usr/local/sbin/sentora-update
 ln -sf $PANEL_PATH/panel/bin/sentora-update-check /usr/local/sbin/sentora-update-check
 ln -sf $PANEL_PATH/panel/bin/sentora-post-install-check /usr/local/sbin/sentora-post-install-check
 ln -sf $PANEL_PATH/panel/bin/sentora-firewall /usr/local/sbin/sentora-firewall
+ln -sf $PANEL_PATH/panel/bin/sentora-apparmor /usr/local/sbin/sentora-apparmor
 ln -s $PANEL_PATH/panel/bin/setzadmin /usr/bin/setzadmin
 
 #
@@ -2171,7 +2172,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup $PANEL_PATH/panel/bin/sentora-firewall 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup $PANEL_PATH/panel/bin/sentora-firewall $PANEL_PATH/panel/bin/sentora-apparmor 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root

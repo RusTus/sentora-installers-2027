@@ -115,6 +115,17 @@ if in_box 'test -d /etc/apparmor.d && command -v apparmor_parser' > /dev/null 2>
     AA=1
 fi
 
+if [ $AA -eq 1 ]; then
+    say "sentora-apparmor on, as on a server whose older installer left Sentora's paths out"
+    in_box 'for f in /etc/apparmor.d/local/*; do [ -f "$f" ] && sed -i "/^# BEGIN Sentora/,/^# END Sentora/d" "$f"; done
+        sentora-apparmor on --yes --container; echo "exit $?"
+        sentora-apparmor status' > "$OUT/apparmor-tool.txt" 2>&1
+    cat "$OUT/apparmor-tool.txt"
+    if grep -q "^exit 0" "$OUT/apparmor-tool.txt" && grep -q "AppArmor is on" "$OUT/apparmor-tool.txt" && ! grep -q "paths missing" "$OUT/apparmor-tool.txt"; then
+        echo "APPARMOR-TOOL: PASSED" >> "$OUT/apparmor-tool.txt"
+    else echo "APPARMOR-TOOL: FAILED" >> "$OUT/apparmor-tool.txt"; fi
+fi
+
 say "Restarting the server (services must come back by themselves)"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 90); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
@@ -269,6 +280,7 @@ if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check ha
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
+if [ $AA -eq 1 ] && ! grep -q 'APPARMOR-TOOL: PASSED' "$OUT/apparmor-tool.txt"; then echo "::error::$SYS: sentora-apparmor on did not work (apparmor-tool.txt)"; ok=0; fi
 if ! grep -q 'FIREWALL: PASSED' "$OUT/firewall.txt"; then echo "::error::$SYS: the firewall did not open exactly Sentora's ports (firewall.txt)"; ok=0; fi
 if ! grep -q 'HOURLY: PASSED' "$OUT/hourly.txt"; then echo "::error::$SYS: an hourly job failed (hourly.txt)"; ok=0; fi
 if ! grep -q 'PLATFORM: PASSED' "$OUT/platform-settings.txt"; then echo "::error::$SYS: this system's settings were not filled in as its installer sets them (platform-settings.txt)"; ok=0; fi
