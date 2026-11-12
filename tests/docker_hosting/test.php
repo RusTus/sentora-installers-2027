@@ -317,6 +317,14 @@ check(strpos($r['text'], 'ok:') !== false, 'limits within the share', $r['text']
 agent('once');
 check(strpos((string) @file_get_contents(getenv('FAKE_DIR') . '/podman/sdh3/c/sdh-' . $c1['dc_id_pk'] . '/updates'), 'update --cpus 0.75 --memory 512m --memory-swap 512m') !== false, 'podman update with the new limits');
 
+// an agent from before 105 sends its message bare (text/plain): still understood
+$oldAgent = getenv('DH_W') . '/old-agent.php';
+$src = file_get_contents(getenv('DH_AGENT'));
+// (the same as an agent from before 105: only bare messages)
+file_put_contents($oldAgent, str_replace('static $bare = false;', 'static $bare = true;', $src));
+check(strpos(file_get_contents($oldAgent), 'static $bare = true;') !== false, '(an agent that sends bare messages only, as before 105)');
+$o = shell_exec('PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg($oldAgent) . ' once 2>&1; echo "exit=$?"');
+check(strpos($o, 'exit=0') !== false && strpos($o, 'HTTP 400') === false, 'an agent from before 105 (its message sent bare) is still understood', $o);
 section('the node checks what it is given');
 $cid = (int) $c2['dc_id_pk'];
 dh::Queue(1, $cid, 'create', array('cid' => $cid, 'user' => 'sdh3', 'image' => 'docker.io/x/y;rm -rf /', 'port' => 80, 'hostport' => 20001, 'env' => array(), 'volumes' => array(),

@@ -387,13 +387,13 @@ run_daemon();
 $jc = array_values(preg_grep('/^journalctl /', $GLOBALS['calls']));
 check($jc && strpos($jc[0], "'--after-cursor=s=abc;i=last'") !== false && strpos($jc[0], '-t snuffleupagus') !== false, 'the next run reads on from there', implode("\n", $jc));
 $many = array();
-for ($i = 0; $i < 1005; $i++) {
+for ($i = 0; $i < ph::KEEP + 5; $i++) {
     $many[] = jline("[snuffleupagus][1.2.3.4][disabled_function][drop] n$i in $W/hosted/bob/a.php on line 1");
 }
 $GLOBALS['journal'] = implode("\n", $many);
 run_daemon();
 global $zdbh;
-check((int) $zdbh->query("SELECT COUNT(*) FROM x_ph_caught")->fetchColumn() === 1000, 'at most 1000 kept (the oldest go)');
+check((int) $zdbh->query("SELECT COUNT(*) FROM x_ph_caught")->fetchColumn() === ph::KEEP, 'at most ' . ph::KEEP . ' kept (the oldest go)');
 $GLOBALS['journal'] = jline('[snuffleupagus][1.2.3.4][disabled_function][drop] <script>alert(1)</script> in ' . $W . '/hosted/bob/<b>.php on line 1') . "\n"
     . jline("[snuffleupagus][1.2.3.4][disabled_function][simulation] watched in $W/hosted/bob/a.php on line 1");
 run_daemon();
@@ -420,6 +420,12 @@ check(strpos($c, "SecDataDir \"$W/modsec/data\"") !== false && strpos($c, "SecAu
 check(strpos($c, 'SecAuditLogParts AHZ') !== false, 'the audit log keeps no headers or bodies (parts A, H, Z)');
 check(strpos($c, 'tx.blocking_paranoia_level=2') !== false && strpos($c, 'tx.inbound_anomaly_score_threshold=10') !== false, 'level and score');
 check(strpos($c, 'SecRule SERVER_NAME "@rx ^(?:www\\.)?(?:panel\\.example)$" "id:99100,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleEngine=DetectionOnly"') !== false, 'the panel itself: watched only (never blocked: no lock-out)', $c);
+check(preg_match('/SecRule SERVER_NAME "@rx (\\^\\(\\?:\\[0-9\\][^"]+)" "id:99102,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleEngine=DetectionOnly"/', $c, $ipm) === 1, 'the panel by the server\'s IP address: watched only too', $c);
+$iprx = '/' . str_replace('/', '\\/', stripcslashes($ipm[1])) . '/';
+check(preg_match($iprx, '172.16.1.250') && preg_match($iprx, '[fe80::1]') && preg_match($iprx, '') && !preg_match($iprx, 'bob.example') && !preg_match($iprx, 'deadbeef') && !preg_match($iprx, '1.2.3.4.evil.example'),
+    '(the IP rule matches addresses only, never a site\'s name)', $iprx);
+eval('class ctrl_branding { static function Addresses() { return array(array(\'host\' => \'panel.reseller.example\'), array(\'host\' => \'bad name\')); } }');
+check(ph_modsec::PanelHosts() === array('panel.example', 'panel.reseller.example'), 'resellers\' panel addresses (Branding) are the panel too; nonsense left out', json_encode(ph_modsec::PanelHosts()));
 check(strpos($c, 'SecRule SERVER_NAME "@rx ^(?:www\\.)?(?:bob\\.example)$" "id:99101,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleEngine=Off"') !== false, 'the chosen domains: left alone (with or without www.)', $c);
 check(strpos(ph_modsec::Conf('on', 1, 5, array(), array()), 'ruleEngine=Off') === false, 'no domains chosen: nothing is left alone');
 check(strpos($c, 'SecRuleRemoveById 942100 920350') !== false, 'rules switched off');
@@ -514,7 +520,7 @@ $audit = "$W/log/modsec_audit.log";
 file_put_contents($audit,
     audit('3c6a5b1f', '10/Nov/2026:13:20:01.123456 -0600', '203.0.113.9', 'www.bob.example', '/index.php', array(array('941100', 'XSS Attack Detected via libinjection'), array('941110', 'XSS Filter - Category 1: Script Tag Vector'), array('949110', 'Inbound Anomaly Score Exceeded (Total Score: 10)'), array('980170', 'Anomaly Scores: (Inbound Scores: blocking=10)')), true)
     . audit('4d7b6c2a', '10/Nov/2026:13:21:00 -0600', '198.51.100.7', 'nobody.example', '/wp-login.php', array(array('942100', 'SQL Injection Attack Detected via libinjection'), array('949110', 'Inbound Anomaly Score Exceeded (Total Score: 5)')), false)
-    . audit('5e8c7d3b', '10/Nov/2026:13:22:00 -0600', '198.51.100.8', 'bob.example', '/ok.php', array(array('920350', 'Host header is a numeric IP address')), false)
+    . audit('5e8c7d3b', '10/Nov/2026:13:22:00.5 --0600', '198.51.100.8', 'bob.example', '/ok.php', array(array('920350', 'Host header is a numeric IP address')), false)
     . "--6f9d8e4c-A--\n[10/Nov/2026:13:23:00 -0600] half 1.2.3.4 1 2 3\n--6f9d8e4c-H--\nMessage: Warning. [id \"949110\"]\n");
 $n = ph_modsec::ReadLog();
 $c = ph::Caught();
@@ -524,6 +530,9 @@ check($b['ca_feature_vc'] === 'modsecurity' && $b['ca_action_vc'] === 'drop' && 
 check($b['ca_message_tx'] === 'Rules 941100 XSS Attack Detected via libinjection; 941110 XSS Filter - Category 1: Script Tag Vector', 'its rules with their numbers (CRS\'s bookkeeping left out)', $b['ca_message_tx']);
 check((int) $b['ca_time_in'] === (new DateTime('2026-11-10 13:20:01', new DateTimeZone('-0600')))->getTimestamp(), 'its time');
 check($c[0]['ca_action_vc'] === 'simulation' && $c[0]['ca_account_vc'] === '' && strpos($c[0]['ca_message_tx'], '942100') !== false, 'watch only: would block; a domain not on this server is nobody\'s');
+$ent = ph_modsec::Entries(audit('1a2b3c4d', '10/Nov/2026:13:22:00.483725 --0600', '1.2.3.4', 'bob.example', '/', array(array('942100', 'x'), array('949110', 'y')), false));
+check(count($ent) === 1 && $ent[0]['time'] === (new DateTime('2026-11-10 13:22:00', new DateTimeZone('-0600')))->getTimestamp(), 'ModSecurity\'s own way of writing a zone west of Greenwich ("--0600"): its real time, not the time it was read', json_encode($ent));
+check(ph::KindOf('modsecurity', $c[1]['ca_message_tx']) === 'xss' && $c[1]['ca_kind_vc'] === 'xss' && $c[0]['ca_kind_vc'] === 'sqli', 'each line knows its kind of attack');
 check(ph_modsec::ReadLog() === 0, 'read again: nothing new');
 file_put_contents($audit, "Message: Warning. [id \"941100\"] [msg \"x\"] [hostname \"bob.example\"] [uri \"/a\"]\nAction: Intercepted (phase 2)\n\n--6f9d8e4c-Z--\n\n", FILE_APPEND);
 check(ph_modsec::ReadLog() === 1, 'the rest of the half entry, once written: read');
@@ -604,23 +613,56 @@ $h = page(1);
 $top = ph::NewestId();
 check(strpos($h, 'id="ph-caught"') !== false && strpos($h, 'data-last="' . $top . '"') !== false && strpos($h, 'data-feed="modules/php_hardening/code/caught.php"') !== false, 'the list knows its newest line and where to ask for more');
 check(strpos($h, 'The server last looked at') !== false && strpos($h, 'Look now') !== false && strpos($h, 'Pause') !== false && strpos($h, 'Nothing yet.') !== false, 'says when the server last looked; Look now and Pause; "Nothing yet" while empty');
+check(strpos($h, 'data-tab="stats"') !== false && strpos($h, 'class="form-control ph-q"') !== false && strpos($h, '<option value="sqli">SQL injection</option>') !== false, 'tabs (list, statistics), search, and the kinds of attack to pick');
 check(strpos(file_get_contents("$MOD/module.zpm"), 'modules/php_hardening/assets/ph.js') !== false && is_file("$MOD/assets/ph.js"), 'the page loads its script');
-$f = module_controller::Feed($top);
+$f = module_controller::Feed(array('after' => (string) $top));
 check($f['count'] === 0 && $f['rows'] === '' && $f['last'] === $top, 'nothing new: nothing sent');
-$zdbh->prepare("INSERT INTO x_ph_caught (ca_time_in, ca_account_vc, ca_feature_vc, ca_action_vc, ca_message_tx, ca_file_tx, ca_line_in, ca_ip_vc) VALUES (:t, 'bob', 'modsecurity', 'drop', :m, '/x<b>.php', 0, '203.0.113.5')")
-    ->execute(array(':t' => time(), ':m' => 'Rules 1 <script>alert(2)</script>'));
-$zdbh->prepare("INSERT INTO x_ph_caught (ca_time_in, ca_account_vc, ca_feature_vc, ca_action_vc, ca_message_tx, ca_file_tx, ca_line_in, ca_ip_vc) VALUES (:t, '', 'snuffleupagus', 'simulation', 'second', '', 0, '')")
-    ->execute(array(':t' => time()));
-$f = module_controller::Feed($top);
+$zdbh->exec("DELETE FROM x_ph_daily");
+$add = function ($t, $acc, $feat, $act, $msg, $file, $ip) { ph::Add(array('time' => $t, 'account' => $acc, 'feature' => $feat, 'action' => $act, 'message' => $msg, 'file' => $file, 'line' => 0, 'ip' => $ip)); };
+$add(time(), 'bob', 'modsecurity', 'drop', 'Rules 942100 <script>alert(2)</script>', 'bob.example/x<b>.php', '203.0.113.5');
+$add(time(), '', 'disabled_function', 'simulation', 'second 100%_done', '/hosted/bob/a.php', '');
+$f = module_controller::Feed(array('after' => (string) $top));
 check($f['count'] === 2 && $f['last'] === ph::NewestId() && strpos($f['rows'], 'second') < strpos($f['rows'], 'alert'), 'new lines come, newest first, with the newest number', json_encode($f));
 check(strpos($f['rows'], '&lt;script&gt;alert(2)') !== false && strpos($f['rows'], '<script>') === false && strpos($f['rows'], '&lt;b&gt;.php') !== false, 'they come escaped by the server');
-check(module_controller::Feed($f['last'])['count'] === 0, 'asked again: nothing twice');
+check(strpos($f['rows'], 'SQL injection') !== false && strpos($f['rows'], 'PHP: forbidden functions') !== false, 'with their kind of attack');
+check(module_controller::Feed(array('after' => (string) $f['last']))['count'] === 0, 'asked again: nothing twice');
 check(strpos($f['looked'], 'The server last looked at') !== false && strpos($f['looked'], '&') === false, 'the "last looked" words come as plain text');
+// many lines: pages, search, filters
+for ($i = 0; $i < 120; $i++) {
+    $add(time() - $i * 600, 'alice', 'modsecurity', $i % 3 ? 'simulation' : 'drop', 'Rules 920350 Host header is a numeric IP address; 931130 Possible Remote File Inclusion', '172.16.1.250/x?u=http://a', '172.16.6.' . ($i % 4));
+}
+$p1 = module_controller::Feed(array('before' => '0'));
+check($p1['count'] === ph::PAGE && $p1['more'] === true && $p1['total'] === 122, 'a page at a time (50), with how many there are', json_encode(array($p1['count'], $p1['more'], $p1['total'])));
+$p2 = module_controller::Feed(array('before' => (string) $p1['oldest']));
+$p3 = module_controller::Feed(array('before' => (string) $p2['oldest']));
+check($p2['count'] === 50 && $p3['count'] === 22 && $p3['more'] === false && $p2['oldest'] < $p1['oldest'], 'older pages until the end, no line twice');
+check(module_controller::Feed(array('before' => '0', 'q' => 'alert'))['total'] === 1 && module_controller::Feed(array('before' => '0', 'q' => '172.16.6.3'))['total'] === 30, 'search: words, addresses');
+check(module_controller::Feed(array('before' => '0', 'q' => '100%_'))['total'] === 1 && module_controller::Feed(array('before' => '0', 'q' => '%'))['total'] === 1 && module_controller::Feed(array('before' => '0', 'q' => '_'))['total'] === 1, 'search: % and _ are only characters (not wildcards)');
+check(module_controller::Feed(array('before' => '0', 'q' => "' OR 1=1 --"))['total'] === 0, '(a search can not change the query)');
+check(module_controller::Feed(array('before' => '0', 'kind' => 'rfi'))['total'] === 120 && module_controller::Feed(array('before' => '0', 'kind' => 'nope'))['total'] === 122, 'by kind (an unknown kind: ignored)');
+check(module_controller::Feed(array('before' => '0', 'act' => 'drop'))['total'] === 41 && module_controller::Feed(array('before' => '0', 'act' => 'watch'))['total'] === 81, 'blocked, or would block');
+check(module_controller::Feed(array('before' => '0', 'guard' => 'php'))['total'] === 1 && module_controller::Feed(array('before' => '0', 'guard' => 'modsecurity', 'kind' => 'sqli'))['total'] === 1, 'by guard, and filters together');
+$lv = module_controller::Feed(array('after' => (string) $p1['last'], 'q' => 'alert'));
+check($lv['count'] === 0, 'new lines follow the filters too');
+// statistics
+$st = module_controller::Feed(array('stats' => '1', 'days' => '30'))['stats'];
+check($st['drop'] === 41 && $st['watch'] === 81 && $st['sources'] === 5, 'statistics: blocked, would block, different sources', json_encode(array($st['drop'], $st['watch'], $st['sources'])));
+check($st['kinds'][0]['key'] === 'rfi' && $st['kinds'][0]['n'] === 120 && $st['kinds'][0]['label'] === 'Remote file inclusion', 'kinds of attack, most first, with their words');
+check(count($st['days']) === 30 && end($st['days'])['day'] === date('Y-m-d'), 'each of the 30 days (today last)');
+check($st['ips'][0]['n'] === 30 && count($st['hours']) === 24 && $st['targets'][0]['label'] === 'alice', 'where from, what they went after, the last 24 hours');
+check(count(module_controller::Feed(array('stats' => '1', 'days' => '99999'))['stats']['days']) === ph::DAYS && count(module_controller::Feed(array('stats' => '1', 'days' => 'x'))['stats']['days']) === 30, 'days: at most a year and a bit; nonsense: 30');
+check(json_encode($st) !== false && strpos(json_encode($st), '<') === false, '(the statistics are numbers and plain words)');
+// the counts outlive the list
+page(1, 'Clear', array());
+check(count(ph::Caught()) === 0 && module_controller::Feed(array('stats' => '1', 'days' => '30'))['stats']['drop'] === 41, 'emptying the list keeps the statistics');
+$zdbh->exec("INSERT INTO x_ph_daily (dy_day_vc, dy_kind_vc, dy_action_vc, dy_count_in) VALUES ('2020-01-01', 'xss', 'drop', 5)");
+ph::Prune();
+check((int) $zdbh->query("SELECT COUNT(*) FROM x_ph_daily WHERE dy_day_vc = '2020-01-01'")->fetchColumn() === 0, 'daily counts older than ' . ph::DAYS . ' days go');
 $src = file_get_contents("$MOD/code/caught.php");
 check(strpos($src, "(int) \$phUser['usergroupid'] !== 1") !== false && strpos($src, 'http_response_code(403)') !== false && strpos($src, "mo_enabled_en") !== false
-    && strpos($src, 'session_write_close') !== false && preg_match('/after.*\\\\d\{1,10\}/', $src), 'the feed: administrators only, the module switched on, a number only', '');
+    && strpos($src, 'session_write_close') !== false && strpos($src, "REQUEST_METHOD'] !== 'GET'") !== false, 'the feed: administrators only, the module switched on, GET only');
 $js = file_get_contents("$MOD/assets/ph.js");
-check(strpos($js, 'innerHTML = j.rows') !== false && strpos($js, 'textContent = j.looked') !== false, 'the script puts in only what the server escaped (and the words as text)');
+check(substr_count($js, 'innerHTML') === 2 && substr_count($js, 'innerHTML = j.rows') === 1 && strpos($js, 't.innerHTML = html') !== false && strpos($js, 'textContent = j.looked') !== false, 'the script puts in only the rows the server escaped; everything else as text');
 // Look now
 page(3, 'LookNow', array());
 check(ph::Get('looknow_at') === '', 'a client can not make the server look');

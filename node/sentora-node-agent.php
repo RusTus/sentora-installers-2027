@@ -40,7 +40,10 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '104';
+    const VERSION = '105';
+
+    /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
+    static $bare = false;
     const V = 1;
     const SKEW = 300;
     const PORT_FIRST = 20000;
@@ -194,19 +197,33 @@ class snode
     {
         $panelSign = self::Bin($cfg['panel_sign_pk'], SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES);
         $panelBox = self::Bin($cfg['panel_box_pk'], SODIUM_CRYPTO_BOX_PUBLICKEYBYTES);
-        $c = curl_init(rtrim($cfg['panel'], '/') . '/modules/docker_hosting/code/node.php');
-        curl_setopt_array($c, array(CURLOPT_POST => true, CURLOPT_POSTFIELDS => self::Pack($msg, $signSk, $panelBox), CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => array('Content-Type: text/plain', 'User-Agent: sentora-node/' . self::VERSION), CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 60,
-            CURLOPT_FOLLOWLOCATION => false, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP));
-        if (empty($cfg['tls_verify'])) {
-            // (safe: every reply is signed with the panel's key, which the node already knows)
-            curl_setopt($c, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($c, CURLOPT_SSL_VERIFYHOST, 0);
+        $wire = self::Pack($msg, $signSk, $panelBox);
+        // as a form field (web filters such as ModSecurity flag every other content type); a panel
+        // with Docker Hosting before 108 understands only the bare message: then that, from then on
+        foreach (self::$bare ? array(true) : array(false, true) as $bare) {
+            $c = curl_init(rtrim($cfg['panel'], '/') . '/modules/docker_hosting/code/node.php');
+            curl_setopt_array($c, array(CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bare ? $wire : 'm=' . rawurlencode($wire), CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => array('Content-Type: ' . ($bare ? 'text/plain' : 'application/x-www-form-urlencoded'), 'User-Agent: sentora-node/' . self::VERSION),
+                CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 60, CURLOPT_FOLLOWLOCATION => false, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP));
+            if (empty($cfg['tls_verify'])) {
+                // (safe: every reply is signed with the panel's key, which the node already knows)
+                curl_setopt($c, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($c, CURLOPT_SSL_VERIFYHOST, 0);
+            }
+            $body = curl_exec($c);
+            $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
+            $err = curl_error($c);
+            curl_close($c);
+            if ($code !== 400) {
+                break;
+            }
+            if ($bare && $body !== false) {
+                break;
+            }
         }
-        $body = curl_exec($c);
-        $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
-        $err = curl_error($c);
-        curl_close($c);
+        if (!self::$bare && $bare && $code === 200) {
+            self::$bare = true;
+        }
         if ($body === false || $code !== 200) {
             if ($body === false && stripos($err, 'certificate') !== false && !empty($cfg['tls_verify'])) {
                 $err .= ' (the panel has a self-signed certificate: add --no-tls-check to the install command; safe, every reply is signed with the panel\'s key)';
