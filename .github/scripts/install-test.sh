@@ -253,6 +253,8 @@ say "The firewall (sentora-firewall on: Sentora's ports open, everything else cl
         if [ "$r" != open ] && [ "$(in_box "ss -Hltn | grep -cE ':$p\\s'")" != 0 ]; then fw=0; fi
     done
     r=$(reach 7777); echo "  after: test port 7777 $r (must be closed)"; [ "$r" = closed ] || fw=0
+    open_now=$(in_box 'sentora-firewall ports' 2>&1); echo "  open: $open_now"
+    echo "$open_now" | grep -qE '(^| )6[0-9]{4}[-:]6[0-9]{4}/tcp' && echo "  FTP's passive ports: open" || { echo "  FTP's passive ports: NOT open"; fw=0; }
     in_box 'sentora-firewall deny 443' > /dev/null 2>&1 && { echo "  Sentora's own port 443 could be closed"; fw=0; } || echo "  Sentora's own port 443 can not be closed"
     in_box 'curl -sk -o /dev/null -w "  the panel from inside: HTTP %{http_code}\n" https://127.0.0.1/'
     [ $fw -eq 1 ] && echo "FIREWALL: PASSED" || echo "FIREWALL: FAILED"

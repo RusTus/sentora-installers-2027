@@ -2277,7 +2277,12 @@ fi
 #--- The firewall: only Sentora's ports open (sentora-firewall; SSH stays open on sshd's ports). In a
 # container the host's firewall decides, so it is left off there.
 if command -v systemd-detect-virt > /dev/null 2>&1 && systemd-detect-virt --quiet --container; then
-    echo "The firewall: left to the host (this is a container)."
+    # (unless one already runs here: firewalld starts itself when it is installed, with only SSH open)
+    if bash $PANEL_PATH/panel/bin/sentora-firewall ports > /dev/null 2>&1; then
+        bash $PANEL_PATH/panel/bin/sentora-firewall on --yes --container || echo "WARNING: the firewall here does not let Sentora's ports through: run sentora-firewall on --container"
+    else
+        echo "The firewall: left to the host (this is a container)."
+    fi
 else
     ui_step "Switching on the firewall (only Sentora's ports open)"
     bash $PANEL_PATH/panel/bin/sentora-firewall on --yes || echo "WARNING: the firewall was not switched on: run sentora-firewall on"
