@@ -2110,7 +2110,7 @@ sed -i 's|systemctl reload httpd > /dev/null|systemctl reload apache2 > /dev/nul
 #--- fail2ban: block addresses that keep guessing passwords
 ##
 ui_step "Installing fail2ban"
-install_available fail2ban python3-systemd
+install_available fail2ban python3-systemd nftables
 install_available ufw
 # The log files the jails read must exist before fail2ban starts
 mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/logs/proftpd" /var/lib/sentora
