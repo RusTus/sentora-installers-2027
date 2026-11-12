@@ -147,6 +147,8 @@ grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || tail -20 "$OUT/smoke-test.txt"
 
 say "Using everything (round 1: the system's rules as they are)"
 to_vm "$INST/.github/scripts/vm-exercise.sh" /root/vm-exercise.sh
+# (the Log Forwarder add-on of this checkout: the exercise installs it from here)
+to_vm "$INST/sentora-repo/log_forwarder.zpp" /root/log_forwarder.zpp
 vm 'bash /root/vm-exercise.sh one' 2>&1 | tee "$OUT/exercise-1.txt"
 
 # what the security module refused between two moments (seconds since 1970, the machine's clock)

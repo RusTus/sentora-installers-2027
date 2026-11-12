@@ -242,6 +242,56 @@ x_autoupdate() { # "Keep the panel up to date": the published release installs i
         || { WHY="no notice saying the panel was updated to $ver"; return 1; }
     WHY="updated to $ver, checked, notice sent"
 }
+x_logforward() { # Log Forwarder (add-on): the panel's own access log sent live over TLS to a receiver on this machine
+    need ADMIN "administrator login" || return $?
+    local zpp=/root/log_forwarder.zpp d="$PANEL/modules/log_forwarder" rx=/root/lf-rx port=12514
+    [ -f "$zpp" ] || { WHY="no log_forwarder.zpp to install"; return 2; }
+    if [ ! -f "$d/module.xml" ]; then
+        # (installed as Repo Browser installs an uploaded package: the files, the module's row, its install step)
+        mkdir -p "$d" && unzip -qo "$zpp" -d "$d" && chown -R root:root "$d"
+        ( cd "$PANEL" && php -r 'require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php"; ui_module::ModuleInfoToDB("log_forwarder");' \
+            && php -q "$d/deploy/install.run" ) > "$TMP/lf-install.txt" 2>&1 || { WHY="install: $(tail -2 "$TMP/lf-install.txt")"; return 1; }
+    fi
+    # a receiver with a certificate of its own making, as a self-hosted log server has
+    mkdir -p $rx && rm -f $rx/got.txt
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=logs.vmtest" -addext "subjectAltName=DNS:logs.vmtest" -keyout $rx/key.pem -out $rx/cert.pem > /dev/null 2>&1
+    grep -q "logs.vmtest" /etc/hosts || echo "127.0.0.1 logs.vmtest" >> /etc/hosts
+    cat > $rx/rx.py <<'EOF_PY'
+import ssl, socket, sys, threading
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(sys.argv[1] + '/cert.pem', sys.argv[1] + '/key.pem')
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(('127.0.0.1', int(sys.argv[2]))); srv.listen(5)
+def take(c):
+    try:
+        s = ctx.wrap_socket(c, server_side=True)
+        while True:
+            b = s.recv(65536)
+            if not b: break
+            with open(sys.argv[1] + '/got.txt', 'ab') as f: f.write(b)
+    except Exception: pass
+while True:
+    c, _ = srv.accept(); threading.Thread(target=take, args=(c,), daemon=True).start()
+EOF_PY
+    pkill -f "$rx/rx.py" 2> /dev/null; nohup setsid python3 $rx/rx.py $rx $port > /dev/null 2>&1 &
+    sleep 1
+    au -L -o "$TMP/lf.html" --data-urlencode "inName=VM test" -d "inHost=logs.vmtest&inPort=$port&inFraming=octet&inLogs%5B%5D=server%3Apanel-access" \
+        --data-urlencode "inCa@$rx/cert.pem" -d "csfr_token=$(atok log_forwarder)" "https://$FQDN/?module=log_forwarder&action=Save"
+    page_ok "$TMP/lf.html" || return 1
+    [ -n "$(q "SELECT lf_id_pk FROM x_logforward WHERE lf_host_vc='logs.vmtest'")" ] || { WHY="the destination was not saved: $(grep -o 'lfw-err[^<]*<[^<]*' "$TMP/lf.html" | head -1)"; return 1; }
+    daemon_now || { WHY="the daemon run did not finish"; return 1; }
+    local marker="vm-lf-$RND"
+    for _ in 1 2 3; do au -o /dev/null "https://$FQDN/?module=log_forwarder&$marker"; sleep 1; done
+    wait_for 90 grep -q "$marker" $rx/got.txt 2> /dev/null || {
+        WHY="nothing arrived at the receiver: $(grep -A3 'START Log Forwarder' /var/sentora/logs/daemon-panel-run.log | tail -3 | tr '\n' ' ') rsyslog: $(journalctl -u rsyslog -n 3 --no-pager 2> /dev/null | tail -2 | tr '\n' ' ')"; return 1; }
+    au -o "$TMP/lf.html" "https://$FQDN/?module=log_forwarder"
+    grep -q "can not forward yet" "$TMP/lf.html" && { WHY="the page still says this server can not forward"; return 1; }
+    if command -v selinuxenabled > /dev/null && selinuxenabled; then
+        semanage port -l | grep -qE "^syslog_tls_port_t +tcp +.*\b$port\b" || { WHY="port $port was not labelled for syslog (SELinux)"; return 1; }
+    fi
+    # cleanup: the destination goes, and the next run takes the settings (and the port label) away
+    q "DELETE FROM x_logforward WHERE lf_host_vc='logs.vmtest'"
+    daemon_now > /dev/null; pkill -f "$rx/rx.py" 2> /dev/null
+    WHY="lines arrived over TLS"
+}
 x_client() {
     local r; r=$(php_panel 'require "modules/manage_clients/code/controller.ext.php";
         $pkg = (int) $zdbh->query("SELECT pk_id_pk FROM x_packages WHERE pk_reseller_fk = 1 AND pk_deleted_ts IS NULL ORDER BY pk_id_pk LIMIT 1")->fetchColumn();
@@ -524,6 +574,7 @@ ex "Check now (Panel Update)" x_admin_update_check
 ex "Apache Status" x_apache_status
 ex "System Log Viewer: every log" x_logviewer
 ex "Repo Browser: Update all (two add-ons behind)" x_update_all
+ex "Log Forwarder: panel log sent live over TLS" x_logforward
 ex "A client is made and logs in" x_client
 ex "Domain, subdomain and parked domain (and a daemon run)" x_domains
 ex "The client opens every page" x_client_walk
