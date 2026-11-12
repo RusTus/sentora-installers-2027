@@ -29,11 +29,11 @@
 set -u
 LOG=/var/log/sentora2027-backup-server.log
 RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup
-KEYARG='' NAME='' GATE='' UPDATE=0
+KEYARG='' AREA='' GATE='' UPDATE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --key) KEYARG=${2:-}; shift ;;
-        --name) NAME=${2:-}; shift ;;
+        --name) AREA=${2:-}; shift ;;
         --gate) GATE=${2:-}; shift ;;
         --update) UPDATE=1 ;;
         -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -181,13 +181,13 @@ case "$FAMILY" in
     deb)
         PKG=apt
         PKG_INSTALL="apt-get -y -o Dpkg::Options::=--force-confold install"
-        PACKAGES="openssh-server rsync chrony coreutils ca-certificates curl"
+        PACKAGES="openssh-server rsync chrony ca-certificates curl"
         SSH_SERVICE=ssh
         CHRONY_SERVICE=chrony ;;
     el|fedora)
         PKG=dnf
         PKG_INSTALL="dnf -y install"
-        PACKAGES="openssh-server rsync chrony coreutils ca-certificates curl firewalld policycoreutils-python-utils"
+        PACKAGES="openssh-server rsync chrony ca-certificates curl firewalld policycoreutils-python-utils"
         SSH_SERVICE=sshd
         CHRONY_SERVICE=chronyd ;;
 esac
@@ -210,8 +210,8 @@ fi
 if [ "$UPDATE" != 1 ]; then
     KEYARG=$(printf '%s' "$KEYARG" | tr -d '\r' | sed 's/^ *//; s/ *$//')
     key_ok "$KEYARG" || die "That is not the panel's backup key (one line: ssh-ed25519 AAAA... sentora-offsite@<panel>)."
-    if [ -z "$NAME" ]; then NAME=${KEYARG##* }; NAME=${NAME#sentora-offsite@}; fi
-    [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "--name: letters, digits, dots and dashes only (the panel's server name)."
+    if [ -z "$AREA" ]; then AREA=${KEYARG##* }; AREA=${AREA#sentora-offsite@}; fi
+    [[ "$AREA" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "--name: letters, digits, dots and dashes only (the panel's server name)."
 fi
 [ "$UPDATE" = 1 ] || : > "$LOG"
 touch "$LOG"; chmod 600 "$LOG"
@@ -311,13 +311,13 @@ fi
 
 ui_step "The panel's key"
 if [ "$UPDATE" != 1 ]; then
-    mkdir -p "$ROOT/$NAME"; chown "$BACKUP_USER:" "$ROOT/$NAME"; chmod 700 "$ROOT/$NAME"
+    mkdir -p "$ROOT/$AREA"; chown "$BACKUP_USER:" "$ROOT/$AREA"; chmod 700 "$ROOT/$AREA"
     body=${KEYARG#* }; body=${body%% *}
     # (the same key again replaces its line)
     grep -vF " $body" "$KEYDIR/authorized_keys" > "$KEYDIR/authorized_keys.new" 2> /dev/null
-    echo "restrict,command=\"/usr/local/sbin/sentora-backup-gate $NAME\" $KEYARG" >> "$KEYDIR/authorized_keys.new"
+    echo "restrict,command=\"/usr/local/sbin/sentora-backup-gate $AREA\" $KEYARG" >> "$KEYDIR/authorized_keys.new"
     chmod 644 "$KEYDIR/authorized_keys.new"; mv "$KEYDIR/authorized_keys.new" "$KEYDIR/authorized_keys"
-    note "Panel \"$NAME\": its copies go to $ROOT/$NAME."
+    note "Panel \"$AREA\": its copies go to $ROOT/$AREA."
 fi
 cat > /usr/local/sbin/sentora-backup-server <<'TOOL_EOF'
 #!/bin/bash
@@ -356,7 +356,7 @@ if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This 
 if [ "$UPDATE" = 1 ]; then
     say "Done: this backup server is up to date."
 else
-    say "Done: this server is ready to keep the backups of \"$NAME\"."
+    say "Done: this server is ready to keep the backups of \"$AREA\"."
     say ""
     say "Last step, in the panel: Admin > Backup Config > Off-server backup:"
     say "    Server:             ${C_BOLD}${ADDR:-(its address)}${C_RESET}"

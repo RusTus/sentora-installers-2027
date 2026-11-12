@@ -10,7 +10,7 @@
 #   sentora-backup latest <dir>          "yes" when <dir>/latest is there (the last copy, to link to)
 #   sentora-backup finish <dir> <date> <keep>   <date>.partial becomes <date> and latest, older nights go
 #   sentora-backup count  <dir>          how many nights are kept
-#   sentora-backup list                  every server's nights with their manifest (for restoring)
+#   sentora-backup list [<dir>]          every server's nights with their manifest (for restoring)
 # Every call is noted in /var/log/sentora-backup-gate.log.
 set -u
 umask 077
@@ -91,7 +91,8 @@ case "$verb" in
         d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
         ls -1d "$d"/20??-??-?? 2> /dev/null | wc -l ;;
     list)
-        cd "$BASE" || exit 3
+        d=$(inside "${ARGS[2]:-/}") || refuse "a folder outside the area"
+        cd "$d" 2> /dev/null || exit 3
         for h in */; do h=${h%/}; [ -L "$h" ] && continue
             for d in "$h"/20??-??-??; do [ -d "$d" ] || continue
                 echo "@@SNAPSHOT $d"
