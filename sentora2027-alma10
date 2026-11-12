@@ -2476,7 +2476,9 @@ if [ -f "$MATOMO/index.php" ]; then
     mstep -d "do_not_track=1&anonymise_ip=1&submit=Continue" "$MI?action=finished&module=Installation&site_idSite=1&site_name=$PANEL_FQDN"
     rm -f "$MC"
     if [ -f "$MATOMO/config/config.ini.php" ]; then
-        mconsole() { (cd "$MATOMO" && setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --init-groups --reset-env /usr/bin/php"$PHPVER" console "$@" > /dev/null 2>&1); }
+        # (the system PHP's command, from the setting php_cli: /usr/bin/php8.4 on Debian, /usr/bin/php on AlmaLinux)
+        PHP_CLI=$($PANEL_PATH/panel/bin/setso --get php_cli); PHP_CLI=${PHP_CLI//\{v\}/$PHPVER}
+        mconsole() { (cd "$MATOMO" && setpriv --reuid="$PANEL_USER" --regid="$PANEL_USER" --init-groups --reset-env "$PHP_CLI" console "$@" > /dev/null 2>&1) || echo "WARNING: Matomo's step failed: php console $*"; }
         mconsole plugin:activate SentoraSync
         # The panel opens Matomo in a frame; reports are built by the hourly job, not by visitors
         mconsole config:set --section=General --key=enable_framed_pages --value=1
