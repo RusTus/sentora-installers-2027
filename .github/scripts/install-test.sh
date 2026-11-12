@@ -235,6 +235,11 @@ in_box 'bash /root/modsec-test.sh' > "$OUT/modsec-test.txt" 2>&1
 cat "$OUT/modsec-test.txt"
 in_box "tail -60 \"\$(php -q /etc/sentora/panel/bin/setso --get apache_log_dir)/modsec_audit.log\"" > "$OUT/modsec-audit.log" 2>&1
 
+say "PHP settings for one domain (its own PHP-FPM pool) and today's PHP defaults"
+docker cp "$INST/.github/scripts/php-domain-test.sh" "$NAME:/root/php-domain-test.sh"
+in_box 'bash /root/php-domain-test.sh' > "$OUT/php-domain-test.txt" 2>&1
+cat "$OUT/php-domain-test.txt"
+
 if [ $AA -eq 1 ]; then
     say "AppArmor: which programs ran confined, and what it refused"
     in_box 'for p in named mysqld mariadbd proftpd clamd freshclam; do
@@ -286,6 +291,7 @@ if ! grep -q 'HOURLY: PASSED' "$OUT/hourly.txt"; then echo "::error::$SYS: an ho
 if ! grep -q 'PLATFORM: PASSED' "$OUT/platform-settings.txt"; then echo "::error::$SYS: this system's settings were not filled in as its installer sets them (platform-settings.txt)"; ok=0; fi
 if ! grep -q 'HARDENING: PASSED' "$OUT/hardening.txt" || grep -q 'HARDENING: FAILED' "$OUT/hardening.txt"; then echo "::error::$SYS: the hardening report was not written as it should (hardening.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi
+if ! grep -q 'PHPDOMAIN: PASSED' "$OUT/php-domain-test.txt"; then echo "::error::$SYS: a domain's own PHP settings or today's PHP defaults did not pass (php-domain-test.txt)"; ok=0; fi
 if ! grep -q 'MODSEC: PASSED' "$OUT/modsec-test.txt"; then echo "::error::$SYS: ModSecurity through the Web Hardening add-on did not pass (modsec-test.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && [ -s "$OUT/apparmor-denied.txt" ]; then echo "::error::$SYS: AppArmor refused something Sentora does (apparmor-denied.txt)"; ok=0; fi
 [ $ok -eq 1 ] && echo "$SYS: installed, post-install check without FAIL, smoke test passed, ModSecurity works"

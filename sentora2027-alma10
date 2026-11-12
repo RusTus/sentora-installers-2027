@@ -1591,6 +1591,14 @@ EOF_SSL
 if [ -f /etc/httpd/conf.modules.d/00-mpm.conf ]; then
     sed -i -e 's|^LoadModule mpm_prefork_module|#LoadModule mpm_prefork_module|' -e 's|^LoadModule mpm_worker_module|#LoadModule mpm_worker_module|'         -e 's|^#LoadModule mpm_event_module|LoadModule mpm_event_module|' /etc/httpd/conf.modules.d/00-mpm.conf
 fi
+# Modules nothing on a Sentora server uses, and that a site's .htaccess can not use either: off
+# (less that can go wrong; e.g. userdir served ~user folders, proxy_connect is a tunnel). Every
+# module a site's .htaccess may name stays (rewrite, headers, expires, deflate, brotli, actions,
+# include, substitute, access_compat, auth, ...); the administrator can load one again.
+SENTORA_APACHE_OFF="userdir dav dav_fs dav_lock info proxy_ajp proxy_balancer proxy_connect proxy_express proxy_fdpass proxy_ftp proxy_hcheck proxy_scgi proxy_uwsgi proxy_http2 lbmethod_bybusyness lbmethod_byrequests lbmethod_bytraffic lbmethod_heartbeat echo dumpio mime_magic dbd authn_dbd authz_dbd authnz_fcgi cache cache_disk cache_socache socache_dbm socache_memcache socache_redis vhost_alias macro"
+for m in $SENTORA_APACHE_OFF; do
+    sed -i -E "s|^([[:space:]]*LoadModule[[:space:]]+${m}_module[[:space:]].*)$|# (off: not used on a Sentora server) \\1|" /etc/httpd/conf.modules.d/*.conf
+done
 
 # adjustments for apache 2.4
 # Order deny,allow / Deny from all   ->  Require all denied

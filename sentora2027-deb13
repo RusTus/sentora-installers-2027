@@ -1691,7 +1691,8 @@ EOF_UNIT
 install_available acl
 a2dismod -q "php$PHPVER" > /dev/null 2>&1
 a2dismod -q mpm_prefork > /dev/null 2>&1
-a2enmod -q mpm_event http2 > /dev/null 2>&1
+# (brotli: smaller pages than gzip for browsers that take it; gzip stays for the others)
+a2enmod -q mpm_event http2 brotli > /dev/null 2>&1
 mkdir -p /var/lib/sentora/accounts
 chmod 700 /var/lib/sentora/accounts
 
