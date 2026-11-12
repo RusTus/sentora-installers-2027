@@ -302,21 +302,22 @@ agent('once');
 $r = req(3, '', array(), array('logs' => (string) $c1['dc_id_pk']));
 check(strpos($r['html'], 'fake log of sdh-' . $c1['dc_id_pk']) !== false, 'logs shown');
 $r = req(3, '', array(), array('settings' => (string) $c1['dc_id_pk']));
-check(strpos($r['html'], 'class="dh-settings"') !== false && strpos($r['html'], 'name="inPublic" value="1">') !== false && strpos($r['html'], 'Nightly updates') !== false
-    && strpos($r['html'], 'Protected by the setup password') !== false && strpos($r['html'], '>Running<') !== false, 'Settings opens under the row: size, night updates, open to everyone (status in words)');
+check(strpos($r['html'], 'class="dh-settings"') !== false && strpos($r['html'], 'name="inCpu"') !== false && strpos($r['html'], 'Nightly updates') !== false
+    && preg_match('#name="inWhat" value="public"><label class="sf-switch"><input type="checkbox"#', $r['html']) === 1 && strpos($r['html'], 'Open to everyone') !== false
+    && strpos($r['html'], 'Password protected') !== false && strpos($r['html'], '>Running<') !== false, 'Settings opens under the row (size); switches for nightly updates and open to everyone; status in words');
 $set = array('inId' => (string) $c1['dc_id_pk'], 'inCpu' => '0.5', 'inMem' => '256', 'inDisk' => '1');
 $r = req(3, 'CtSettings', $set);
 check(strpos($r['text'], 'Nothing changed') !== false, 'saved as it was: nothing changed');
-$r = req(3, 'CtSettings', $set + array('inPublic' => '1'));
-check(strpos($r['text'], 'it is open to everyone') !== false, 'ticking "Open to everyone"', $r['text']);
+$r = req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'public'));
+check(strpos($r['text'], 'ok:') !== false, 'switching on "Open to everyone"', $r['text']);
 $r = req(4, 'CtSettings', $set);
 check(strpos($r['text'], 'No such container') !== false, '(another client can not change its settings)');
 agent('once');
 $s = sites();
 check(strpos($s, 'kuma.example.com {') !== false && substr_count($s, 'basic_auth') === 1, 'open to the public: no setup password for it (the other still has one)', $s);
 $r = req(3);
-check(strpos($r['html'], 'Open to everyone') !== false && strpos($r['html'], 'class="dh-settings"') === false, 'shown as open to everyone; Settings closed again');
-req(3, 'CtSettings', $set);
+check(strpos($r['html'], 'Open to everyone: no password') !== false && preg_match('#name="inWhat" value="private"><label class="sf-switch"><input type="checkbox"[^>]* checked#', $r['html']) === 1, 'shown as open to everyone (no password), its switch on');
+req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'private'));
 agent('once');
 check(substr_count(sites(), 'basic_auth') === 2, 'closed again: behind a (new) setup password');
 $r = req(3, 'CtSettings', array('inId' => (string) $c1['dc_id_pk'], 'inCpu' => '1', 'inMem' => '900', 'inDisk' => '2'));
