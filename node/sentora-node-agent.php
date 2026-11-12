@@ -15,14 +15,19 @@
  * rootless Podman (its own user namespace, cgroup limits for CPU, memory and processes). Containers
  * listen on 127.0.0.1 only; Caddy (the node's web server) gives each its address with HTTPS.
  *
+ *   sentora-node-agent enroll --panel https://panel.example [--panel-code XXXX-XXXX] [--no-tls-check]
+ *                                (the installer's usual way: the node makes its own key, the panel
+ *                                 administrator pastes it in "Add a node"; the panel's code is checked
+ *                                 by the person installing, so the node never trusts a fake panel)
  *   sentora-node-agent pair --panel https://panel.example --key v1.<sign>.<box> --code <id>.<secret> [--no-tls-check]
+ *                                (the older way: the command the panel shows)
  *   sentora-node-agent run       (the service)
  *   sentora-node-agent once      (one call to the panel)
  *   sentora-node-agent status
  *
  * Paths for tests: SNODE_ETC (/etc/sentora-node), SNODE_STATE (/var/lib/sentora-node),
  * SNODE_CADDY (/etc/caddy), SNODE_RUN (/run/user), SNODE_HOME (/home), SNODE_SUBID (/etc: subuid,
- * subgid), SNODE_USERPATH (PATH of the customers' commands).
+ * subgid), SNODE_USERPATH (PATH of the customers' commands), SNODE_KEYFILE (/root/sentora-node-key.txt).
  *
  * @package Sentora
  * @license GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
@@ -35,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '102';
+    const VERSION = '104';
     const V = 1;
     const SKEW = 300;
     const PORT_FIRST = 20000;
@@ -51,6 +56,7 @@ class snode
     /** @var array Disk use per container (MB) and when measured. */
     static $disk = array();
     static $diskAt = 0;
+    static $sysCheckAt = 0;
 
     static function Init()
     {
@@ -127,6 +133,61 @@ class snode
     }
 
     /**
+     * The short code of a panel's public keys (the panel shows the same one), like K7Q2-9MXD.
+     */
+    static function Fingerprint($signPk, $boxPk)
+    {
+        $b = self::Base32(hash('sha256', 'sentora-panel|' . $signPk . $boxPk, true));
+        return substr($b, 0, 4) . '-' . substr($b, 4, 4);
+    }
+
+    static function Base32($bin)
+    {
+        $a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        $bits = '';
+        foreach (str_split($bin) as $c) {
+            $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
+        }
+        $out = '';
+        foreach (str_split($bits, 5) as $chunk) {
+            $out .= $a[bindec(str_pad($chunk, 5, '0'))];
+        }
+        return $out;
+    }
+
+    /**
+     * Fetch the panel's public keys (they are not secret) and whether its certificate can be checked.
+     * Returns [key line, tls_verify] or null.
+     */
+    static function PanelKey($panel, $verify)
+    {
+        foreach ($verify ? array(true, false) : array(false) as $v) {
+            $c = curl_init(rtrim($panel, '/') . '/modules/docker_hosting/code/node.php?key=1');
+            curl_setopt_array($c, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 30, CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_HTTPHEADER => array('User-Agent: sentora-node/' . self::VERSION)));
+            if (!$v) {
+                curl_setopt($c, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($c, CURLOPT_SSL_VERIFYHOST, 0);
+            }
+            $body = curl_exec($c);
+            $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
+            $errno = curl_errno($c);
+            $err = curl_error($c);
+            curl_close($c);
+            if ($body !== false && $code === 200 && preg_match('/^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/', trim($body))) {
+                return array(trim($body), $v);
+            }
+            if ($v && in_array($errno, array(51, 58, 60, 77, 83), true)) {
+                self::Out('The panel\'s certificate is self-signed: the node will rely on the panel\'s key (checked with you below) instead.');
+                continue;
+            }
+            self::Out('Could not get the panel\'s key from ' . $panel . ': ' . ($body === false ? $err : 'HTTP ' . $code . ($code === 404 ? ' (is the Docker Hosting add-on installed and up to date in the panel?)' : '')));
+            return null;
+        }
+        return null;
+    }
+
+    /**
      * Send a message to the panel; its opened reply, or null (with the reason on the output).
      */
     static function Call(array $msg, $signSk, $boxKp, array $cfg)
@@ -166,7 +227,7 @@ class snode
     {
         $f = self::$etc . '/node.json';
         $c = is_file($f) ? json_decode((string) file_get_contents($f), true) : null;
-        if (!is_array($c) || !isset($c['node'], $c['panel'], $c['sign_sk'], $c['box_kp'], $c['panel_sign_pk'], $c['panel_box_pk'])) {
+        if (!is_array($c) || !isset($c['node'], $c['panel'], $c['sign_sk'], $c['box_kp'], $c['panel_sign_pk'], $c['panel_box_pk']) || ((int) $c['node'] === 0 && !isset($c['claim']))) {
             return null;
         }
         return self::$cfg = $c;
@@ -374,7 +435,7 @@ class snode
         if (isset($d['mem']) && (!is_int($d['mem']) || $d['mem'] < 16 || $d['mem'] > 4194304)) {
             return 'bad memory';
         }
-        if ($action === 'create') {
+        if ($action === 'create' || $action === 'update') {
             if (!isset($d['image']) || !is_string($d['image']) || strlen($d['image']) > 255
                 || !preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+(:[A-Za-z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$#', $d['image'])) {
                 return 'bad image';
@@ -410,10 +471,194 @@ class snode
     }
 
     /**
+     * podman create's arguments for a container (the same for a new one and an updated one).
+     */
+    static function CreateArgs(array $d, $name)
+    {
+        $args = array('create', '--name', $name, '--label', 'sentora.cid=' . $d['cid'], '--restart', 'unless-stopped',
+            '--cpus', sprintf('%d.%02d', intdiv($d['cpu'], 100), $d['cpu'] % 100), '--memory', $d['mem'] . 'm', '--memory-swap', $d['mem'] . 'm',
+            '--pids-limit', '1024', '--security-opt', 'no-new-privileges', '--log-driver', 'k8s-file', '--log-opt', 'max-size=10mb',
+            '--publish', '127.0.0.1:' . $d['hostport'] . ':' . $d['port']);
+        foreach (array_values($d['volumes']) as $i => $path) {
+            $args[] = '--volume';
+            $args[] = self::Name($d['cid']) . '-' . $i . ':' . $path;
+        }
+        foreach ($d['env'] as $k => $v) {
+            $args[] = '--env';
+            $args[] = $k . '=' . $v;
+        }
+        $args[] = $d['image'];
+        return $args;
+    }
+
+    /**
+     * Update an app to its image's newest version: the new one replaces the old with the same data;
+     * when it does not start, the old one runs again. [ok, output]
+     */
+    static function Update(array $d, array &$s)
+    {
+        $name = self::Name($d['cid']);
+        $u = $d['user'];
+        $pull = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
+        if ($pull[0] !== 0) {
+            return array(false, 'pull: ' . self::Tail($pull[1]));
+        }
+        $new = self::Podman($u, array('image', 'inspect', '--format', '{{.Id}}', $d['image']));
+        $cur = self::Podman($u, array('container', 'inspect', '--format', '{{.Image}}', $name));
+        if ($cur[0] !== 0) {
+            return array(false, 'no such container here');
+        }
+        if ($new[0] === 0 && trim($new[1]) === trim($cur[1])) {
+            $s['updates'][(string) $d['cid']] = false;
+            return array(true, 'already the newest version');
+        }
+        $old = $name . '-old';
+        self::Podman($u, array('rm', '--force', '--ignore', $old));
+        self::Podman($u, array('stop', '--time', '20', $name), 120);
+        $rn = self::Podman($u, array('rename', $name, $old));
+        if ($rn[0] !== 0) {
+            self::Podman($u, array('start', $name));
+            return array(false, 'rename: ' . self::Tail($rn[1]));
+        }
+        $back = function ($why) use ($u, $name, $old) {
+            self::Podman($u, array('rm', '--force', '--ignore', $name));
+            self::Podman($u, array('rename', $old, $name));
+            self::Podman($u, array('start', $name));
+            return array(false, $why . ': the old version runs again');
+        };
+        $cr = self::Podman($u, self::CreateArgs($d, $name));
+        if ($cr[0] !== 0) {
+            return $back('the new version could not be made (' . self::Tail($cr[1]) . ')');
+        }
+        $st = self::Podman($u, array('start', $name));
+        if ($st[0] !== 0) {
+            return $back('the new version did not start (' . self::Tail($st[1]) . ')');
+        }
+        // it must still run after a while (an app that crashes at once comes back as the old one)
+        sleep((int) (getenv('SNODE_UPDATE_WAIT') !== false ? getenv('SNODE_UPDATE_WAIT') : 20));
+        $state = self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name));
+        if (trim($state[1]) !== 'running') {
+            return $back('the new version stopped after starting (' . trim($state[1]) . ')');
+        }
+        self::Podman($u, array('rm', '--force', $old));
+        self::Podman($u, array('image', 'prune', '--force'), 300);
+        $s['updates'][(string) $d['cid']] = false;
+        return array(true, 'updated to the newest version');
+    }
+
+    /**
+     * Whether a newer version of each app's image is published (checked once a day; skopeo reads the
+     * registry without downloading the image). Results in $s['updates'].
+     */
+    static function CheckUpdates(array &$s, $force = false)
+    {
+        if (!$force && isset($s['updates_at']) && time() - (int) $s['updates_at'] < 86400) {
+            return;
+        }
+        $s['updates_at'] = time();
+        if (!isset($s['updates']) || !is_array($s['updates'])) {
+            $s['updates'] = array();
+        }
+        foreach ($s['containers'] as $cid => $c) {
+            if (self::Uid($c['user']) < 0) {
+                continue;
+            }
+            if (!isset($c['image'])) {
+                // (containers made by agent 102 and before: their image is read from Podman)
+                $in = self::Podman($c['user'], array('container', 'inspect', '--format', '{{.ImageName}}', self::Name($cid)), 60);
+                if ($in[0] !== 0 || !preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+(:[A-Za-z0-9._-]{1,128})?$#', trim($in[1]))) {
+                    continue;
+                }
+                $s['containers'][$cid]['image'] = $c['image'] = trim($in[1]);
+            }
+            $local = self::Podman($c['user'], array('image', 'inspect', '--format', '{{json .RepoDigests}}', $c['image']), 60);
+            $remote = self::Run(array('skopeo', 'inspect', '--no-tags', '--format', '{{.Digest}}', 'docker://' . $c['image']), null, 120);
+            $digests = json_decode(trim($local[1]), true);
+            if ($local[0] !== 0 || $remote[0] !== 0 || !is_array($digests) || !preg_match('/^sha256:[a-f0-9]{64}$/', trim($remote[1]))) {
+                continue;
+            }
+            $found = false;
+            foreach ($digests as $dg) {
+                $found = $found || substr((string) $dg, -71) === trim($remote[1]);
+            }
+            $s['updates'][(string) $cid] = !$found;
+        }
+        self::SaveState($s);
+    }
+
+    /**
+     * Jobs about the node itself (no container). [ok, output] or null when it is not one.
+     */
+    static function NodeJob($action, array $d, array &$s)
+    {
+        $bg = function (array $argv, $delay = 0) {
+            $unit = 'sentora-node-' . preg_replace('/[^a-z]/', '', $argv[0] === '/usr/local/sbin/sentora-node-sysupdate' ? 'sysupdate' : basename($argv[0])) . '-' . time();
+            $cmd = array_merge(array('systemd-run', '--unit', $unit, '--collect', '--quiet'), $delay > 0 ? array('--on-active=' . $delay) : array(), $argv);
+            return self::Run($cmd, null, 60);
+        };
+        switch ($action) {
+            case 'node-update':
+                $r = $bg(array('/usr/local/sbin/sentora-node-update', '--yes'), 5);
+                return array($r[0] === 0, $r[0] === 0 ? 'updating the node (agent ' . self::VERSION . ' now); it comes back in a few minutes' : 'node-update: ' . self::Tail($r[1]));
+            case 'sys-update':
+                $r = $bg(array('/usr/local/sbin/sentora-node-sysupdate', !empty($d['security']) ? '--security' : '--all'));
+                return array($r[0] === 0, $r[0] === 0 ? 'installing ' . (!empty($d['security']) ? 'security' : 'all') . ' updates' : 'sys-update: ' . self::Tail($r[1]));
+            case 'reboot':
+                $r = self::Run(array('shutdown', '-r', '+1', 'The Sentora panel asked for a restart of this node'), null, 30);
+                return array($r[0] === 0, $r[0] === 0 ? 'restarting in a minute' : 'reboot: ' . self::Tail($r[1]));
+            case 'check-updates':
+                self::CheckUpdates($s, true);
+                $bg(array('/usr/local/sbin/sentora-node-sysupdate', '--check'));
+                return array(true, 'checked');
+            case 'settings':
+                $email = isset($d['email']) && is_string($d['email']) ? $d['email'] : '';
+                if ($email !== '' && !preg_match('/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/', $email)) {
+                    return array(false, 'refused: bad email');
+                }
+                return self::Settings($email, !empty($d['local_certs']));
+            case 'uninstall':
+                // a little later, so this answer reaches the panel first
+                $r = $bg(array('/usr/local/sbin/sentora-node-uninstall', '--purge'), 30);
+                return array($r[0] === 0, $r[0] === 0 ? 'uninstalling in 30 seconds' : 'uninstall: ' . self::Tail($r[1]));
+        }
+        return null;
+    }
+
+    /**
+     * The node's settings from the panel: Let's Encrypt's email, or Caddy's own certificates. The
+     * same Caddyfile the installer writes; checked, reloaded, put back on failure.
+     */
+    static function Settings($email, $local)
+    {
+        $file = self::$caddy . '/Caddyfile';
+        $t = "# Written by the Sentora Node installer. The containers' sites are in sentora/ (the agent writes them).\n{\n"
+            . ($email !== '' ? "\temail " . $email . "\n" : '') . ($local ? "\tlocal_certs\n" : '')
+            . "\tskip_install_trust\n\tadmin localhost:2019\n}\n\nimport /etc/caddy/sentora/*.caddy\n";
+        $old = is_file($file) ? (string) file_get_contents($file) : '';
+        if ($old !== $t) {
+            self::WriteFile($file, $t, 0644);
+            $v = self::Run(array('caddy', 'validate', '--config', $file, '--adapter', 'caddyfile'), null, 60);
+            $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', 'caddy'), null, 60) : $v;
+            if ($r[0] !== 0) {
+                self::WriteFile($file, $old, 0644);
+                self::Run(array('systemctl', 'reload', 'caddy'), null, 60);
+                return array(false, 'settings: ' . self::Tail($r[1]));
+            }
+        }
+        self::WriteFile(self::$etc . '/install.conf', "# Settings this node was installed with (read by sentora-node-update; set from the panel)\n"
+            . ($email !== '' ? 'EMAIL=' . $email . "\n" : '') . ($local ? "LOCAL_CERTS=1\n" : ''));
+        return array(true, 'settings: ' . ($local ? 'Caddy\'s own certificates' : 'Let\'s Encrypt') . ($email !== '' ? ', ' . $email : ''));
+    }
+
+    /**
      * Do one job: [ok, output].
      */
     static function Job($action, array $d, array &$s)
     {
+        $nj = self::NodeJob($action, $d, $s);
+        if ($nj !== null) {
+            return $nj;
+        }
         $bad = self::Check($d, $action);
         if ($bad !== '') {
             return array(false, 'refused: ' . $bad);
@@ -441,26 +686,13 @@ class snode
                     if ($pull[0] !== 0) {
                         return array(false, 'pull: ' . self::Tail($pull[1]));
                     }
-                    $args = array('create', '--name', $name, '--label', 'sentora.cid=' . $d['cid'], '--restart', 'unless-stopped',
-                        '--cpus', sprintf('%d.%02d', intdiv($d['cpu'], 100), $d['cpu'] % 100), '--memory', $d['mem'] . 'm', '--memory-swap', $d['mem'] . 'm',
-                        '--pids-limit', '1024', '--security-opt', 'no-new-privileges', '--log-driver', 'k8s-file', '--log-opt', 'max-size=10mb',
-                        '--publish', '127.0.0.1:' . $d['hostport'] . ':' . $d['port']);
-                    foreach (array_values($d['volumes']) as $i => $path) {
-                        $args[] = '--volume';
-                        $args[] = $name . '-' . $i . ':' . $path;
-                    }
-                    foreach ($d['env'] as $k => $v) {
-                        $args[] = '--env';
-                        $args[] = $k . '=' . $v;
-                    }
-                    $args[] = $d['image'];
-                    $cr = self::Podman($d['user'], $args);
+                    $cr = self::Podman($d['user'], self::CreateArgs($d, $name));
                     if ($cr[0] !== 0) {
                         return array(false, 'create: ' . self::Tail($cr[1]));
                     }
                 }
                 $s['containers'][$key] = array('user' => $d['user'], 'domain' => $d['domain'], 'hostport' => $d['hostport'], 'public' => (int) $d['public'],
-                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']));
+                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $d['image']);
                 self::SaveState($s);
                 $st = self::Podman($d['user'], array('start', $name));
                 if ($st[0] !== 0) {
@@ -468,6 +700,16 @@ class snode
                 }
                 $px = self::Proxy($s);
                 return $px === '' ? array(true, 'created and started') : array(false, $px);
+            case 'update':
+                if (!isset($s['containers'][$key])) {
+                    return array(false, 'no such container here');
+                }
+                if ((int) $s['containers'][$key]['hostport'] !== $d['hostport'] || $s['containers'][$key]['domain'] !== $d['domain']) {
+                    return array(false, 'refused: the address or port of an app does not change with an update');
+                }
+                $res = self::Update($d, $s);
+                $s['containers'][$key]['image'] = $d['image'];
+                return $res;
             case 'start':
             case 'stop':
             case 'restart':
@@ -583,7 +825,33 @@ class snode
         $se = self::Run(array('getenforce'), null, 10);
         return array('cpus' => max(1, (int) $cpus), 'mem_mb' => $mem, 'disk_total_mb' => (int) (disk_total_space($home) / 1048576), 'disk_free_mb' => (int) (disk_free_space($home) / 1048576),
             'os' => $os, 'kernel' => php_uname('r'), 'podman' => $p[0] === 0 ? trim(str_replace('podman version', '', $p[1])) : 'missing',
-            'caddy' => $c[0] === 0 ? strtok(trim($c[1]), ' ') : 'missing', 'agent' => self::VERSION, 'selinux' => $se[0] === 0 ? trim($se[1]) : '');
+            'caddy' => $c[0] === 0 ? strtok(trim($c[1]), ' ') : 'missing', 'agent' => self::VERSION, 'selinux' => $se[0] === 0 ? trim($se[1]) : '')
+            + self::SysInfo();
+    }
+
+    /**
+     * The system's waiting updates and the last update run (sentora-node-sysupdate writes them; it
+     * looks again every 6 hours).
+     */
+    static function SysInfo()
+    {
+        $f = self::$state . '/sysupdate.json';
+        $j = is_file($f) ? json_decode((string) file_get_contents($f), true) : null;
+        $j = is_array($j) ? $j : array();
+        $checked = isset($j['checked_at']) ? (int) $j['checked_at'] : 0;
+        if (time() - $checked > 6 * 3600 && time() - self::$sysCheckAt > 3600) {
+            self::$sysCheckAt = time();
+            self::Run(array('systemd-run', '--unit', 'sentora-node-syscheck-' . time(), '--collect', '--quiet', '/usr/local/sbin/sentora-node-sysupdate', '--check'), null, 30);
+        }
+        $out = array();
+        // the node's own settings (so the panel shows what the node really uses)
+        $conf = is_file(self::$etc . '/install.conf') ? (string) file_get_contents(self::$etc . '/install.conf') : '';
+        $out['cfg_local_certs'] = preg_match('/^LOCAL_CERTS=1$/m', $conf) ? 1 : 0;
+        $out['cfg_email'] = preg_match('/^EMAIL=([A-Za-z0-9._%+@-]{3,200})$/m', $conf, $m) ? $m[1] : '';
+        foreach (array('updates', 'security', 'reboot', 'checked_at', 'last_at', 'last_ok', 'last_kind', 'running') as $k) {
+            $out['sys_' . $k] = isset($j[$k]) ? (is_bool($j[$k]) ? (int) $j[$k] : $j[$k]) : 0;
+        }
+        return $out;
     }
 
     /**
@@ -615,7 +883,8 @@ class snode
                 if ($measure) {
                     self::$disk[$cid] = self::DiskUse($user, (int) $cid, (int) $s['containers'][$cid]['volumes']);
                 }
-                $out[$cid] = array('state' => $st, 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user);
+                $out[$cid] = array('state' => $st, 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
+                    'update' => !empty($s['updates'][$cid]) ? 1 : 0);
             }
         }
         if ($measure) {
@@ -681,6 +950,88 @@ class snode
     }
 
     /**
+     * Make this node's keys and its node key, for the panel's administrator to paste in "Add a node".
+     */
+    static function Enroll(array $opt)
+    {
+        if (!isset($opt['panel']) || !preg_match('#^https?://[A-Za-z0-9.-]{1,253}(:\d{1,5})?$#', rtrim($opt['panel'], '/'))) {
+            self::Out('enroll needs --panel https://<the panel\'s name or IP address>');
+            return 2;
+        }
+        $panel = rtrim($opt['panel'], '/');
+        $k = self::PanelKey($panel, !isset($opt['no-tls-check']));
+        if (!$k) {
+            return 1;
+        }
+        $p = explode('.', $k[0]);
+        $sp = self::Bin($p[1], SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES);
+        $bp = self::Bin($p[2], SODIUM_CRYPTO_BOX_PUBLICKEYBYTES);
+        $fp = self::Fingerprint($sp, $bp);
+        if (isset($opt['panel-code']) && $opt['panel-code'] !== '') {
+            if (strtoupper(trim($opt['panel-code'])) !== $fp) {
+                self::Out('The panel answered with code ' . $fp . ', not ' . $opt['panel-code'] . ': that is not your panel (or the code was mistyped). Nothing was changed.');
+                return 1;
+            }
+        } else {
+            self::Out('');
+            self::Out('The panel at ' . $panel . ' answered with this code:  ' . $fp);
+            self::Out('Check it in the panel: Docker Hosting > Nodes and apps shows "This panel\'s code". They must be the same:');
+            self::Out('if they are not, something between this server and the panel is pretending to be it.');
+            $ans = function_exists('readline') ? readline('Is it the same code? [y/N] ') : (fwrite(STDOUT, 'Is it the same code? [y/N] ') ? fgets(STDIN) : '');
+            if (!in_array(strtolower(trim((string) $ans)), array('y', 'yes'), true)) {
+                self::Out('Stopped: nothing was changed.');
+                return 1;
+            }
+        }
+        $secret = random_bytes(15);
+        $sign = sodium_crypto_sign_keypair();
+        $box = sodium_crypto_box_keypair();
+        $cfg = array('panel' => $panel, 'panel_sign_pk' => $p[1], 'panel_box_pk' => $p[2], 'tls_verify' => $k[1], 'node' => 0,
+            'claim' => bin2hex($secret), 'sign_sk' => self::B64(sodium_crypto_sign_secretkey($sign)), 'box_kp' => self::B64($box));
+        if (!is_dir(self::$etc)) {
+            mkdir(self::$etc, 0700, true);
+        }
+        self::WriteFile(self::$etc . '/node.json', json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $key = 'SN1-' . implode('-', str_split(self::Base32($secret), 4));
+        $file = getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt';
+        self::WriteFile($file, "Sentora Node key for the panel at " . $panel . " (made " . date('Y-m-d H:i') . "):\n\n    " . $key . "\n\n"
+            . "In the panel: Docker Hosting > Nodes and apps > Add a node: give the node a name and paste this key.\n"
+            . "It links this node once; after that it is not needed any more (this file is then removed).\n");
+        self::Out('');
+        self::Out('Node key:  ' . $key);
+        self::Out('(also saved in ' . $file . ', readable by root only)');
+        return 0;
+    }
+
+    /**
+     * A node not added in the panel yet says hello until the administrator adds it with its node key.
+     * Returns the seconds to wait.
+     */
+    static function Hello()
+    {
+        $cfg = self::$cfg;
+        $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
+        $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
+        // (the key itself, sealed so only the panel reads it; the panel keeps only its hash)
+        $msg = self::Msg('hello', 0, array('claim' => $cfg['claim'], 'sign_pk' => self::B64(sodium_crypto_sign_publickey_from_secretkey($sk)),
+            'box_pk' => self::B64(sodium_crypto_box_publickey($kp)), 'info' => self::Info()));
+        $r = self::Call($msg, $sk, $kp, $cfg);
+        if (!$r) {
+            return 30;
+        }
+        if ($r['type'] === 'linked' && isset($r['data']['node']) && (int) $r['data']['node'] > 0) {
+            $cfg['node'] = (int) $r['data']['node'];
+            unset($cfg['claim']);
+            self::WriteFile(self::$etc . '/node.json', json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            self::$cfg = $cfg;
+            @unlink(getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt');
+            self::Out('Linked to ' . $cfg['panel'] . ' as node ' . $cfg['node'] . ' ("' . (isset($r['data']['name']) ? $r['data']['name'] : '') . '").');
+            return 1;
+        }
+        return 10;
+    }
+
+    /**
      * One call to the panel: the report and results out, the jobs in, done; then again while there were jobs.
      * Returns the seconds to wait before the next call.
      */
@@ -689,6 +1040,8 @@ class snode
         $cfg = self::$cfg;
         $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
         $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
+        $s = self::State();
+        self::CheckUpdates($s);
         for ($round = 0; $round < 20; $round++) {
             $s = self::State();
             $msg = self::Msg('poll', $cfg['node'], array('info' => self::Info(), 'results' => array_values($s['results']), 'states' => (object) self::States($s)));
@@ -732,22 +1085,33 @@ class snode
         $opt = array();
         for ($i = 2; $i < count($argv); $i++) {
             if (preg_match('/^--([a-z-]+)$/', $argv[$i], $m)) {
-                $opt[$m[1]] = in_array($m[1], array('no-tls-check'), true) ? true : (isset($argv[$i + 1]) ? $argv[++$i] : '');
+                $opt[$m[1]] = in_array($m[1], array('no-tls-check', 'security', 'all'), true) ? true : (isset($argv[$i + 1]) ? $argv[++$i] : '');
             }
         }
         if ($cmd === 'pair') {
             return self::Pair($opt);
+        }
+        if ($cmd === 'enroll') {
+            return self::Enroll($opt);
         }
         if (!self::LoadCfg()) {
             self::Out('This node is not linked to a panel yet (sentora-node-agent pair ...).');
             return 1;
         }
         if ($cmd === 'once') {
+            if ((int) self::$cfg['node'] === 0) {
+                self::Hello();
+                return 0;
+            }
             self::Once();
             return 0;
         }
         if ($cmd === 'status') {
             $s = self::State();
+            if ((int) self::$cfg['node'] === 0) {
+                self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ': not added there yet (its node key is in ' . (getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt') . ').');
+                return 0;
+            }
             self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
             foreach (self::States($s) as $cid => $st) {
                 self::Out(sprintf('  %s  %-8s %-10s %s (%d MB)', self::Name($cid), $st['user'], $st['state'], $s['containers'][$cid]['domain'], $st['used_mb']));
@@ -755,12 +1119,12 @@ class snode
             return 0;
         }
         if ($cmd === 'run') {
-            self::Out('Sentora Node agent ' . self::VERSION . ': calling ' . self::$cfg['panel'] . ' as node ' . self::$cfg['node']);
+            self::Out('Sentora Node agent ' . self::VERSION . ': calling ' . self::$cfg['panel'] . ((int) self::$cfg['node'] === 0 ? ', waiting to be added there with its node key' : ' as node ' . self::$cfg['node']));
             while (true) {
-                sleep(self::Once());
+                sleep((int) self::$cfg['node'] === 0 ? self::Hello() : self::Once());
             }
         }
-        self::Out("sentora-node-agent pair|run|once|status");
+        self::Out("sentora-node-agent enroll|pair|run|once|status");
         return 2;
     }
 }

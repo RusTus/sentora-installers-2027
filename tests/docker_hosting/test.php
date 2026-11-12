@@ -159,7 +159,8 @@ check($n['nd_seen_in'] >= time() - 5 && $info['podman'] === '5.6.0' && $info['cp
 $r = req(1, '', array(), array('tab' => 'nodes'));
 check(strpos($r['html'], '>online<') !== false && strpos($r['html'], 'public address: 127.0.0.1') !== false, 'the page shows it online, with its address');
 preg_match("/const VERSION = '([^']+)'/", file_get_contents(getenv('DH_AGENT')), $vm);
-check(strpos($r['html'], 'agent ' . $vm[1]) !== false, 'and the version of its agent (' . $vm[1] . ')');
+check(strpos($r['html'], 'Version ' . $vm[1]) !== false, 'and the version of its agent (' . $vm[1] . ')');
+check(preg_match('/class="dh-fp">([A-Z2-9]{4}-[A-Z2-9]{4})</', $r['html'], $fpm) === 1 && $fpm[1] === dh::Fingerprint(), 'the page shows the panel\'s code for new nodes');
 // a message played back, tampered with, or from another key
 $k = dh::Keys();
 $sk = sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair());
@@ -350,6 +351,225 @@ $o = agent('once');
 check(strpos($o, 'proxy') !== false && strpos($o, 'failed') !== false && sites() === $keep, 'Caddy refuses: its old sites are put back', $o);
 unlink(getenv('FAKE_DIR') . '/caddy-fail');
 
+section('app updates');
+// a newer version of the app's image is published
+$imgFile = getenv('FAKE_DIR') . '/registry/docker.io_louislam_uptime-kuma_1';
+@mkdir(getenv('FAKE_DIR') . '/registry', 0755, true);
+file_put_contents($imgFile, 'id-kuma-2 sha256:' . str_repeat('2', 64));
+$r = req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'check-updates'));
+check(strpos($r['text'], 'looks for updates now') !== false, 'administrator asks the node to look for updates');
+$o = agent('once');
+check(strpos($o, 'check-updates') !== false && strpos(calls(), 'skopeo inspect --no-tags --format {{.Digest}} docker://docker.io/louislam/uptime-kuma:1') !== false, 'the node asks the registry (skopeo, nothing downloaded)', $o);
+agent('once');
+$cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c1['dc_id_pk']));
+check((int) $cu['dc_update_in'] === 1, 'the panel knows a newer version is out');
+$r = req(3);
+check(strpos($r['html'], 'update available') !== false && strpos($r['html'], "name=\"inWhat\" value=\"update\"") !== false, 'the owner sees "update available" and an Update button');
+$r = req(4, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'update'));
+check(strpos($r['text'], 'No such container') !== false, 'nobody else can update it');
+$r = req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'update'));
+check(strpos($r['text'], 'Updating it') !== false, 'the owner presses Update');
+$r = req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'update'));
+check(strpos($r['text'], 'being updated already') !== false, 'not twice at once');
+$o = agent('once');
+$cdir = getenv('FAKE_DIR') . '/podman/sdh3/c/sdh-' . $c1['dc_id_pk'];
+check(strpos($o, 'update container ' . $c1['dc_id_pk'] . ': ok') !== false && trim(file_get_contents($cdir . '/imageid')) === 'id-kuma-2' && !is_dir($cdir . '-old'), 'the node swapped in the new version (the old one removed)', $o);
+check(is_dir(getenv('FAKE_DIR') . '/podman/sdh3/v/sdh-' . $c1['dc_id_pk'] . '-0'), 'its data (volume) stayed');
+$a2 = implode(' ', file($cdir . '/args', FILE_IGNORE_NEW_LINES));
+check(strpos($a2, '--cpus 0.75 --memory 512m') !== false && strpos($a2, '--publish 127.0.0.1:20000:3001') !== false, 'with the same limits and port', $a2);
+agent('once');
+$cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c1['dc_id_pk']));
+check((int) $cu['dc_update_in'] === 0 && $cu['dc_state_vc'] === 'running', 'the panel: running, no update waiting');
+// the next version crashes at once: the old one comes back
+file_put_contents($imgFile, 'id-kuma-3 sha256:' . str_repeat('3', 64));
+file_put_contents(getenv('FAKE_DIR') . '/crash-id', 'id-kuma-3');
+req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'update'));
+$o = agent('once');
+check(strpos($o, 'failed: the new version stopped after starting') !== false && trim(file_get_contents($cdir . '/imageid')) === 'id-kuma-2' && trim(file_get_contents($cdir . '/state')) === 'running', 'a new version that crashes: the old one runs again', $o);
+agent('once');
+$cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c1['dc_id_pk']));
+check(strpos($cu['dc_note_vc'], 'old version runs again') !== false, 'the owner is told', json_encode($cu));
+unlink(getenv('FAKE_DIR') . '/crash-id');
+$r = req(3, 'Act', array('inId' => (string) $c1['dc_id_pk'], 'inWhat' => 'auto-on'));
+check((int) row("SELECT dc_autoupd_in FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c1['dc_id_pk']))['dc_autoupd_in'] === 1, 'automatic updates switched on');
+$zdbh->prepare("UPDATE x_dh_containers SET dc_update_in = 1, dc_state_vc = 'running', dc_note_vc = '' WHERE dc_id_pk = :c")->execute(array(':c' => $c1['dc_id_pk']));
+$d = shell_exec('DH_TEST_HOUR=14 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'automatic updates') === false, 'not in the day');
+$d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'updating kuma.example.com (automatic updates)') !== false, 'at night it updates by itself', (string) $d);
+$o = agent('once');
+check(strpos($o, 'update container ' . $c1['dc_id_pk'] . ': ok') !== false && trim(file_get_contents($cdir . '/imageid')) === 'id-kuma-3', 'updated by itself', $o);
+agent('once');
+
+section('the node from the panel');
+foreach (array('node-update' => 'updates itself', 'sys-security' => 'security updates', 'reboot' => 'restarts') as $w => $txt) {
+    $r = req(1, 'NodeAct', array('inId' => '1', 'inWhat' => $w));
+    check(strpos($r['text'], $txt) !== false, 'administrator: ' . $w, $r['text']);
+}
+$r = req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'reboot'));
+check(strpos($r['text'], 'asked already') !== false, 'not twice while waiting');
+$r = req(3, 'NodeAct', array('inId' => '1', 'inWhat' => 'reboot'));
+check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'reboot'") === 1, 'a client can not');
+$o = agent('once');
+$cl = calls();
+check(strpos($cl, 'systemd-run --unit sentora-node-sentoranodeupdate-') !== false && strpos($cl, '--on-active=5 /usr/local/sbin/sentora-node-update --yes') !== false, 'the node runs sentora-node-update --yes (on its own, it restarts the agent)', $cl);
+check(strpos($cl, '/usr/local/sbin/sentora-node-sysupdate --security') !== false, 'the node installs its security updates (sentora-node-sysupdate)');
+check(strpos($cl, 'shutdown -r +1') !== false, 'the node restarts in a minute');
+agent('once');
+check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = 0 AND jb_state_vc = 'done'") >= 4, 'the panel has their results');
+// what the node's system reports
+file_put_contents(getenv('SNODE_STATE') . '/sysupdate.json', json_encode(array('updates' => 7, 'security' => 2, 'reboot' => 1, 'checked_at' => time(), 'last_at' => time() - 60, 'last_ok' => 1, 'last_kind' => 'security', 'running' => '')));
+agent('once');
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], '7 updates waiting, 2 of them security fixes') !== false && strpos($r['html'], 'A restart is needed') !== false, 'the page shows the waiting updates and that a restart is needed');
+check(strpos($r['html'], 'Needs a look') !== false && strpos($r['html'], 'has 2 security updates waiting') !== false, 'and lists it under "Needs a look"');
+$zdbh->exec("UPDATE x_accounts SET ac_email_vc = 'admin@example.com' WHERE ac_id_pk = 1");
+@unlink(getenv('DH_MAIL'));
+daemon();
+$mail = (string) @file_get_contents(getenv('DH_MAIL'));
+check(strpos($mail, 'To: admin@example.com') !== false && strpos($mail, 'has 2 security updates waiting') !== false && strpos($mail, 'needs a restart') !== false, 'the administrators are mailed', $mail);
+@unlink(getenv('DH_MAIL'));
+daemon();
+check(!is_file(getenv('DH_MAIL')), 'not again on the next run (only again after a day)');
+$d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'installs its security updates') === false, 'security updates wait while automatic is off');
+req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autosec-on'));
+$d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'installs its security updates') !== false, 'with automatic on, they install at night', (string) $d);
+$d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'installs its security updates') === false, 'once a night');
+agent('once');
+agent('once');
+// settings
+$r = req(1, 'NodeSettings', array('inId' => '1', 'inEmail' => 'bad@', 'inLocal' => '1'));
+check(strpos($r['text'], 'not an email') !== false, 'a bad email is refused');
+$r = req(1, 'NodeSettings', array('inId' => '1', 'inEmail' => 'certs@example.com', 'inLocal' => '1'));
+check(strpos($r['text'], 'Saved') !== false, 'settings saved');
+agent('once');
+$cf = (string) @file_get_contents(getenv('SNODE_CADDY') . '/Caddyfile');
+check(strpos($cf, "\temail certs@example.com\n\tlocal_certs\n\tskip_install_trust") !== false && strpos($cf, 'import /etc/caddy/sentora/*.caddy') !== false, 'the node rewrote Caddy\'s settings', $cf);
+check(strpos((string) @file_get_contents(getenv('SNODE_ETC') . '/install.conf'), "EMAIL=certs@example.com\nLOCAL_CERTS=1") !== false, 'and kept them for its own updates (install.conf)');
+agent('once');
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'value="certs@example.com"') !== false && preg_match('/name="inLocal" value="1" checked/', $r['html']) === 1, 'the page shows the settings the node reports it uses');
+touch(getenv('FAKE_DIR') . '/caddy-fail');
+req(1, 'NodeSettings', array('inId' => '1', 'inEmail' => '', 'inLocal' => '0'));
+$o = agent('once');
+check(strpos($o, 'settings') !== false && strpos($o, 'failed') !== false && strpos((string) file_get_contents(getenv('SNODE_CADDY') . '/Caddyfile'), 'local_certs') !== false, 'Caddy refuses: the old settings stay', $o);
+unlink(getenv('FAKE_DIR') . '/caddy-fail');
+agent('once');
+
+section('a node that makes its own key');
+$fp = dh::Fingerprint();
+$e2 = getenv('DH_W') . '/n2etc';
+$k2 = getenv('DH_W') . '/n2key.txt';
+$env2 = 'SNODE_ETC=' . escapeshellarg($e2) . ' SNODE_KEYFILE=' . escapeshellarg($k2) . ' SNODE_STATE=' . escapeshellarg(getenv('DH_W') . '/n2state') . ' ';
+$o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . " enroll --panel $web --panel-code AAAA-BBBB 2>&1; echo exit=$?");
+check(strpos($o, 'not your panel') !== false && strpos($o, 'exit=1') !== false && !is_file($e2 . '/node.json'), 'a wrong panel code: nothing is made', $o);
+$o = shell_exec('echo n | ' . $env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . " enroll --panel $web 2>&1; echo exit=$?");
+check(strpos($o, 'answered with this code:  ' . $fp) !== false && strpos($o, 'Stopped') !== false && !is_file($e2 . '/node.json'), 'asked to compare the code; "n": nothing is made', $o);
+$o = shell_exec('echo y | ' . $env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . " enroll --panel $web 2>&1; echo exit=$?");
+check(preg_match('/Node key:  (SN1(-[A-Z2-9]{4}){6})/', $o, $km) === 1 && strpos($o, 'exit=0') !== false, 'answered "y": the node shows its key', $o);
+$nodekey = $km[1];
+check((fileperms($k2) & 0777) === 0600 && strpos(file_get_contents($k2), $nodekey) !== false, 'and keeps it for root only');
+$n2 = json_decode(file_get_contents($e2 . '/node.json'), true);
+check($n2['node'] === 0 && strlen($n2['claim']) === 30 && (fileperms($e2 . '/node.json') & 0777) === 0600, 'node.json keeps the key for root only until it is linked');
+check(strpos(json_encode(row("SELECT * FROM x_dh_settings")), $n2['claim']) === false, '(the panel never sees it before it is pasted)');
+$o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1; echo exit=$?');
+check(strpos($o, 'Linked') === false && strpos($o, 'panel:') === false, 'before it is added: the panel answers "not yet"', $o);
+$r = req(1, 'AddNode', array('inName' => 'keynode', 'inKey' => 'SN1-AAAA-BBBB'));
+check(strpos($r['text'], 'not a node key') !== false, 'a wrong key is refused');
+$r = req(1, 'AddNode', array('inName' => 'keynode', 'inKey' => strtolower($nodekey)));
+check(strpos($r['text'], 'Node "keynode" added') !== false, 'added with its key (typed in small letters works too)', $r['text']);
+$r = req(1, 'AddNode', array('inName' => 'again', 'inKey' => $nodekey));
+check(strpos($r['text'], 'added already') !== false, 'the same key can not be added twice');
+$o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1; echo exit=$?');
+clearstatcache();
+check(strpos($o, 'Linked to ' . $web . ' as node') !== false && !is_file($k2), 'the node is linked the next time it calls; its key file is removed', $o);
+$n2 = json_decode(file_get_contents($e2 . '/node.json'), true);
+$kn = row("SELECT * FROM x_dh_nodes WHERE nd_name_vc = 'keynode'");
+check((int) $n2['node'] === (int) $kn['nd_id_pk'] && !isset($n2['claim']) && $kn['nd_claim_vc'] === '' && $kn['nd_signpk_vc'] !== '', 'both sides agree; the key can not be used again');
+$o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1; echo exit=$?');
+check(strpos($o, 'panel:') === false && dh::Online(dh::Node((int) $kn['nd_id_pk'])), 'and it calls as a node from then on', $o);
+list($c, $body) = (function () use ($web) { $c = curl_init($web . '/modules/docker_hosting/code/node.php?key=1'); curl_setopt($c, CURLOPT_RETURNTRANSFER, true); $b = curl_exec($c); $h = curl_getinfo($c, CURLINFO_HTTP_CODE); curl_close($c); return array($h, $b); })();
+check($c === 200 && $body === dh::PanelKey(), 'the panel\'s public keys are offered (they are not secret)');
+// removing an online node: it removes itself
+$r = req(1, 'Node', array('inId' => (string) $kn['nd_id_pk'], 'inRemove' => '1'));
+check(strpos($r['text'], 'asked to remove its agent') !== false, 'removing an online node: it is asked to remove itself');
+$o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
+check(strpos(calls(), '--on-active=30 /usr/local/sbin/sentora-node-uninstall --purge') !== false, 'the node uninstalls itself (30 seconds later, so its answer gets through)', $o);
+shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
+check(dh::Node((int) $kn['nd_id_pk']) === null, 'and the panel forgets it when it says so');
+
+section('apps of the administrator\'s own');
+$zdbh->exec("INSERT INTO x_vhosts (vh_id_pk, vh_acc_fk, vh_name_vc) VALUES (20, 1, 'admin.test')");
+$zdbh->exec("INSERT INTO x_dns (dn_acc_fk, dn_name_vc, dn_vhost_fk, dn_type_vc, dn_host_vc, dn_ttl_in, dn_target_vc) VALUES (1, 'admin.test', 20, 'A', '@', 3600, '192.0.2.9')");
+$own = array('inName' => 'Linkding', 'inDesc' => 'Bookmarks you keep and share.', 'inImage' => 'ghcr.io/sissbruecker/linkding:1', 'inPort' => '9090', 'inVolumes' => "/etc/linkding/data/\n\n",
+    'inEnv' => "LD_CSRF_TRUSTED_ORIGINS=https://{domain}\r\nLD_SECRET={secret}\nLD_NOTE=a=b\n", 'inMinMem' => '128', 'inMem' => '256', 'inCpu' => '0.5', 'inDisk' => '1', 'inWeb' => 'https://linkding.link');
+$r = req(2, 'App', $own);
+check((int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'a reseller can not add an app');
+$refused = array(
+    array('inImage' => 'linkding', 'full name'), array('inImage' => 'sissbruecker/linkding:1', 'full name'), array('inImage' => 'ghcr.io/x/y:1 --privileged', 'full name'),
+    array('inPort' => '70000', 'from 1 to 65535'), array('inVolumes' => "/data\n/../etc", 'not a folder inside'), array('inVolumes' => "data", 'not a folder inside'),
+    array('inEnv' => "NOT A SETTING", 'one line NAME=value'), array('inEnv' => "A=1\nA=2", 'there twice'), array('inMem' => '64', 'not less than the least'),
+    array('inName' => '<script>', 'Give the app a name'), array('inWeb' => 'javascript:alert(1)', 'starting with https://'), array('inCpu' => 'x', 'as numbers'),
+);
+foreach ($refused as $x) {
+    $why = array_pop($x);
+    $r = req(1, 'App', array_merge($own, $x));
+    check(strpos($r['text'], $why) !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'refused: ' . json_encode($x), $r['text']);
+}
+$r = req(1, 'App', array_merge($own, array('inCpu' => 'x')), array('tab' => 'nodes'));
+check(strpos($r['html'], 'value="x"') !== false && strpos($r['html'], 'Linkding') !== false, 'a refused form is shown again with what was typed');
+$r = req(1, 'App', $own);
+check(strpos($r['text'], 'ok: Linkding was added') !== false, 'the administrator adds an app of its own', $r['text']);
+$ap = row("SELECT * FROM x_dh_apps");
+check($ap['ap_id_vc'] === 'my-linkding' && $ap['ap_volumes_tx'] === '["\/etc\/linkding\/data"]' && strpos($ap['ap_env_tx'], 'enc1:') === 0 && strpos($ap['ap_env_tx'], 'LD_SECRET') === false, 'kept: its id, folders; its settings encrypted', json_encode($ap));
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'Your own apps') !== false && strpos($r['html'], 'ghcr.io/sissbruecker/linkding:1') !== false && strpos($r['html'], 'your own') !== false && strpos($r['html'], 'LD_SECRET={secret}') !== false, 'listed on Nodes and apps, settings shown to the administrator');
+$r = req(1, 'App', $own);
+check(strpos($r['text'], 'ok:') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps WHERE ap_id_vc = 'my-linkding-2'") === 1, 'the same name again gets its own id');
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding-2'));
+check(strpos($r['text'], 'removed') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 1, 'an unused app is removed');
+$r = req(1, 'AppRemove', array('inId' => 'gitea'));
+check(strpos($r['text'], 'No such app of your own') !== false, 'a built-in app can not be removed');
+$r = req(1);
+check(strpos($r['html'], 'Linkding') !== false && strpos($r['html'], 'Bookmarks you keep and share.') !== false, 'offered to the administrator at once');
+$r = req(3);
+check(strpos($r['html'], 'Linkding') === false, 'not to a client until it is in their share');
+$r = req(1, 'Deploy', array('inApp' => 'my-linkding', 'inName' => 'links', 'inDomain' => '20', 'inCpu' => '0.5', 'inMem' => '256', 'inDisk' => '1', 'inDns' => '1'));
+check(strpos($r['text'], 'ok: Starting Linkding at links.admin.test') !== false, 'started like any app', $r['text']);
+$lc = row("SELECT * FROM x_dh_containers WHERE dc_domain_vc = 'links.admin.test'");
+agent('once');
+$args = file(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $lc['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
+$a = implode(' ', $args);
+check(strpos($a, '--publish 127.0.0.1:' . $lc['dc_port_in'] . ':9090') !== false && strpos($a, '--volume sdh-' . $lc['dc_id_pk'] . '-0:/etc/linkding/data') !== false
+    && strpos($a, 'no-new-privileges') !== false && end($args) === 'ghcr.io/sissbruecker/linkding:1', 'the node runs it with the same limits as every app', $a);
+check(in_array('LD_CSRF_TRUSTED_ORIGINS=https://links.admin.test', $args, true) && in_array('LD_NOTE=a=b', $args, true), '{domain} is the app\'s address; a value may hold =', $a);
+$sec = dh::AppSecret((int) $lc['dc_id_pk'], 'LD_SECRET');
+check(in_array('LD_SECRET=' . $sec, $args, true) && preg_match('/^[0-9a-f]{40}$/', $sec) && $sec !== dh::AppSecret((int) $lc['dc_id_pk'] + 1, 'LD_SECRET') && $sec !== dh::AppSecret((int) $lc['dc_id_pk'], 'OTHER'), '{secret}: the container\'s own, different for every container and setting', $a);
+agent('once');
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inPort' => '9091')));
+check(strpos($r['text'], 'port and data folders stay') !== false, 'in use: its port can not change', $r['text']);
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inVolumes' => "/data")));
+check(strpos($r['text'], 'port and data folders stay') !== false, 'in use: its folders can not change');
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inImage' => 'ghcr.io/sissbruecker/linkding:1.40', 'inEnv' => "LD_SECRET={secret}")));
+check(strpos($r['text'], 'ok: Linkding was saved') !== false && dh_catalog::Custom() !== null, 'in use: the image and settings can change', $r['text']);
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding'));
+check(strpos($r['text'], 'still use Linkding') !== false, 'in use: it can not be removed');
+req(1, 'Act', array('inId' => (string) $lc['dc_id_pk'], 'inWhat' => 'update'));
+$o = agent('once');
+$args = file(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $lc['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
+check(end($args) === 'ghcr.io/sissbruecker/linkding:1.40' && in_array('LD_SECRET=' . $sec, $args, true) && !in_array('LD_NOTE=a=b', $args, true), 'Update brings the new image and settings; the secret stays the same', $o . implode(' ', $args));
+agent('once');
+req(1, 'Act', array('inId' => (string) $lc['dc_id_pk'], 'inWhat' => 'delete'));
+agent('once');
+agent('once');
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding'));
+check(strpos($r['text'], 'removed') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'once its containers are gone it can be removed');
+$r = req(1, '', array(), array('tab' => 'log'));
+check(strpos($r['html'], 'Own app Linkding (my-linkding) added') !== false, 'the log has it');
+
 section('daemon: account switched off, disk limit, account deleted');
 agent('once');
 $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 3");
@@ -431,7 +651,10 @@ check(strpos($r['html'], 'kuma.example.com') === false, 'a client\'s log has onl
 $o = agent('status');
 check(strpos($o, 'node 1') !== false && strpos($o, 'kuma2.example.com') === false, 'agent status', $o);
 $r = req(1, 'Node', array('inId' => '1', 'inRemove' => '1'));
-check(strpos($r['text'], 'was removed') !== false, 'node removed once empty');
+check(strpos($r['text'], 'asked to remove its agent') !== false, 'node 1 (online, empty) is asked to remove itself');
+agent('once');
+agent('once');
+check(dh::Node(1) === null, 'and is gone once it has');
 $o = agent('once');
 check(strpos($o, 'HTTP 400') !== false, 'its keys no longer work', $o);
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');

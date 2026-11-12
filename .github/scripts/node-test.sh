@@ -50,9 +50,9 @@ cleanup() {
 }
 trap cleanup EXIT
 sleep 1
-read -r KEY CODE < <(panel init)
-[[ "$KEY" == v1.* ]] && [[ "$CODE" =~ ^1\. ]] || { echo "::error::the stand-in panel did not start ($KEY $CODE)"; exit 1; }
-ok "panel ready, node added (code $CODE)"
+FP=$(panel init)
+[[ "$FP" =~ ^[A-Z2-9]{4}-[A-Z2-9]{4}$ ]] || { echo "::error::the stand-in panel did not start ($FP)"; exit 1; }
+ok "panel ready (its code: $FP)"
 
 say "A fresh $IMAGE with systemd"
 # (container images may mask systemd-logind; a server never does)
@@ -68,10 +68,18 @@ say "Installing the node"
 docker cp "$REPO/node/sentora2027-node-alma10" "$NAME:/root/sentora2027-node"
 docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/sentora-node-agent.php"
 START=$(date +%s)
-in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-node --panel http://$GW:18092 --key $KEY --code $CODE --no-tls-check --agent /root/sentora-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
+# (the node makes its own key; the panel's code is given as the person installing would confirm it)
+in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-node --panel http://$GW:18092 --panel-code $FP --agent /root/sentora-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
 echo "installed in $(( $(date +%s) - START )) seconds"
-grep -q "^Done: this server is a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; in_box 'tail -40 /var/log/sentora2027-node.log'; exit 1; }
+grep -q "^Done: this server is ready to be a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; in_box 'tail -40 /var/log/sentora2027-node.log'; exit 1; }
+NODEKEY=$(grep -oE 'SN1(-[A-Z2-9]{4}){6}' "$OUT/node-install-screen.txt" | head -1)
+[ -n "$NODEKEY" ] && ok "the installer showed the node's key" || bad "no node key shown"
+in_box 'stat -c %a /root/sentora-node-key.txt' | grep -qx 600 && ok "the key is also kept for root only" || bad "no key file (0600)"
+sleep 12
+panel online | grep -qx 0 && ok "not linked before it is added in the panel" || bad "linked before it was added"
+panel addkey node1 "$NODEKEY" | grep -qx ok && ok "added in the panel with its key" || bad "the panel refused the key"
 wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "node not online"
+in_box '[ ! -e /root/sentora-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
 in_box 'stat -c %a /etc/sentora-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
 in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
 in_box 'cat /etc/systemd/system/user@.service.d/sentora-delegate.conf' | grep -q 'Delegate=cpu cpuset io memory pids' && ok "cgroup controllers handed to the customers' users" || bad "no Delegate drop-in"
@@ -178,14 +186,40 @@ in_box 'echo "<?php syntax error" > /root/src/sentora-node-agent.php'
 U2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1)
 echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "a damaged download changes nothing" || bad "damaged download: $U2"
 
+say "Updates and settings from the panel"
+panel nodeact check-updates | grep -qx ok || bad "check-updates refused"
+wait_for 300 bash -c "v=\$(php '$T/node_real.php' info sys_checked_at); [ \"\${v:-0}\" -gt 0 ] && echo \$v" > /dev/null \
+    && ok "the node counted its system's updates: $(panel info sys_updates) waiting, $(panel info sys_security) security" || bad "the node did not count its updates"
+wait_for 60 bash -c "php '$T/node_real.php' lastjob check-updates | grep '^done'" > /dev/null && ok "the node looked for app updates" || bad "check-updates not done"
+[ "$(panel field "$CID" dc_update_in)" = 0 ] && ok "Uptime Kuma is the newest version (asked the registry)" || bad "an update is shown for the newest image"
+panel act "$CID" update > /dev/null
+U=$(wait_for 600 bash -c "php '$T/node_real.php' lastjob update | grep -E '^(done|failed)'")
+echo "  $U"
+[[ "$U" == "done already the newest version"* ]] && ok "Update: nothing to do for the newest version" || bad "update: $U"
+wait_for 60 state_is "$CID" running > /dev/null && ok "still running" || bad "not running after the update: $(panel state "$CID")"
+panel settings certs@example.com 1 | grep -qx ok || bad "settings refused"
+wait_for 60 bash -c "docker exec $NAME grep -q 'email certs@example.com' /etc/caddy/Caddyfile && echo y" > /dev/null && ok "the node took its settings from the panel (Caddy's email)" || bad "Caddyfile: $(in_box 'cat /etc/caddy/Caddyfile')"
+in_box 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-node/install.conf' && ok "and kept them for its own updates" || bad "settings not kept"
+for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "the app is still served (setup password)" || bad "after the settings: HTTP $C"
+panel nodeact sys-security | grep -qx ok || bad "sys-security refused"
+wait_for 900 bash -c "v=\$(php '$T/node_real.php' info sys_last_at); [ \"\${v:-0}\" -gt 0 ] && echo \$v" > /dev/null \
+    && ok "the node installed its security updates (it went $([ "$(panel info sys_last_ok)" = 1 ] && echo well || echo badly))" || bad "security updates did not run"
+[ "$(panel info sys_last_ok)" = 1 ] || bad "the security update run failed: $(in_box 'tail -5 /var/log/sentora-node-sysupdate.log')"
+
 say "Deleting"
 panel act "$CID" delete > /dev/null
 wait_for 180 bash -c "php '$T/node_real.php' state $CID | grep -x deleted" > /dev/null && ok "deleted in the panel" || bad "not deleted: $(panel state "$CID")"
 N=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps -a -q | wc -l; runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman volume ls -q | wc -l" | tr '\n' ' ')
 [ "$N" = "0 0 " ] && ok "container and its data gone from the node" || bad "left on the node (containers, volumes): $N"
 in_box 'grep -c kuma.example.test /etc/caddy/sentora/sites.caddy || true' | grep -qx 0 && ok "its site gone from Caddy" || bad "its site is still in Caddy"
+say "Removing the node from the panel"
+panel remove | grep -qx online && ok "the online node is asked to remove itself" || bad "remove: not asked"
+wait_for 180 bash -c "php '$T/node_real.php' info agent | grep -x gone" > /dev/null && ok "the panel forgot it once it said so" || bad "the node is still in the panel"
+for _ in $(seq 1 30); do in_box 'systemctl is-active sentora-node' 2> /dev/null | grep -qx active || break; sleep 3; done
+in_box '! systemctl is-active --quiet sentora-node && [ ! -e /etc/sentora-node ] && [ ! -e /usr/local/sbin/sentora-node-agent ]' && ok "the node removed its agent and keys" || bad "the agent is still on the node"
 grep -q "PHP \(Warning\|Notice\|Deprecated\|Fatal\)" "$OUT/panel-web.log" && bad "the panel logged PHP problems" || ok "no PHP problems in the panel"
-in_box 'journalctl -u sentora-node --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecated\)"' && bad "the agent logged PHP problems" || ok "no PHP problems in the agent"
+in_box 'journalctl --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecated\)"' && bad "the agent logged PHP problems" || ok "no PHP problems in the agent"
 
 echo
 [ $FAILS -eq 0 ] && echo "NODE TEST PASSED" || echo "NODE TEST: $FAILS FAILED"

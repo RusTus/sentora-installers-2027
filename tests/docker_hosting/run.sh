@@ -19,6 +19,7 @@ echo "import sentora/*.caddy" > "$W/node/caddy/Caddyfile"
 export DH_DB="$W/test.sqlite" DH_WEB=http://127.0.0.1:18092 DH_AGENT="$REPO/node/sentora-node-agent.php" DH_W="$W"
 export FAKE_DIR="$W/fake" SNODE_ETC="$W/node/etc" SNODE_STATE="$W/node/state" SNODE_CADDY="$W/node/caddy" SNODE_RUN="$W/node/run"
 export SNODE_HOME="$W/node/home" SNODE_SUBID="$W/node/sub" SNODE_USERPATH="$T/fakebin:/usr/bin:/bin"
+export SNODE_UPDATE_WAIT=0 SNODE_KEYFILE="$W/node/sentora-node-key.txt" DH_MAIL="$W/mail.txt"
 if [ -n "${DH_MYSQL:-}" ]; then
     php -r 'list($h, $p, $u, $w, $d) = explode(";", getenv("DH_MYSQL")); $x = new PDO("mysql:host=$h;port=$p", $u, $w);
         $x->exec("DROP DATABASE IF EXISTS `$d`"); $x->exec("CREATE DATABASE `$d` CHARACTER SET utf8mb4"); echo "database: ", $x->query("SELECT VERSION()")->fetchColumn(), "\n";' || exit 1

@@ -40,7 +40,7 @@ if (getenv('DH_MYSQL')) {
     list($h, $p, $u, $pw, $db) = explode(';', getenv('DH_MYSQL'));
     $zdbh = new MyPDO("mysql:host=$h;port=$p;dbname=$db;charset=utf8mb4", $u, $pw);
     $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, ac_user_vc varchar(50), ac_reseller_fk int(6), ac_group_fk int(6),
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, ac_user_vc varchar(50), ac_email_vc varchar(200) DEFAULT '', ac_reseller_fk int(6), ac_group_fk int(6),
         ac_enabled_in int(1) DEFAULT 1, ac_deleted_ts int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
     $zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, vh_acc_fk int(6), vh_name_vc varchar(255) CHARACTER SET latin1 COLLATE latin1_general_ci,
         vh_type_in int(1) DEFAULT 1, vh_deleted_ts int(30)) ENGINE=MyISAM DEFAULT CHARSET=utf8");
@@ -56,7 +56,7 @@ if (getenv('DH_MYSQL')) {
     $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $zdbh->exec('PRAGMA journal_mode=WAL');
     $zdbh->exec('PRAGMA busy_timeout=10000');
-    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_reseller_fk INT, ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_deleted_ts INT)");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_email_vc TEXT DEFAULT '', ac_reseller_fk INT, ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_deleted_ts INT)");
     $zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, vh_acc_fk INT, vh_name_vc TEXT, vh_type_in INT DEFAULT 1, vh_deleted_ts INT)");
     $zdbh->exec("CREATE TABLE IF NOT EXISTS x_dns (dn_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, dn_acc_fk INT, dn_name_vc TEXT, dn_vhost_fk INT, dn_type_vc TEXT, dn_host_vc TEXT, dn_ttl_in INT,
         dn_target_vc TEXT, dn_texttarget_tx TEXT, dn_priority_in INT, dn_weight_in INT, dn_port_in INT, dn_created_ts INT, dn_deleted_ts INT)");
@@ -152,6 +152,25 @@ class fs_filehandler
     static function NewLine()
     {
         return "\n";
+    }
+}
+
+// (mail: written to the file DH_MAIL)
+class sys_email
+{
+    public $Subject = '';
+    public $Body = '';
+    public $to = array();
+
+    public function AddAddress($a)
+    {
+        $this->to[] = $a;
+    }
+
+    public function SendEmail()
+    {
+        file_put_contents(getenv('DH_MAIL'), "To: " . implode(', ', $this->to) . "\nSubject: " . $this->Subject . "\n\n" . $this->Body . "\n----\n", FILE_APPEND);
+        return true;
     }
 }
 
