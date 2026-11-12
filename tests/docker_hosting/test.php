@@ -470,7 +470,8 @@ check(preg_match('/Node key:  (SN1(-[A-Z2-9]{4}){6})/', $o, $km) === 1 && strpos
 $nodekey = $km[1];
 check((fileperms($k2) & 0777) === 0600 && strpos(file_get_contents($k2), $nodekey) !== false, 'and keeps it for root only');
 $n2 = json_decode(file_get_contents($e2 . '/node.json'), true);
-check($n2['node'] === 0 && strlen($n2['claim']) === 64 && strpos(json_encode($n2), substr($nodekey, 4, 9)) === false, 'node.json has only the key\'s hash, not the key');
+check($n2['node'] === 0 && strlen($n2['claim']) === 30 && (fileperms($e2 . '/node.json') & 0777) === 0600, 'node.json keeps the key for root only until it is linked');
+check(strpos(json_encode(row("SELECT * FROM x_dh_settings")), $n2['claim']) === false, '(the panel never sees it before it is pasted)');
 $o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1; echo exit=$?');
 check(strpos($o, 'Linked') === false && strpos($o, 'panel:') === false, 'before it is added: the panel answers "not yet"', $o);
 $r = req(1, 'AddNode', array('inName' => 'keynode', 'inKey' => 'SN1-AAAA-BBBB'));

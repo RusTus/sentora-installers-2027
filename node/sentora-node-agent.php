@@ -983,7 +983,7 @@ class snode
         $sign = sodium_crypto_sign_keypair();
         $box = sodium_crypto_box_keypair();
         $cfg = array('panel' => $panel, 'panel_sign_pk' => $p[1], 'panel_box_pk' => $p[2], 'tls_verify' => $k[1], 'node' => 0,
-            'claim' => hash('sha256', $secret), 'sign_sk' => self::B64(sodium_crypto_sign_secretkey($sign)), 'box_kp' => self::B64($box));
+            'claim' => bin2hex($secret), 'sign_sk' => self::B64(sodium_crypto_sign_secretkey($sign)), 'box_kp' => self::B64($box));
         if (!is_dir(self::$etc)) {
             mkdir(self::$etc, 0700, true);
         }
@@ -1008,6 +1008,7 @@ class snode
         $cfg = self::$cfg;
         $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
         $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
+        // (the key itself, sealed so only the panel reads it; the panel keeps only its hash)
         $msg = self::Msg('hello', 0, array('claim' => $cfg['claim'], 'sign_pk' => self::B64(sodium_crypto_sign_publickey_from_secretkey($sk)),
             'box_pk' => self::B64(sodium_crypto_box_publickey($kp)), 'info' => self::Info()));
         $r = self::Call($msg, $sk, $kp, $cfg);
