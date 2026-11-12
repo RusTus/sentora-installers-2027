@@ -217,7 +217,7 @@ find "$P/bin" "$P/sbin" "$P/lib/php/extensions" -type f -exec strip --strip-unne
 cat > "$P/BUILD-INFO" <<EOI
 PHP $V for Sentora on $OS_NAME (amd64)
 Built $(date -u +%Y-%m-%d) with build-sentora-php.sh from php-$V.${ADDON_LIST:+
-Add-ons (bin/sentora-php-addons switches them on):$ADDON_LIST}
+Add-ons ($([ "${AUTO_ON:-1}" = 1 ] && echo 'bin/sentora-php-addons switches them on' || echo 'off: switched on in PHP Versions > Extensions')):$ADDON_LIST}
 Snuffleupagus $SP_VERSION: lib/php/extensions, off (the PHP Hardening add-on switches it on).
 Configure options: see bin/php-config --configure-options
 EOI
