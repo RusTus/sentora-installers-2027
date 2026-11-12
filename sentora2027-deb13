@@ -1219,6 +1219,7 @@ ln -sf $PANEL_PATH/panel/bin/sentora-smoke-test /usr/local/sbin/sentora-smoke-te
 ln -sf $PANEL_PATH/panel/bin/sentora-update /usr/local/sbin/sentora-update
 ln -sf $PANEL_PATH/panel/bin/sentora-update-check /usr/local/sbin/sentora-update-check
 ln -sf $PANEL_PATH/panel/bin/sentora-post-install-check /usr/local/sbin/sentora-post-install-check
+ln -sf $PANEL_PATH/panel/bin/sentora-firewall /usr/local/sbin/sentora-firewall
 ln -s $PANEL_PATH/panel/bin/setzadmin /usr/bin/setzadmin
 
 #
@@ -2098,6 +2099,10 @@ $PANEL_PATH/panel/bin/setso --set modsec_data_dir /var/cache/modsecurity > /dev/
 $PANEL_PATH/panel/bin/setso --set modsec_conf_dir "$PANEL_CONF/apache/modsecurity.d" > /dev/null
 $PANEL_PATH/panel/bin/setso --set modsec_off_cmd "a2dismod -q -f security2" > /dev/null
 $PANEL_PATH/panel/bin/setso --set php_bundle_tag debian13 > /dev/null
+$PANEL_PATH/panel/bin/setso --set firewall_kind ufw > /dev/null
+$PANEL_PATH/panel/bin/setso --set firewall_cmd /usr/sbin/ufw > /dev/null
+$PANEL_PATH/panel/bin/setso --set firewall_service ufw > /dev/null
+$PANEL_PATH/panel/bin/setso --set firewall_package ufw > /dev/null
 $PANEL_PATH/panel/bin/setso --set php_bundle_libs "libpng16-16t64 libjpeg62-turbo libfreetype6 libwebp7 libgmp10 zlib1g libldap2 libgnutls30t64 libonig5 libzip5 libsodium23 libargon2-1 libsqlite3-0 libxml2 libcurl4t64 libicu76 libxslt1.1 libssl3t64" > /dev/null
 zadminpassword=$(passwordgen);
 setzadmin --set "$zadminpassword";
@@ -2139,6 +2144,7 @@ sed -i 's|systemctl reload httpd > /dev/null|systemctl reload apache2 > /dev/nul
 ##
 ui_step "Installing fail2ban"
 install_available fail2ban python3-systemd
+install_available ufw
 # The log files the jails read must exist before fail2ban starts
 mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/logs/proftpd" /var/lib/sentora
 touch /var/log/dovecot.log /var/log/dovecot-info.log "$PANEL_DATA/logs/roundcube/errors.log" "$PANEL_DATA/logs/proftpd/auth.log" /var/lib/sentora/sentora-auth.log
@@ -2199,7 +2205,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup $PANEL_PATH/panel/bin/sentora-firewall 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
@@ -2266,6 +2272,15 @@ if systemctl cat apparmor.service &> /dev/null; then
     systemctl enable apparmor &> /dev/null
     systemctl reload-or-restart apparmor &> /dev/null
     aa_active && echo "AppArmor is on: $(aa-status --enforced 2> /dev/null || echo some) profiles in enforce mode"
+fi
+
+#--- The firewall: only Sentora's ports open (sentora-firewall; SSH stays open on sshd's ports). In a
+# container the host's firewall decides, so it is left off there.
+if command -v systemd-detect-virt > /dev/null 2>&1 && systemd-detect-virt --quiet --container; then
+    echo "The firewall: left to the host (this is a container)."
+else
+    ui_step "Switching on the firewall (only Sentora's ports open)"
+    bash $PANEL_PATH/panel/bin/sentora-firewall on --yes || echo "WARNING: the firewall was not switched on: run sentora-firewall on"
 fi
 
 echo -e "\n--- Restarting Services"

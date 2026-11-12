@@ -1231,6 +1231,7 @@ ln -sf $PANEL_PATH/panel/bin/sentora-smoke-test /usr/local/sbin/sentora-smoke-te
 ln -sf $PANEL_PATH/panel/bin/sentora-update /usr/local/sbin/sentora-update
 ln -sf $PANEL_PATH/panel/bin/sentora-update-check /usr/local/sbin/sentora-update-check
 ln -sf $PANEL_PATH/panel/bin/sentora-post-install-check /usr/local/sbin/sentora-post-install-check
+ln -sf $PANEL_PATH/panel/bin/sentora-firewall /usr/local/sbin/sentora-firewall
 ln -s $PANEL_PATH/panel/bin/setzadmin /usr/bin/setzadmin
 
 #
@@ -2167,6 +2168,7 @@ SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
 so php_cli /usr/bin/php
+so firewall_kind firewalld; so firewall_cmd /usr/bin/firewall-cmd; so firewall_service firewalld; so firewall_package firewalld
 so php_bundle_tag alma10; so php_bundle_libs "$PHP_BUNDLE_LIBS"
 # ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
 # httpd.conf includes, and the command that keeps the system's own settings off
@@ -2213,6 +2215,7 @@ ln -s $PANEL_CONF/logrotate/Sentora-dovecot /etc/logrotate.d/Sentora-dovecot
 ##
 ui_step "Installing fail2ban"
 install_available fail2ban-server fail2ban-sendmail python3-systemd nftables
+install_available firewalld
 # The log files the jails read must exist before fail2ban starts
 mkdir -p "$PANEL_DATA/logs/roundcube" "$PANEL_DATA/logs/proftpd" /var/lib/sentora
 touch /var/log/dovecot.log /var/log/dovecot-info.log "$PANEL_DATA/logs/roundcube/errors.log" "$PANEL_DATA/logs/proftpd/auth.log" /var/lib/sentora/sentora-auth.log
@@ -2279,7 +2282,7 @@ chmod 750 "$PANEL_DATA/logs/domains"
 chown -R root:root $PANEL_PATH/panel
 find $PANEL_PATH/panel -type d -exec chmod 755 {} +
 find $PANEL_PATH/panel -type f -exec chmod 644 {} +
-chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup 2> /dev/null
+chmod 755 $PANEL_PATH/panel/bin/zppy $PANEL_PATH/panel/bin/setso $PANEL_PATH/panel/bin/setzadmin $PANEL_PATH/panel/bin/sentora-notice $PANEL_PATH/panel/bin/sentora-update-check $PANEL_PATH/panel/bin/sentora-post-install-check $PANEL_PATH/panel/bin/sentora-update $PANEL_PATH/panel/bin/sentora-restore $PANEL_PATH/panel/bin/sentora-smoke-test $PANEL_PATH/panel/bin/sentora-offsite-backup $PANEL_PATH/panel/bin/sentora-panel-restore $PANEL_PATH/panel/bin/sentora-web-probe $PANEL_PATH/panel/bin/sentora-ftp-kick $PANEL_PATH/panel/bin/sentora-php-install $PANEL_PATH/panel/bin/sentora-change-domain $PANEL_PATH/panel/bin/sentora-migrate-import $PANEL_PATH/panel/bin/sentora-migrate-export $PANEL_PATH/panel/bin/sentora-matomo-setup $PANEL_PATH/panel/bin/sentora-firewall 2> /dev/null
 chown root:"$PANEL_USER" $PANEL_PATH/panel/bin/zsudo; chmod 750 $PANEL_PATH/panel/bin/zsudo
 # What the panel itself writes: its template cache. Modules and Repo Browser's
 # package cache belong to root: the panel queues module changes and the root
@@ -2409,16 +2412,13 @@ if systemctl list-unit-files cockpit.socket > /dev/null 2>&1 && systemctl is-ena
     echo "  To use it again: systemctl enable --now cockpit.socket (and reach it through an SSH tunnel)."
 fi
 
-#--- The firewall (firewalld, when it runs): the ports Sentora serves
-if systemctl is-active --quiet firewalld 2> /dev/null; then
-    ui_step "Opening the firewall for Sentora's services"
-    for svc in http https smtp smtps smtp-submission imap imaps pop3 pop3s ftp dns managesieve; do
-        firewall-cmd --permanent --add-service="$svc" > /dev/null 2>&1 || echo "firewalld: no service $svc"
-    done
-    # FTP's passive data ports (proftpd: PassivePorts)
-    firewall-cmd --permanent --add-port=60000-65535/tcp > /dev/null 2>&1
-    firewall-cmd --reload > /dev/null 2>&1
-    echo "firewalld: $(firewall-cmd --list-services 2> /dev/null)"
+#--- The firewall: only Sentora's ports open (sentora-firewall; SSH stays open on sshd's ports). In a
+# container the host's firewall decides, so it is left off there.
+if command -v systemd-detect-virt > /dev/null 2>&1 && systemd-detect-virt --quiet --container; then
+    echo "The firewall: left to the host (this is a container)."
+else
+    ui_step "Switching on the firewall (only Sentora's ports open)"
+    bash $PANEL_PATH/panel/bin/sentora-firewall on --yes || echo "WARNING: the firewall was not switched on: run sentora-firewall on"
 fi
 
 echo -e "\n--- Restarting Services"

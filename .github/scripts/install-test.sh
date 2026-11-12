@@ -236,6 +236,29 @@ if [ $AA -eq 1 ]; then
     fi
 fi
 
+say "The firewall (sentora-firewall on: Sentora's ports open, everything else closed)"
+# (the installer leaves it to the host in a container: switched on here to test it, as on a server)
+{
+    in_box 'nohup setsid python3 -m http.server 7777 --bind 0.0.0.0 > /dev/null 2>&1 &'
+    sleep 2
+    IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
+    reach() { timeout 5 bash -c "exec 3<>/dev/tcp/$IP/$1" 2> /dev/null && echo open || echo closed; }
+    echo "  before: 443 $(reach 443), test port 7777 $(reach 7777)"
+    in_box 'sentora-firewall on --yes --container' 2>&1 | sed 's/^/  /'
+    in_box 'sentora-firewall status' 2>&1 | head -30 | sed 's/^/  /'
+    fw=1
+    for p in 443 80 25 587 993 21 53; do
+        r=$(reach $p); echo "  after: $p $r"
+        # (closed is wrong only when something in there listens on it)
+        if [ "$r" != open ] && [ "$(in_box "ss -Hltn | grep -cE ':$p\\s'")" != 0 ]; then fw=0; fi
+    done
+    r=$(reach 7777); echo "  after: test port 7777 $r (must be closed)"; [ "$r" = closed ] || fw=0
+    in_box 'sentora-firewall deny 443' > /dev/null 2>&1 && { echo "  Sentora's own port 443 could be closed"; fw=0; } || echo "  Sentora's own port 443 can not be closed"
+    in_box 'curl -sk -o /dev/null -w "  the panel from inside: HTTP %{http_code}\n" https://127.0.0.1/'
+    [ $fw -eq 1 ] && echo "FIREWALL: PASSED" || echo "FIREWALL: FAILED"
+} > "$OUT/firewall.txt" 2>&1
+cat "$OUT/firewall.txt"
+
 in_box "cat /var/sentora/logs/daemon-last-run.log" > "$OUT/daemon-last-run.log" 2>&1
 
 say "Result for $SYS"
@@ -244,6 +267,7 @@ if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check ha
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
+if ! grep -q 'FIREWALL: PASSED' "$OUT/firewall.txt"; then echo "::error::$SYS: the firewall did not open exactly Sentora's ports (firewall.txt)"; ok=0; fi
 if ! grep -q 'HOURLY: PASSED' "$OUT/hourly.txt"; then echo "::error::$SYS: an hourly job failed (hourly.txt)"; ok=0; fi
 if ! grep -q 'PLATFORM: PASSED' "$OUT/platform-settings.txt"; then echo "::error::$SYS: this system's settings were not filled in as its installer sets them (platform-settings.txt)"; ok=0; fi
 if ! grep -q 'HARDENING: PASSED' "$OUT/hardening.txt" || grep -q 'HARDENING: FAILED' "$OUT/hardening.txt"; then echo "::error::$SYS: the hardening report was not written as it should (hardening.txt)"; ok=0; fi
