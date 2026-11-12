@@ -192,7 +192,7 @@ x_update_all() { # Repo Browser's "Update all": two add-ons made to look one ver
     local list m mods=""; list="${root}etc/zppy-cache/package.list"
     [ -s "$list" ] || { WHY="no package list from the repositories"; return 2; }
     # two small add-ons that are not installed yet (installed by root here: what is tested is the button)
-    for m in $(awk '{print $1}' "$list" | grep -vxE 'docker_hosting|payment_plans|php_hardening' | sort -u); do
+    for m in $(awk '{print $1}' "$list" | grep -vxE 'docker_hosting|payment_plans|php_hardening|log_forwarder' | sort -u); do
         [ -n "$(q "SELECT mo_folder_vc FROM x_modules WHERE mo_folder_vc='$m'")" ] && continue
         zp install "$m" > /dev/null 2>&1 && [ -n "$(q "SELECT mo_folder_vc FROM x_modules WHERE mo_folder_vc='$m'")" ] && mods="$mods $m"
         [ "$(echo $mods | wc -w)" -ge 2 ] && break
@@ -224,6 +224,8 @@ x_update_all() { # Repo Browser's "Update all": two add-ons made to look one ver
 }
 x_autoupdate() { # "Keep the panel up to date": the published release installs itself, is checked, and the administrators are told
     local st=/var/lib/sentora-update l
+    # (the test machine was installed from the test's own file server: a real server asks GitHub)
+    sed -i 's/^URL=.*/URL=""/' /etc/sentora/update.conf 2> /dev/null
     l=$(bash "$PANEL/bin/sentora-update" --status 2> /dev/null | tail -1)
     case "$l" in available*) ;; *) WHY="no newer release to install ($l)"; return 2 ;; esac
     [ -s "$st/available-sum" ] || { WHY="sentora-update --status did not note which release it is"; return 1; }
