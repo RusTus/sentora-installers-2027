@@ -501,6 +501,75 @@ check(strpos(calls(), '--on-active=30 /usr/local/sbin/sentora-node-uninstall --p
 shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
 check(dh::Node((int) $kn['nd_id_pk']) === null, 'and the panel forgets it when it says so');
 
+section('apps of the administrator\'s own');
+$zdbh->exec("INSERT INTO x_vhosts (vh_id_pk, vh_acc_fk, vh_name_vc) VALUES (20, 1, 'admin.test')");
+$zdbh->exec("INSERT INTO x_dns (dn_acc_fk, dn_name_vc, dn_vhost_fk, dn_type_vc, dn_host_vc, dn_ttl_in, dn_target_vc) VALUES (1, 'admin.test', 20, 'A', '@', 3600, '192.0.2.9')");
+$own = array('inName' => 'Linkding', 'inDesc' => 'Bookmarks you keep and share.', 'inImage' => 'ghcr.io/sissbruecker/linkding:1', 'inPort' => '9090', 'inVolumes' => "/etc/linkding/data/\n\n",
+    'inEnv' => "LD_CSRF_TRUSTED_ORIGINS=https://{domain}\r\nLD_SECRET={secret}\nLD_NOTE=a=b\n", 'inMinMem' => '128', 'inMem' => '256', 'inCpu' => '0.5', 'inDisk' => '1', 'inWeb' => 'https://linkding.link');
+$r = req(2, 'App', $own);
+check((int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'a reseller can not add an app');
+$refused = array(
+    array('inImage' => 'linkding', 'full name'), array('inImage' => 'sissbruecker/linkding:1', 'full name'), array('inImage' => 'ghcr.io/x/y:1 --privileged', 'full name'),
+    array('inPort' => '70000', 'from 1 to 65535'), array('inVolumes' => "/data\n/../etc", 'not a folder inside'), array('inVolumes' => "data", 'not a folder inside'),
+    array('inEnv' => "NOT A SETTING", 'one line NAME=value'), array('inEnv' => "A=1\nA=2", 'there twice'), array('inMem' => '64', 'not less than the least'),
+    array('inName' => '<script>', 'Give the app a name'), array('inWeb' => 'javascript:alert(1)', 'starting with https://'), array('inCpu' => 'x', 'as numbers'),
+);
+foreach ($refused as $x) {
+    $why = array_pop($x);
+    $r = req(1, 'App', array_merge($own, $x));
+    check(strpos($r['text'], $why) !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'refused: ' . json_encode($x), $r['text']);
+}
+$r = req(1, 'App', array_merge($own, array('inCpu' => 'x')), array('tab' => 'nodes'));
+check(strpos($r['html'], 'value="x"') !== false && strpos($r['html'], 'Linkding') !== false, 'a refused form is shown again with what was typed');
+$r = req(1, 'App', $own);
+check(strpos($r['text'], 'ok: Linkding was added') !== false, 'the administrator adds an app of its own', $r['text']);
+$ap = row("SELECT * FROM x_dh_apps");
+check($ap['ap_id_vc'] === 'my-linkding' && $ap['ap_volumes_tx'] === '["\/etc\/linkding\/data"]' && strpos($ap['ap_env_tx'], 'enc1:') === 0 && strpos($ap['ap_env_tx'], 'LD_SECRET') === false, 'kept: its id, folders; its settings encrypted', json_encode($ap));
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'Your own apps') !== false && strpos($r['html'], 'ghcr.io/sissbruecker/linkding:1') !== false && strpos($r['html'], 'your own') !== false && strpos($r['html'], 'LD_SECRET={secret}') !== false, 'listed on Nodes and apps, settings shown to the administrator');
+$r = req(1, 'App', $own);
+check(strpos($r['text'], 'ok:') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps WHERE ap_id_vc = 'my-linkding-2'") === 1, 'the same name again gets its own id');
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding-2'));
+check(strpos($r['text'], 'removed') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 1, 'an unused app is removed');
+$r = req(1, 'AppRemove', array('inId' => 'gitea'));
+check(strpos($r['text'], 'No such app of your own') !== false, 'a built-in app can not be removed');
+$r = req(1);
+check(strpos($r['html'], 'Linkding') !== false && strpos($r['html'], 'Bookmarks you keep and share.') !== false, 'offered to the administrator at once');
+$r = req(3);
+check(strpos($r['html'], 'Linkding') === false, 'not to a client until it is in their share');
+$r = req(1, 'Deploy', array('inApp' => 'my-linkding', 'inName' => 'links', 'inDomain' => '20', 'inCpu' => '0.5', 'inMem' => '256', 'inDisk' => '1', 'inDns' => '1'));
+check(strpos($r['text'], 'ok: Starting Linkding at links.admin.test') !== false, 'started like any app', $r['text']);
+$lc = row("SELECT * FROM x_dh_containers WHERE dc_domain_vc = 'links.admin.test'");
+agent('once');
+$args = file(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $lc['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
+$a = implode(' ', $args);
+check(strpos($a, '--publish 127.0.0.1:' . $lc['dc_port_in'] . ':9090') !== false && strpos($a, '--volume sdh-' . $lc['dc_id_pk'] . '-0:/etc/linkding/data') !== false
+    && strpos($a, 'no-new-privileges') !== false && end($args) === 'ghcr.io/sissbruecker/linkding:1', 'the node runs it with the same limits as every app', $a);
+check(in_array('LD_CSRF_TRUSTED_ORIGINS=https://links.admin.test', $args, true) && in_array('LD_NOTE=a=b', $args, true), '{domain} is the app\'s address; a value may hold =', $a);
+$sec = dh::AppSecret((int) $lc['dc_id_pk'], 'LD_SECRET');
+check(in_array('LD_SECRET=' . $sec, $args, true) && preg_match('/^[0-9a-f]{40}$/', $sec) && $sec !== dh::AppSecret((int) $lc['dc_id_pk'] + 1, 'LD_SECRET') && $sec !== dh::AppSecret((int) $lc['dc_id_pk'], 'OTHER'), '{secret}: the container\'s own, different for every container and setting', $a);
+agent('once');
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inPort' => '9091')));
+check(strpos($r['text'], 'port and data folders stay') !== false, 'in use: its port can not change', $r['text']);
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inVolumes' => "/data")));
+check(strpos($r['text'], 'port and data folders stay') !== false, 'in use: its folders can not change');
+$r = req(1, 'App', array_merge($own, array('inId' => 'my-linkding', 'inImage' => 'ghcr.io/sissbruecker/linkding:1.40', 'inEnv' => "LD_SECRET={secret}")));
+check(strpos($r['text'], 'ok: Linkding was saved') !== false && dh_catalog::Custom() !== null, 'in use: the image and settings can change', $r['text']);
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding'));
+check(strpos($r['text'], 'still use Linkding') !== false, 'in use: it can not be removed');
+req(1, 'Act', array('inId' => (string) $lc['dc_id_pk'], 'inWhat' => 'update'));
+$o = agent('once');
+$args = file(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $lc['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
+check(end($args) === 'ghcr.io/sissbruecker/linkding:1.40' && in_array('LD_SECRET=' . $sec, $args, true) && !in_array('LD_NOTE=a=b', $args, true), 'Update brings the new image and settings; the secret stays the same', $o . implode(' ', $args));
+agent('once');
+req(1, 'Act', array('inId' => (string) $lc['dc_id_pk'], 'inWhat' => 'delete'));
+agent('once');
+agent('once');
+$r = req(1, 'AppRemove', array('inId' => 'my-linkding'));
+check(strpos($r['text'], 'removed') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === 0, 'once its containers are gone it can be removed');
+$r = req(1, '', array(), array('tab' => 'log'));
+check(strpos($r['html'], 'Own app Linkding (my-linkding) added') !== false, 'the log has it');
+
 section('daemon: account switched off, disk limit, account deleted');
 agent('once');
 $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 3");
