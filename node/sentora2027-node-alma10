@@ -34,6 +34,8 @@
 # Update: sentora-node-update --yes (Sentora's own software only: the newest agent and installer from
 #         master2027; Podman, Caddy, PHP and the rest come with the system's updates; the customers'
 #         containers keep running). A package the new version needs and the node lacks is still added.
+# Relink:    sentora-node-relink --panel URL [--new-key] (the panel moved, was set up again, or another panel:
+#            the apps and their data stay; the panel lists them under "Found on this node" to give back).
 # Uninstall: sentora-node-uninstall (keeps the customers' containers unless --purge).
 # Log: /var/log/sentora2027-node.log
 set -u
@@ -208,8 +210,25 @@ cat > /usr/local/sbin/sentora-node-agent <<EOF
 exec /usr/bin/php $LIB/sentora-node-agent.php "\$@"
 EOF
 chmod 755 /usr/local/sbin/sentora-node-agent
+cat > /usr/local/sbin/sentora-node-relink <<'RELINK_EOF'
+#!/bin/sh
+# Sentora Node: link this node again, keeping every app and its data.
+#   sentora-node-relink --panel https://panel.example            the same panel at a new address (only the address
+#                                                                 changes), or another panel (new node key to add there)
+#   sentora-node-relink --panel https://panel.example --new-key  the same panel, which no longer knows this node
+#                                                                 (removed there, set up again or restored)
+# Then add the node in the panel with the key shown; its apps appear under "Found on this node", where the
+# administrator gives each back to its owner.
+[ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
+[ $# -gt 0 ] || { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+systemctl stop sentora-node 2>/dev/null
+/usr/local/sbin/sentora-node-agent relink "$@"; r=$?
+systemctl start sentora-node
+exit $r
+RELINK_EOF
+chmod 755 /usr/local/sbin/sentora-node-relink
 if [ -f /etc/sentora-node/node.json ]; then
-    say "   Already linked to a panel (/etc/sentora-node/node.json): kept. To link it again, run sentora-node-uninstall first."
+    say "   Already linked to a panel (/etc/sentora-node/node.json): kept. To link it to a panel again (apps kept): sentora-node-relink --panel <address>."
 elif [ "$MODE" = pair ]; then
     /usr/local/sbin/sentora-node-agent pair --panel "$PANEL" --key "$KEY" --code "$CODE" $TLS 2>&1 | tee -a "$LOG"
     [ "${PIPESTATUS[0]}" -eq 0 ] || die "Not linked to the panel (see above)."
@@ -242,7 +261,7 @@ cat > /usr/local/sbin/sentora-node-uninstall <<'EOF'
 # --purge also deletes every customer's containers, data and Linux user (sdh*), and the containers' sites.
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 systemctl disable --now sentora-node 2>/dev/null
-rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent /usr/local/sbin/sentora-node-update /usr/local/sbin/sentora-node-sysupdate /root/sentora-node-key.txt
+rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent /usr/local/sbin/sentora-node-relink /usr/local/sbin/sentora-node-update /usr/local/sbin/sentora-node-sysupdate /root/sentora-node-key.txt
 rm -rf /etc/sentora-node /usr/local/lib/sentora-node
 if [ "${1:-}" = --purge ]; then
     for u in $(awk -F: '$1 ~ /^sdh[0-9]+$/ {print $1}' /etc/passwd); do

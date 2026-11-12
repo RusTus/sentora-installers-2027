@@ -40,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '108';
+    const VERSION = '109';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -454,7 +454,7 @@ class snode
         if (isset($d['mem']) && (!is_int($d['mem']) || $d['mem'] < 16 || $d['mem'] > 4194304)) {
             return 'bad memory';
         }
-        if ($action === 'create' || $action === 'update' || $action === 'recreate') {
+        if ($action === 'create' || $action === 'update' || $action === 'recreate' || $action === 'move') {
             if (!isset($d['image']) || !is_string($d['image']) || strlen($d['image']) > 255
                 || !preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+(:[A-Za-z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$#', $d['image'])) {
                 return 'bad image';
@@ -715,7 +715,7 @@ class snode
         $name = self::Name($d['cid']);
         $key = (string) $d['cid'];
         // a container belongs to the user it was made for
-        if (isset($s['containers'][$key]) && $s['containers'][$key]['user'] !== $d['user']) {
+        if ($action !== 'move' && isset($s['containers'][$key]) && $s['containers'][$key]['user'] !== $d['user']) {
             return array(false, 'refused: that container belongs to another user');
         }
         switch ($action) {
@@ -805,6 +805,13 @@ class snode
                 }
                 $px = self::Proxy($s);
                 return $px === '' ? array(true, 'proxy: done') : array(false, $px);
+            case 'inspect':
+                if (!isset($s['containers'][$key])) {
+                    return array(false, 'no such container here');
+                }
+                return self::Inspect($d, $s);
+            case 'move':
+                return self::Move($d, $s);
             case 'delete':
                 if (self::Uid($d['user']) >= 0) {
                     $r = self::Podman($d['user'], array('rm', '--force', '--time', '10', '--ignore', $name), 300);
@@ -953,8 +960,12 @@ class snode
                 if ($measure) {
                     self::$disk[$cid] = self::DiskUse($user, (int) $cid, (int) $s['containers'][$cid]['volumes']);
                 }
+                $c = $s['containers'][$cid];
                 $out[$cid] = array('state' => $st, 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
-                    'update' => !empty($s['updates'][$cid]) ? 1 : 0);
+                    'update' => !empty($s['updates'][$cid]) ? 1 : 0,
+                    // (what the panel needs to show an app it does not know, and to take it back)
+                    'image' => isset($c['image']) ? (string) $c['image'] : '', 'domain' => (string) $c['domain'], 'hostport' => (int) $c['hostport'],
+                    'volumes' => (int) $c['volumes'], 'public' => (int) $c['public']);
             }
         }
         if ($measure) {
@@ -975,6 +986,256 @@ class snode
             }
         }
         return $mb;
+    }
+
+    /**
+     * The customers' Linux users (sdh*) on this node.
+     */
+    static function Users()
+    {
+        $out = array();
+        foreach ((array) @file(getenv('SNODE_PASSWD') ?: '/etc/passwd', FILE_IGNORE_NEW_LINES) as $l) {
+            $p = explode(':', (string) $l);
+            if (count($p) > 2 && preg_match('/^sdh\d{1,9}$/', $p[0])) {
+                $out[] = $p[0];
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * Apps that are on this node but not in its list (the list was lost: the node was set up again
+     * with the customers' users kept, or state.json was removed): found by the label every app has,
+     * with what can be read back (image, port, folders, its address from Caddy's sites), and listed
+     * again, so the panel sees them and can take them back. Nothing is changed or removed.
+     * Returns how many were added.
+     */
+    static function Scan(array &$s)
+    {
+        $added = 0;
+        $sites = (string) @file_get_contents(self::$caddy . '/sentora/sites.caddy');
+        foreach (self::Users() as $user) {
+            if (self::Uid($user) < 0) {
+                continue;
+            }
+            $r = self::Podman($user, array('ps', '--all', '--filter', 'label=sentora.cid', '--format', 'json'), 60);
+            $list = $r[0] === 0 ? json_decode($r[1], true) : null;
+            foreach (is_array($list) ? $list : array() as $p) {
+                $cid = isset($p['Labels']['sentora.cid']) ? (string) $p['Labels']['sentora.cid'] : '';
+                $names = isset($p['Names']) && is_array($p['Names']) ? $p['Names'] : array();
+                if (!ctype_digit($cid) || (int) $cid <= 0 || isset($s['containers'][$cid]) || !in_array(self::Name((int) $cid), $names, true)) {
+                    continue;
+                }
+                $name = self::Name((int) $cid);
+                $img = self::Podman($user, array('container', 'inspect', '--format', '{{.ImageName}}', $name));
+                // ("3001/tcp -> 127.0.0.1:20000")
+                $ports = self::Podman($user, array('port', $name));
+                $hostport = preg_match('/127\.0\.0\.1:(\d{5})\b/', $ports[1], $m) ? (int) $m[1] : 0;
+                $vols = self::Podman($user, array('volume', 'ls', '--quiet', '--filter', 'name=^' . $name . '-[0-9]+$'));
+                $nv = 0;
+                foreach (preg_split('/\s+/', trim($vols[1])) as $v) {
+                    $nv += preg_match('/^' . $name . '-\d+$/', $v) ? 1 : 0;
+                }
+                // its address and setup password (hash) from the sites Caddy has
+                $domain = $auth = '';
+                if (preg_match('/^# container ' . (int) $cid . ' \(' . $user . '\)\n([a-z0-9.-]{1,253}) \{\n(.*?)\n\}/ms', $sites, $m)) {
+                    $domain = $m[1];
+                    $auth = preg_match('#basic_auth \{\n\t\tsetup (\$2[aby]\$\d\d\$[./A-Za-z0-9]{53})\n#', $m[2], $a) ? $a[1] : '';
+                }
+                $s['containers'][$cid] = array('user' => $user, 'domain' => $domain, 'hostport' => $hostport, 'public' => $auth === '' ? 1 : 0, 'auth' => $auth,
+                    'volumes' => $nv, 'image' => trim($img[1]), 'found' => 1);
+                self::Out('found ' . $name . ' of ' . $user . ($domain !== '' ? ' (' . $domain . ')' : '') . ': listed again for the panel');
+                $added++;
+            }
+        }
+        $s['scanned_at'] = time();
+        return $added;
+    }
+
+    /**
+     * What the panel needs to take an app back as it is: its own settings (the image's own
+     * variables left out), limits and the exact version it runs. [ok, JSON]
+     */
+    static function Inspect(array $d, array $s)
+    {
+        $name = self::Name($d['cid']);
+        $u = $d['user'];
+        $env = self::Podman($u, array('container', 'inspect', '--format', '{{json .Config.Env}}', $name));
+        if ($env[0] !== 0) {
+            return array(false, 'no such container here');
+        }
+        $id = self::Podman($u, array('container', 'inspect', '--format', '{{.Image}}', $name));
+        $lim = self::Podman($u, array('container', 'inspect', '--format', '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}', $name));
+        $imgEnv = self::Podman($u, array('image', 'inspect', '--format', '{{json .Config.Env}}', trim($id[1])));
+        $base = $imgEnv[0] === 0 && is_array(json_decode($imgEnv[1], true)) ? json_decode($imgEnv[1], true) : array();
+        $out = array();
+        foreach ((array) json_decode($env[1], true) as $line) {
+            if (!is_string($line) || in_array($line, $base, true) || !preg_match('/^([A-Za-z_][A-Za-z0-9_]{0,63})=(.*)$/s', $line, $m) || strlen($m[2]) > 4096 || preg_match('/[\x00\r\n]/', $m[2])
+                || in_array($m[1], array('HOSTNAME', 'HOME', 'container', 'TERM'), true)) {
+                // (Podman's own: not the app's settings)
+                continue;
+            }
+            $out[$m[1]] = $m[2];
+        }
+        $l = preg_split('/\s+/', trim($lim[1]));
+        return array(true, json_encode(array('env' => (object) array_slice($out, 0, 50, true), 'cpu' => isset($l[0]) ? (int) round((int) $l[0] / 10000000) : 0,
+            'mem' => isset($l[1]) ? (int) round((int) $l[1] / 1048576) : 0, 'image' => isset($s['containers'][(string) $d['cid']]['image']) ? (string) $s['containers'][(string) $d['cid']]['image'] : '')));
+    }
+
+    /**
+     * Move an app to another customer (Linux user) and/or number: the same version and the same
+     * data, made again under its new owner; the old one is removed only once the new one runs.
+     * When anything fails, the new one goes and the old one runs again. [ok, output]
+     */
+    static function Move(array $d, array &$s)
+    {
+        if (!isset($d['from_cid'], $d['from_user']) || !is_int($d['from_cid']) || $d['from_cid'] <= 0 || !is_string($d['from_user']) || !preg_match('/^sdh\d{1,9}$/', $d['from_user'])) {
+            return array(false, 'refused: bad app to move');
+        }
+        $from = (string) $d['from_cid'];
+        $fu = $d['from_user'];
+        $u = $d['user'];
+        $key = (string) $d['cid'];
+        if ($from === $key && $fu === $u) {
+            return array(false, 'refused: nothing to move');
+        }
+        if (!isset($s['containers'][$from]) || $s['containers'][$from]['user'] !== $fu) {
+            return array(false, 'no such container here');
+        }
+        if ($from !== $key && isset($s['containers'][$key])) {
+            return array(false, 'refused: app number ' . $key . ' is in use here');
+        }
+        foreach ($s['containers'] as $k => $c) {
+            if ((string) $k !== $from && (int) $c['hostport'] === $d['hostport']) {
+                return array(false, 'refused: port ' . $d['hostport'] . ' is taken');
+            }
+        }
+        if ((int) $s['containers'][$from]['volumes'] !== count($d['volumes'])) {
+            return array(false, 'refused: the app has ' . (int) $s['containers'][$from]['volumes'] . ' data folders, the panel\'s app ' . count($d['volumes']));
+        }
+        $e = self::EnsureUser($u);
+        if ($e !== '') {
+            return array(false, $e);
+        }
+        $fe = self::Fence();
+        if ($fe !== '') {
+            self::Out($fe);
+        }
+        $old = self::Name((int) $from);
+        $name = self::Name($d['cid']);
+        $id = self::Podman($fu, array('container', 'inspect', '--format', '{{.Image}}', $old));
+        $id = trim($id[1]);
+        if (!preg_match('/^(sha256:)?[A-Za-z0-9._-]{3,128}$/', $id)) {
+            return array(false, 'the version the app runs could not be read');
+        }
+        // work folders in the two users' homes (each user reads only its own)
+        $dir = function ($user) {
+            $p = self::$home . '/' . $user . '/.sentora-move';
+            if (!is_dir($p)) {
+                @mkdir($p, 0700, true);
+            }
+            @chown($p, $user);
+            @chmod($p, 0700);
+            return $p;
+        };
+        $from_dir = $dir($fu);
+        $to_dir = $dir($u);
+        $hand = function ($file) use ($to_dir, $u) {
+            $to = $to_dir . '/' . basename($file);
+            if (!@rename($file, $to)) {
+                return '';
+            }
+            @chown($to, $u);
+            @chmod($to, 0600);
+            return $to;
+        };
+        $made = array();
+        $clean = function () use (&$made, $u, $from_dir, $to_dir) {
+            foreach ($made as $m) {
+                self::Podman($u, $m[0] === 'c' ? array('rm', '--force', '--ignore', $m[1]) : array('volume', 'rm', '--force', $m[1]));
+            }
+            foreach (array($from_dir, $to_dir) as $p) {
+                foreach ((array) glob($p . '/*.tar') as $f) {
+                    @unlink($f);
+                }
+                @rmdir($p);
+            }
+        };
+        $back = function ($why) use ($clean, $fu, $old) {
+            $clean();
+            self::Podman($fu, array('start', $old));
+            return array(false, $why . ': the app runs again where it was');
+        };
+        self::Podman($fu, array('stop', '--time', '20', $old), 120);
+        if ($fu !== $u) {
+            // the same version for the new owner (not downloaded again: it may be newer by now)
+            @unlink($from_dir . '/image.tar');
+            @unlink($to_dir . '/image.tar');
+            $r = self::Podman($fu, array('image', 'save', '--output', $from_dir . '/image.tar', $id), 1800);
+            $f = $r[0] === 0 ? $hand($from_dir . '/image.tar') : '';
+            $r = $f !== '' ? self::Podman($u, array('image', 'load', '--input', $f), 1800) : $r;
+            if ($f !== '') {
+                @unlink($f);
+            }
+            if ($f === '' || $r[0] !== 0) {
+                return $back('the app\'s version could not be handed over (' . self::Tail($r[1]) . ')');
+            }
+        }
+        for ($i = 0; $i < count($d['volumes']); $i++) {
+            $tar = $from_dir . '/v' . $i . '.tar';
+            @unlink($tar);
+            @unlink($to_dir . '/v' . $i . '.tar');
+            $r = self::Podman($fu, array('volume', 'export', '--output', $tar, $old . '-' . $i), 3600);
+            $f = $r[0] === 0 ? $hand($tar) : '';
+            if ($f === '') {
+                return $back('data folder ' . $i . ' could not be read (' . self::Tail($r[1]) . ')');
+            }
+            $r = self::Podman($u, array('volume', 'create', $name . '-' . $i));
+            if ($r[0] !== 0) {
+                return $back('data folder ' . $i . ' could not be made (' . self::Tail($r[1]) . ')');
+            }
+            $made[] = array('v', $name . '-' . $i);
+            $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, $f), 3600);
+            @unlink($f);
+            if ($r[0] !== 0) {
+                return $back('data folder ' . $i . ' could not be copied (' . self::Tail($r[1]) . ')');
+            }
+        }
+        $d['image'] = $id;
+        $r = self::Podman($u, self::CreateArgs($d, $name));
+        if ($r[0] !== 0) {
+            return $back('the app could not be made for its new owner (' . self::Tail($r[1]) . ')');
+        }
+        $made[] = array('c', $name);
+        $r = self::Podman($u, array('start', $name));
+        if ($r[0] !== 0) {
+            return $back('the app did not start for its new owner (' . self::Tail($r[1]) . ')');
+        }
+        sleep((int) (getenv('SNODE_UPDATE_WAIT') !== false ? getenv('SNODE_UPDATE_WAIT') : 20));
+        $st = self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name));
+        if (trim($st[1]) !== 'running') {
+            return $back('the app stopped after starting for its new owner (' . trim($st[1]) . ')');
+        }
+        // it runs: the old one and its data go, the sites point to the new one
+        $image = isset($s['containers'][$from]['image']) ? (string) $s['containers'][$from]['image'] : '';
+        unset($s['containers'][$from]);
+        $s['containers'][$key] = array('user' => $u, 'domain' => $d['domain'], 'hostport' => $d['hostport'], 'public' => (int) $d['public'],
+            'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $image);
+        self::SaveState($s);
+        if ($fu !== $u || $old !== $name) {
+            self::Podman($fu, array('rm', '--force', '--ignore', $old), 300);
+            for ($i = 0; $i < count($d['volumes']); $i++) {
+                self::Podman($fu, array('volume', 'rm', '--force', $old . '-' . $i));
+            }
+        }
+        foreach (array($from_dir, $to_dir) as $p) {
+            foreach ((array) glob($p . '/*.tar') as $f) {
+                @unlink($f);
+            }
+            @rmdir($p);
+        }
+        $px = self::Proxy($s);
+        return $px === '' ? array(true, 'moved to ' . $u . ' as ' . $name . ', with its data') : array(false, $px);
     }
 
     // ----- commands -----
@@ -1070,6 +1331,66 @@ class snode
         self::Out('');
         self::Out('Node key:  ' . $key);
         self::Out('(also saved in ' . $file . ', readable by root only)');
+        return 0;
+    }
+
+    /**
+     * Link this node again, keeping every app and its data:
+     *  - the same panel at a new address (its keys are the same): only the address changes;
+     *  - a panel that no longer knows this node (it was removed there, the panel was set up again or
+     *    restored, its keys changed) or another panel: new keys and a new node key to add in the panel
+     *    (--new-key forces this for the same panel). The apps are then listed there under "Found on
+     *    this node" and the administrator gives each back to its owner.
+     * (Run through sentora-node-relink, which stops the agent first and starts it again after.)
+     */
+    static function Relink(array $opt)
+    {
+        if (!isset($opt['panel']) || !preg_match('#^https?://[A-Za-z0-9.-]{1,253}(:\d{1,5})?$#', rtrim($opt['panel'], '/'))) {
+            self::Out('relink needs --panel https://<the panel\'s name or IP address>');
+            return 2;
+        }
+        $panel = rtrim($opt['panel'], '/');
+        $old = self::LoadCfg();
+        if ($old && (int) $old['node'] > 0 && !isset($opt['new-key'])) {
+            $k = self::PanelKey($panel, !isset($opt['no-tls-check']));
+            if (!$k) {
+                return 1;
+            }
+            $p = explode('.', $k[0]);
+            if ($p[1] === $old['panel_sign_pk'] && $p[2] === $old['panel_box_pk']) {
+                if ($panel === $old['panel']) {
+                    self::Out('This node is linked to ' . $panel . ' as node ' . $old['node'] . ' already, and that panel has the same keys.');
+                    self::Out('If the panel no longer knows this node (it was removed there, or the panel was set up again), link it anew, apps kept:');
+                    self::Out('  sentora-node-relink --panel ' . $panel . ' --new-key');
+                    return 1;
+                }
+                // the same panel (the same keys) at another address
+                $old['panel'] = $panel;
+                $old['tls_verify'] = $k[1];
+                self::WriteFile(self::$etc . '/node.json', json_encode($old, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                self::Out('The panel\'s address is now ' . $panel . ' (the same panel, its keys checked; still node ' . $old['node'] . '). Apps and settings unchanged.');
+                return 0;
+            }
+        }
+        // a new link: the old keys are kept aside, the apps stay; the answers to the old panel's jobs are dropped
+        // (job numbers start again on another panel)
+        // (the old keys stay in use if this stops half-way; once linked anew they are kept aside)
+        $f = self::$etc . '/node.json';
+        $before = is_file($f) ? (string) file_get_contents($f) : '';
+        $r = self::Enroll($opt);
+        if ($r !== 0) {
+            return $r;
+        }
+        if ($before !== '') {
+            self::WriteFile($f . '.old-' . date('YmdHis'), $before);
+        }
+        $s = self::State();
+        $s['done'] = $s['results'] = array();
+        unset($s['scanned_at']);
+        self::SaveState($s);
+        self::Out('');
+        self::Out('The ' . count($s['containers']) . ' apps on this node keep running, with their data. Once the node is added in the panel,');
+        self::Out('they show there under "Found on this node", where the administrator gives each back to its owner.');
         return 0;
     }
 
@@ -1200,6 +1521,12 @@ class snode
         $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
         $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
         $s = self::State();
+        if (!isset($s['scanned_at']) || time() - (int) $s['scanned_at'] > 3600) {
+            if (self::Scan($s) > 0) {
+                self::Proxy($s);
+            }
+            self::SaveState($s);
+        }
         self::CheckUpdates($s);
         for ($round = 0; $round < 20; $round++) {
             $s = self::State();
@@ -1244,7 +1571,7 @@ class snode
         $opt = array();
         for ($i = 2; $i < count($argv); $i++) {
             if (preg_match('/^--([a-z-]+)$/', $argv[$i], $m)) {
-                $opt[$m[1]] = in_array($m[1], array('no-tls-check', 'security', 'all'), true) ? true : (isset($argv[$i + 1]) ? $argv[++$i] : '');
+                $opt[$m[1]] = in_array($m[1], array('no-tls-check', 'security', 'all', 'new-key'), true) ? true : (isset($argv[$i + 1]) ? $argv[++$i] : '');
             }
         }
         if ($cmd === 'pair') {
@@ -1252,6 +1579,9 @@ class snode
         }
         if ($cmd === 'enroll') {
             return self::Enroll($opt);
+        }
+        if ($cmd === 'relink') {
+            return self::Relink($opt);
         }
         if (!self::LoadCfg()) {
             self::Out('This node is not linked to a panel yet (sentora-node-agent pair ...).');
@@ -1283,7 +1613,7 @@ class snode
                 sleep((int) self::$cfg['node'] === 0 ? self::Hello() : self::Once());
             }
         }
-        self::Out("sentora-node-agent enroll|pair|run|once|status");
+        self::Out("sentora-node-agent enroll|relink|pair|run|once|status");
         return 2;
     }
 }

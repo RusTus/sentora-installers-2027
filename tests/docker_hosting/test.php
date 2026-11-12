@@ -753,12 +753,17 @@ check(!is_dir(getenv('FAKE_DIR') . '/podman/sdh3/c/sdh-' . $c1['dc_id_pk']) && !
 check(strpos(sites(), 'kuma.example.com') === false && strpos(sites(), 'kuma2.example.com') !== false, 'its site gone from Caddy, the other stays');
 check(row("SELECT dn_deleted_ts FROM x_dns WHERE dn_id_pk = :d", array(':d' => $c1['dc_dns_fk']))['dn_deleted_ts'] !== null, 'its DNS record deleted (the one it added only)');
 check((int) val("SELECT COUNT(*) FROM x_dns WHERE dn_vhost_fk = 10 AND dn_deleted_ts IS NULL") === 2, 'the domain\'s other records stay');
-// the node has a container the panel does not know: it goes
+// the node has a container the panel does not know: kept (never deleted by itself), listed
 $st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
 $st['containers']['999'] = array('user' => 'sdh3', 'domain' => 'ghost.example.com', 'hostport' => 20099, 'public' => 1, 'auth' => '', 'volumes' => 0);
 file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
 $o = agent('once');
-check(strpos($o, 'delete container 999: ok') !== false && strpos(sites(), 'ghost') === false, 'a container the panel does not know is deleted', $o);
+check(strpos($o, 'delete container 999') === false && isset(json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true)['containers']['999']),
+    'a container the panel does not know is not deleted', $o);
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 999");
+check($fd && $fd['fd_user_vc'] === 'sdh3' && $fd['fd_domain_vc'] === 'ghost.example.com' && (int) $fd['fd_hostport_in'] === 20099 && (int) $fd['fd_volumes_in'] === 0,
+    'it is listed as found, with what the node knows of it', json_encode($fd));
+check(row("SELECT dc_state_vc, dc_deleted_in FROM x_dh_containers WHERE dc_id_pk = 999")['dc_state_vc'] === 'reserved', 'its number is kept from new apps (a reserved row)');
 // the account is deleted: its containers go
 $zdbh->exec("UPDATE x_accounts SET ac_deleted_ts = " . time() . " WHERE ac_id_pk = 3");
 $d = daemon();
@@ -768,6 +773,180 @@ agent('once');
 check((int) val("SELECT COUNT(*) FROM x_dh_containers WHERE dc_deleted_in IS NULL") === 0 && (int) val("SELECT COUNT(*) FROM x_dh_grants WHERE gr_acc_fk = 3") === 0, 'nothing left of it; its share gone');
 $r = req(2, 'Grant', array('inAcc' => '4', 'inOff' => '1'));
 check(strpos($r['text'], 'taken back') !== false, 'a share not in use can be taken back');
+
+section('apps a node has that the panel does not know; apps a node lost; a node gone for good');
+$fake = getenv('FAKE_DIR');
+// a customer's Linux user and an app on the node, made by hand as an older setup would have left them
+function fakeuser($u)
+{
+    global $T;
+    $fake = getenv('FAKE_DIR');
+    if (!is_file("$fake/users/$u")) {
+        shell_exec('FAKE_DIR=' . escapeshellarg($fake) . ' ' . escapeshellarg($T . '/fakebin/useradd') . ' --home-dir ' . escapeshellarg(getenv('SNODE_HOME') . '/' . $u) . ' ' . $u);
+    }
+    $d = getenv('SNODE_RUN') . '/' . trim(file_get_contents("$fake/users/$u"));
+    @mkdir($d, 0700, true);
+    touch("$d/bus");
+    return $d;
+}
+function seed($u, $cid, $port, $domain, $private, array $env)
+{
+    global $T;
+    $run = fakeuser($u);
+    $args = array('create', '--name', 'sdh-' . $cid, '--label', 'sentora.cid=' . $cid, '--cpus', '0.50', '--memory', '256m', '--publish', "127.0.0.1:$port:3001", '--volume', "sdh-$cid-0:/app/data");
+    foreach ($env as $k => $v) {
+        $args[] = '--env';
+        $args[] = "$k=$v";
+    }
+    $args[] = 'docker.io/louislam/uptime-kuma:1';
+    $pre = 'FAKE_DIR=' . escapeshellarg(getenv('FAKE_DIR')) . ' FAKE_USER=' . $u . ' XDG_RUNTIME_DIR=' . escapeshellarg($run) . ' SNODE_RUN=' . escapeshellarg(getenv('SNODE_RUN')) . ' ';
+    shell_exec($pre . escapeshellarg($T . '/fakebin/podman') . ' ' . implode(' ', array_map('escapeshellarg', $args)));
+    shell_exec($pre . escapeshellarg($T . '/fakebin/podman') . ' start sdh-' . $cid);
+    file_put_contents(getenv('FAKE_DIR') . "/podman/$u/v/sdh-$cid-0/data.txt", "kept data of $cid\n");
+    $f = getenv('SNODE_CADDY') . '/sentora/sites.caddy';
+    file_put_contents($f, (is_file($f) ? file_get_contents($f) : '') . "\n# container $cid ($u)\n$domain {\n\tencode zstd gzip\n"
+        . ($private ? "\tbasic_auth {\n\t\tsetup " . password_hash('old-pass', PASSWORD_BCRYPT) . "\n\t}\n" : '') . "\treverse_proxy 127.0.0.1:$port\n}\n");
+    // (the node looks for lost apps at its next call)
+    $st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+    unset($st['scanned_at']);
+    file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+}
+$zdbh->prepare("INSERT INTO x_dh_grants (gr_acc_fk, gr_by_fk, gr_count_in, gr_cpu_in, gr_mem_in, gr_disk_in, gr_apps_tx, gr_updated_in) VALUES (4, 2, 5, 400, 4096, 20480, 'uptime-kuma', :t)")->execute(array(':t' => time()));
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'Found on the nodes') !== false && strpos($r['html'], 'ghost.example.com') !== false && strpos($r['html'], 'app(s) the panel does not know') !== false,
+    'administrator: the found app is shown (and in Needs a look)', substr(strip_tags($r['html']), 0, 3000));
+check(strpos($r['html'], 'Its owner is not known here') !== false, 'its account is not on this panel: no owner suggested');
+$r = req(4, 'FoundDelete', array('inFound' => (string) $fd['fd_id_pk']));
+check(row("SELECT fd_step_vc FROM x_dh_found WHERE fd_cid_in = 999")['fd_step_vc'] === '', 'a client can not delete a found app');
+$r = req(1, 'FoundDelete', array('inFound' => (string) $fd['fd_id_pk']));
+agent('once');
+agent('once');
+check(!row("SELECT * FROM x_dh_found WHERE fd_cid_in = 999") && !isset(json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true)['containers']['999']),
+    'the administrator deletes it: gone on the node and from the list');
+// a made-up number far past the panel's: listed, but not kept from the panel's numbering
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+$st['containers']['1999999999'] = array('user' => 'sdh4', 'domain' => 'far.example.com', 'hostport' => 20098, 'public' => 1, 'auth' => '', 'volumes' => 0);
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+agent('once');
+check(row("SELECT * FROM x_dh_found WHERE fd_cid_in = 1999999999") && !row("SELECT * FROM x_dh_containers WHERE dc_id_pk = 1999999999"),
+    'a number far past the panel\'s own: listed, but not reserved (a node can not push the numbering to its end)');
+req(1, 'FoundDelete', array('inFound' => (string) row("SELECT fd_id_pk FROM x_dh_found WHERE fd_cid_in = 1999999999")['fd_id_pk']));
+agent('once');
+agent('once');
+check(!row("SELECT * FROM x_dh_found WHERE fd_cid_in = 1999999999"), '(deleted)');
+// the node lost its list of apps (state.json): it finds them again by their label
+seed('sdh6', 555, 20077, 'kuma.other.com', true, array('FOO' => 'bar baz', 'ADMIN_SECRET' => 'from-another-panel'));
+$o = agent('once');
+check(strpos($o, 'found sdh-555 of sdh6 (kuma.other.com)') !== false, 'the node finds an app missing from its list and lists it again', $o);
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 555");
+check($fd && $fd['fd_user_vc'] === 'sdh6' && $fd['fd_domain_vc'] === 'kuma.other.com' && (int) $fd['fd_hostport_in'] === 20077 && (int) $fd['fd_volumes_in'] === 1
+    && $fd['fd_image_vc'] === 'docker.io/louislam/uptime-kuma:1' && (int) $fd['fd_public_in'] === 0, 'with its address, port, data folder, image and setup password (from Caddy\'s sites)', json_encode($fd));
+$sg = dh::Suggest($fd);
+check($sg['acc'] === 4 && $sg['app'] === 'uptime-kuma' && $sg['back'] === 0 && strpos($sg['why'], 'other.com, client2') !== false, 'suggested: client2 (its address is under client2\'s domain), Uptime Kuma (by its image)', json_encode($sg));
+$r = req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '6', 'inApp' => 'uptime-kuma'));
+check(strpos($r['text'], 'belongs to client2, not client3') !== false, 'not to another owner than the domain\'s', $r['text']);
+$zdbh->exec("UPDATE x_dh_found SET fd_volumes_in = 2 WHERE fd_cid_in = 555");
+$r = req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+$zdbh->exec("UPDATE x_dh_found SET fd_volumes_in = 1 WHERE fd_cid_in = 555");
+check(strpos($r['text'], 'it is not that app') !== false, 'not as an app with other data folders', $r['text']);
+$r = req(4, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+check(row("SELECT fd_step_vc FROM x_dh_found WHERE fd_cid_in = 555")['fd_step_vc'] === '', 'a client can not take a found app');
+$r = req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+check(strpos($r['text'], 'asked for the app') !== false, 'given to client2', $r['text']);
+$o = agent('once') . agent('once');
+$c = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = 555");
+check($c && (int) $c['dc_acc_fk'] === 4 && (int) $c['dc_node_fk'] === 1 && $c['dc_state_vc'] === 'running' && $c['dc_deleted_in'] === null && (int) $c['dc_port_in'] === 20077,
+    'it is client2\'s app now, the same number and port', $o . json_encode($c));
+check(is_dir("$fake/podman/sdh4/c/sdh-555") && trim(file_get_contents("$fake/podman/sdh4/c/sdh-555/state")) === 'running' && !is_dir("$fake/podman/sdh6/c/sdh-555"),
+    'on the node it was moved under client2\'s user (sdh4), the old one removed');
+check(@file_get_contents("$fake/podman/sdh4/v/sdh-555-0/data.txt") === "kept data of 555\n" && !is_dir("$fake/podman/sdh6/v/sdh-555-0"), 'with its data');
+check(strpos(file_get_contents("$fake/podman/sdh4/c/sdh-555/args"), "FOO=bar baz\n--env\nADMIN_SECRET=from-another-panel") !== false, 'and the settings it ran with');
+$cd = dh::CreateData(dh::Container(555), '');
+check($cd['env']['FOO'] === 'bar baz' && $cd['env']['ADMIN_SECRET'] === 'from-another-panel' && !isset($cd['env']['PATH']) && !isset($cd['env']['HOSTNAME']) && !isset($cd['env']['container']),
+    'those settings are kept for its updates (not the image\'s or Podman\'s own)', json_encode($cd['env']));
+check(strpos((string) $c['dc_keepenv_tx'], 'enc1:') === 0 && strpos(json_encode(row("SELECT * FROM x_dh_jobs WHERE jb_action_vc = 'inspect' ORDER BY jb_id_pk DESC LIMIT 1")), 'from-another-panel') === false,
+    'kept encrypted, and not in the jobs\' results');
+check(preg_match('/# container 555 \(sdh4\)\nkuma\.other\.com \{.*?setup (\S+)\n/s', sites(), $hm) === 1 && password_verify(dh::SetupPassword($c), $hm[1]), 'its site points to it, with a new setup password the owner can read');
+check(!row("SELECT * FROM x_dh_found WHERE fd_cid_in = 555"), 'off the found list');
+$r = req(4);
+check(strpos($r['html'], 'kuma.other.com') !== false, 'client2 sees it among its apps');
+// moving fails: the app runs where it was, stays on the list
+seed('sdh6', 556, 20078, 'kuma4.other.com', false, array());
+agent('once');
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 556");
+touch("$fake/save-fail");
+req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+$o = agent('once') . agent('once');
+unlink("$fake/save-fail");
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 556");
+check($fd && $fd['fd_step_vc'] === '' && strpos($fd['fd_note_vc'], 'Could not be moved') !== false, 'a move that fails: still on the list, with why', $o . json_encode($fd));
+check(trim(file_get_contents("$fake/podman/sdh6/c/sdh-556/state")) === 'running' && !is_dir("$fake/podman/sdh4/c/sdh-556"), 'and the app runs again where it was');
+check(row("SELECT dc_state_vc FROM x_dh_containers WHERE dc_id_pk = 556")['dc_state_vc'] === 'reserved', 'its number is kept for it again');
+req(1, 'FoundDelete', array('inFound' => (string) $fd['fd_id_pk']));
+agent('once');
+agent('once');
+check(!row("SELECT * FROM x_dh_found WHERE fd_cid_in = 556") && !is_dir("$fake/podman/sdh6/c/sdh-556"), '(deleted again)');
+// the node lost an app (set up again, restored): shown as missing, made again by its owner
+shell_exec('rm -rf ' . escapeshellarg("$fake/podman/sdh4/c/sdh-555") . ' ' . escapeshellarg("$fake/podman/sdh4/v/sdh-555-0"));
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+unset($st['containers']['555']);
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+agent('once');
+check(row("SELECT dc_state_vc FROM x_dh_containers WHERE dc_id_pk = 555")['dc_state_vc'] === 'missing', 'an app the node no longer has is shown as missing');
+$r = req(4);
+check(strpos($r['html'], 'Missing on its node') !== false && strpos($r['html'], 'Make it again') !== false, 'its owner sees it, with Make it again');
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'no longer has 1 of its apps') !== false, 'the administrators are told');
+$r = req(4, 'Act', array('inId' => '555', 'inWhat' => 'remake'));
+agent('once');
+check(row("SELECT dc_state_vc FROM x_dh_containers WHERE dc_id_pk = 555")['dc_state_vc'] === 'running' && is_dir("$fake/podman/sdh4/c/sdh-555")
+    && strpos(file_get_contents("$fake/podman/sdh4/c/sdh-555/args"), 'FOO=bar baz') !== false, 'made again, with its kept settings', $r['text']);
+// an app of a node that no longer reaches the panel (node set up again with its apps kept, relinked): given back as it was
+$zdbh->prepare("INSERT INTO x_dh_nodes (nd_name_vc, nd_signpk_vc, nd_boxpk_vc, nd_seen_in, nd_created_in) VALUES ('oldnode', 'x', 'y', :t, :t)")->execute(array(':t' => time() - 90000));
+$old = (int) $zdbh->lastInsertId();
+$zdbh->prepare("INSERT INTO x_dh_containers (dc_id_pk, dc_acc_fk, dc_node_fk, dc_app_vc, dc_label_vc, dc_cpu_in, dc_mem_in, dc_disk_in, dc_port_in, dc_domain_vc, dc_state_vc, dc_public_in, dc_created_in)
+    VALUES (777, 4, :n, 'uptime-kuma', 'monitor', 50, 256, 2048, 20050, 'kuma3.other.com', 'running', 1, :t)")->execute(array(':n' => $old, ':t' => time()));
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'has been away for over a day with 1 app(s)') !== false, 'a node away for over a day with apps: the administrators are told');
+seed('sdh4', 777, 20050, 'kuma3.other.com', false, array());
+agent('once');
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 777");
+$sg = dh::Suggest($fd);
+check($sg['back'] === 1 && $sg['acc'] === 4 && strpos($sg['why'], 'last on node "oldnode"') !== false, 'recognised: client2\'s app from the old node', json_encode($sg));
+$jobs = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'move'");
+req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+agent('once');
+agent('once');
+$c = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = 777");
+check((int) $c['dc_node_fk'] === 1 && $c['dc_state_vc'] === 'running' && $c['dc_label_vc'] === 'monitor' && (int) $c['dc_disk_in'] === 2048 && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'move'") === $jobs,
+    'given back as it was (its name and size kept), nothing moved on the node', json_encode($c));
+// a node gone for good: its apps start on the other nodes, fresh
+$zdbh->prepare("INSERT INTO x_dns (dn_acc_fk, dn_name_vc, dn_vhost_fk, dn_type_vc, dn_host_vc, dn_ttl_in, dn_target_vc) VALUES (4, 'other.com', 12, 'A', 'kuma5', 3600, '192.0.2.99')")->execute();
+$dn = (int) $zdbh->lastInsertId();
+$zdbh->prepare("INSERT INTO x_dh_containers (dc_acc_fk, dc_node_fk, dc_app_vc, dc_cpu_in, dc_mem_in, dc_disk_in, dc_port_in, dc_domain_vc, dc_vhost_fk, dc_dns_fk, dc_state_vc, dc_public_in, dc_created_in)
+    VALUES (4, :n, 'uptime-kuma', 50, 256, 1024, 20051, 'kuma5.other.com', 12, :d, 'running', 0, :t)")->execute(array(':n' => $old, ':d' => $dn, ':t' => time()));
+$c5 = (int) $zdbh->lastInsertId();
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $old));
+check(strpos($r['html'], 'Start its apps on other nodes') !== false, 'Manage of a node away: Start its apps on other nodes');
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
+check(strpos($r['html'], 'Start its apps on other nodes') === false && strpos($r['html'], 'sentora-node-relink') !== false, '(not for an online node; how to link a node again is there)');
+$r = req(1, 'Rehome', array('inId' => '1'));
+check(strpos($r['text'], 'is online') !== false, 'refused for a node that is online');
+$r = req(1, 'Rehome', array('inId' => (string) $old));
+agent('once');
+$c = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c5));
+check((int) $c['dc_node_fk'] === 1 && $c['dc_state_vc'] === 'running' && is_dir("$fake/podman/sdh4/c/sdh-$c5") && strpos(sites(), 'kuma5.other.com') !== false, 'started on node1, fresh', $r['text'] . json_encode($c));
+check(row("SELECT dn_target_vc FROM x_dns WHERE dn_id_pk = :d", array(':d' => $dn))['dn_target_vc'] === dh::PublicIp(dh::Node(1)), 'its DNS record points to node1 now');
+check((int) dh::Placed($old)['count'] === 0, 'nothing left on the old node');
+// tidy up: node1 empty again, the old node gone
+foreach (array(555, 777, $c5) as $id) {
+    req(4, 'Act', array('inId' => (string) $id, 'inWhat' => 'delete'));
+}
+agent('once');
+agent('once');
+$zdbh->exec("DELETE FROM x_dh_nodes WHERE nd_id_pk = " . $old);
+$zdbh->exec("DELETE FROM x_dh_grants WHERE gr_acc_fk = 4");
+check((int) val("SELECT COUNT(*) FROM x_dh_containers WHERE dc_deleted_in IS NULL") === 0 && !is_dir("$fake/podman/sdh4/c/sdh-555"), '(all deleted again)');
 
 section('a node speaks only for its own apps; linking messages are limited');
 // a second node, linked with keys this test holds (as if it were broken into)
@@ -846,6 +1025,36 @@ $o = agent('once');
 check(strpos($o, 'HTTP 400') !== false, 'its keys no longer work', $o);
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
 check(strpos((string) $out, 'no secret key') !== false && (string) dh::Get('sign_sk') !== '', 'the server\'s secret changed: the page says so, keys are not made anew');
+check(strpos((string) $out, 'Start over with new keys') !== false, 'and offers to start over with new keys (keys there but unreadable)');
+$before = (string) dh::Get('sign_sk');
+$out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 4, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
+check((string) dh::Get('sign_sk') === $before, 'a client can not');
+
+
+section('linking a node again (sentora-node-relink): its apps stay');
+// node1 was removed above (the panel forgot it): its apps and data are still on the server
+seed('sdh4', 990, 20090, 'kuma9.other.com', false, array('KEEP' => 'me'));
+$o = agent("relink --panel $web");
+check(strpos($o, 'linked to ' . $web . ' as node 1 already') !== false && strpos($o, '--new-key') !== false && strpos($o, 'exit=1') !== false, 'the same panel and address: says how to link anew', $o);
+$o = agent('relink --panel http://localhost:18092');
+$nj = json_decode(file_get_contents(getenv('SNODE_ETC') . '/node.json'), true);
+check(strpos($o, 'address is now http://localhost:18092') !== false && $nj['panel'] === 'http://localhost:18092' && (int) $nj['node'] === 1, 'the same panel at another address: only the address changes', $o);
+$o = agent('relink --panel http://localhost:18092 --new-key --panel-code AAAA-BBBB');
+check(strpos($o, 'not your panel') !== false && json_decode(file_get_contents(getenv('SNODE_ETC') . '/node.json'), true) == $nj, 'a wrong panel code: nothing changes', $o);
+$o = agent("relink --panel $web --new-key --panel-code " . dh::Fingerprint());
+check(preg_match('/Node key:  (SN1(-[A-Z2-9]{4}){6})/', $o, $km) === 1 && strpos($o, 'keep running, with their data') !== false && strpos($o, 'exit=0') !== false, 'linked anew: a new node key, the apps stay', $o);
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+check(count(glob(getenv('SNODE_ETC') . '/node.json.old-*')) === 1 && $st['done'] === array() && $st['results'] === array(), 'the old keys are kept aside; the old panel\'s job answers are dropped');
+$r = req(1, 'AddNode', array('inName' => 'relinked', 'inKey' => $km[1]));
+$o = agent('once') . agent('once');
+$rn = row("SELECT * FROM x_dh_nodes WHERE nd_name_vc = 'relinked'");
+$fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 990");
+check(strpos($o, 'found sdh-990 of sdh4') !== false && $fd && (int) $fd['fd_node_fk'] === (int) $rn['nd_id_pk'] && dh::Suggest($fd)['acc'] === 4, 'linked as a new node: its app is found there, client2 suggested', $o);
+
+$jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
+$out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
+check((string) dh::Get('sign_sk') !== $before && strpos((string) $out, 'sentora-node-relink') !== false && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')") === 0,
+    'the administrator starts over: new keys, told to relink the nodes, unreadable jobs dropped', substr(strip_tags((string) $out), 0, 600));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

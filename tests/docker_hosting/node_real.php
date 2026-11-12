@@ -16,6 +16,10 @@
 //   node_real.php limits <id> <cpu> <mem> <disk GB>
 //   node_real.php logs <id>             prints the last logs the node sent
 //   node_real.php log                   prints the add-on's log
+//   node_real.php forget <id>           the panel loses an app (as a panel restored from an older copy)
+//   node_real.php found <cid> <column>  a column of an app on the found list ('none' when it is not there)
+//   node_real.php adopt <cid> <acc>     give a found app to an account (as Uptime Kuma)
+//   node_real.php domainto <acc>        example.test belongs to this account now
 set_error_handler(function ($no, $str, $file, $line) {
     fwrite(STDERR, "PHP problem: $str in $file:$line\n");
     exit(3);
@@ -31,13 +35,14 @@ switch ($a[1]) {
         $zdbh->exec("INSERT INTO x_groups (ug_id_pk) VALUES (1), (2), (3)");
         $zdbh->exec("INSERT INTO x_modules (mo_folder_vc, mo_name_vc, mo_enabled_en) VALUES ('docker_hosting', 'Docker Hosting', 'true')");
         $zdbh->exec("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('dns_hasupdates', '')");
-        $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_reseller_fk, ac_group_fk) VALUES (1, 'zadmin', 1, 1), (2, 'res1', 1, 2), (3, 'client1', 2, 3)");
+        $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_reseller_fk, ac_group_fk) VALUES (1, 'zadmin', 1, 1), (2, 'res1', 1, 2), (3, 'client1', 2, 3), (4, 'client2', 2, 3)");
         $zdbh->exec("INSERT INTO x_vhosts (vh_id_pk, vh_acc_fk, vh_name_vc) VALUES (10, 3, 'example.test')");
         $zdbh->exec("INSERT INTO x_dns (dn_acc_fk, dn_name_vc, dn_vhost_fk, dn_type_vc, dn_host_vc, dn_ttl_in, dn_target_vc) VALUES (3, 'example.test', 10, 'A', '@', 3600, '192.0.2.1')");
         dh::Ensure();
         $all = array_keys(dh_catalog::Apps());
         dh::SetGrant(1, 2, array('count' => 5, 'cpu' => 400, 'mem' => 4096, 'disk' => 20480, 'apps' => $all)) || die(dh::$why . "\n");
         dh::SetGrant(2, 3, array('count' => 3, 'cpu' => 200, 'mem' => 2048, 'disk' => 10240, 'apps' => $all)) || die(dh::$why . "\n");
+        dh::SetGrant(2, 4, array('count' => 1, 'cpu' => 100, 'mem' => 1024, 'disk' => 4096, 'apps' => $all)) || die(dh::$why . "\n");
         echo dh::Fingerprint() . "\n";
         break;
     case 'addkey':
@@ -48,6 +53,24 @@ switch ($a[1]) {
         break;
     case 'settings':
         echo dh::SetNodeSettings(1, $a[2], $a[3] === '1', 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'forget':
+        $zdbh->exec("DELETE FROM x_dh_containers WHERE dc_id_pk = " . (int) $a[2]);
+        echo "ok\n";
+        break;
+    case 'found':
+        $q = $zdbh->prepare("SELECT * FROM x_dh_found WHERE fd_cid_in = :c");
+        $q->execute(array(':c' => (int) $a[2]));
+        $f = $q->fetch(PDO::FETCH_ASSOC);
+        echo $f ? $f[$a[3]] . "\n" : "none\n";
+        break;
+    case 'adopt':
+        $fid = (int) $zdbh->query("SELECT fd_id_pk FROM x_dh_found WHERE fd_cid_in = " . (int) $a[2])->fetchColumn();
+        echo dh::Adopt(1, $fid, (int) $a[3], 'uptime-kuma') ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'domainto':
+        $zdbh->exec("UPDATE x_vhosts SET vh_acc_fk = " . (int) $a[2] . " WHERE vh_id_pk = 10");
+        echo "ok\n";
         break;
     case 'lan':
         echo dh::SetLan(1, (int) $a[2], $a[3] === '1') ? "ok\n" : 'refused: ' . dh::$why . "\n";

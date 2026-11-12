@@ -15,6 +15,11 @@ case "$1" in
       inspect)
         [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }
         case "$*" in
+          *PortBindings*) v=$(grep -A1 -x -- --publish "$P/c/$last/args" | tail -1); echo "${v%:*} "; exit 0 ;;
+          *NanoCpus*) c=$(grep -A1 -x -- --cpus "$P/c/$last/args" | tail -1); m=$(grep -A1 -x -- --memory "$P/c/$last/args" | tail -1)
+            php -r 'echo (int) round((float) $argv[1] * 1e9), " ", (int) $argv[2] * 1048576, "\n";' "$c" "${m%m}"; exit 0 ;;
+          *Config.Env*) grep -A1 -x -- --env "$P/c/$last/args" | grep -vx -- --env | grep -vx -- -- | php -r '$o = array("PATH=/usr/bin", "container=podman", "HOSTNAME=abc");
+            foreach (file("php://stdin", FILE_IGNORE_NEW_LINES) as $l) { $o[] = $l; } echo json_encode($o), "\n";'; exit 0 ;;
           *.ImageName*) tail -1 "$P/c/$last/args"; exit 0 ;;
           *.Image*) cat "$P/c/$last/imageid"; exit 0 ;;
           *State.Status*) cat "$P/c/$last/state"; exit 0 ;;
@@ -24,6 +29,9 @@ case "$1" in
   image)
     f="$P/i/$(echo "$last" | tr '/:' '__')"
     case "$*" in
+      *Config.Env*) echo '["PATH=/usr/bin"]'; exit 0 ;;
+      "image save --output "*) [ -f "$FAKE_DIR/save-fail" ] && { echo "Error: save failed"; exit 125; }; echo "$last" > "$4"; exit 0 ;;
+      "image load --input "*) [ -f "$4" ] || exit 125; echo "Loaded image: $(cat "$4")"; exit 0 ;;
       *prune*) exit 0 ;;
       *RepoDigests*) [ -f "$f" ] || exit 125; echo "[\"${last%%:*}@$(cut -d' ' -f2 "$f")\"]"; exit 0 ;;
       *Id*) [ -f "$f" ] || exit 125; cut -d' ' -f1 "$f"; exit 0 ;;
@@ -48,11 +56,15 @@ case "$1" in
   update) [ -d "$P/c/$last" ] || exit 125; echo "$*" >> "$P/c/$last/updates"; exit 0 ;;
   logs) [ -d "$P/c/$last" ] || exit 125; echo "fake log of $last: listening"; exit 0 ;;
   rm) rm -rf "$P/c/$last"; exit 0 ;;
+  port) [ -d "$P/c/$last" ] || exit 125; v=$(grep -A1 -x -- --publish "$P/c/$last/args" | tail -1); echo "${v##*:}/tcp -> ${v%:*}"; exit 0 ;;
   volume)
     case "$2" in
       ls) pre=${last#name=^}; pre=${pre%%-\[*}; ls "$P/v" | grep "^$pre-" ; exit 0 ;;
       inspect) [ -d "$P/v/$last" ] || { echo "Error: no such volume"; exit 125; }; echo "$P/v/$last"; exit 0 ;;
       rm) rm -rf "$P/v/$last"; exit 0 ;;
+      create) mkdir -p "$P/v/$last"; echo "$last"; exit 0 ;;
+      export) [ -d "$P/v/$last" ] || exit 125; tar -C "$P/v/$last" -cf "$4" . ; exit $? ;;
+      import) [ -d "$P/v/$3" ] && [ -f "$4" ] || exit 125; tar -C "$P/v/$3" -xf "$4"; exit $? ;;
     esac ;;
   ps)
     out='['; sep=''

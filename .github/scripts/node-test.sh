@@ -181,6 +181,45 @@ wait_for 120 state_is "$CID" running > /dev/null && ok "started again" || bad "n
 U=$(wait_for 400 bash -c "panel() { php '$T/node_real.php' \"\$@\"; }; s=\$(panel state $CID); u=\${s#* }; u=\${u%%MB*}; [ \"\${u:-0}\" -gt 0 ] && echo \$u")
 [ -n "$U" ] && ok "disk use measured: $U MB" || bad "no disk use measured"
 
+say "An app the panel lost: found again, given back, moved to another customer and back (with its data)"
+podu() { in_box "runuser -u $1 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u $1) podman $2"; }
+podu sdh3 "exec sdh-$CID sh -c 'echo kept-$CID > /app/data/sentora-test.txt'"
+# the node's own list loses it too (state.json): it must find it by its label
+in_box "php -r '\$f = \"/var/lib/sentora-node/state.json\"; \$s = json_decode(file_get_contents(\$f), true); unset(\$s[\"containers\"][\"$CID\"], \$s[\"scanned_at\"]); file_put_contents(\$f, json_encode(\$s));'"
+panel forget "$CID" > /dev/null
+F=$(wait_for 120 bash -c "v=\$(php '$T/node_real.php' found $CID fd_domain_vc); [ \"\$v\" != none ] && echo \$v")
+[ "$F" = kuma.example.test ] && ok "the node found it again by its label, with its address: $F" || { bad "not found: '$F'"; in_box 'journalctl -u sentora-node --no-pager | tail -20'; }
+[ "$(panel found "$CID" fd_hostport_in)" = 20000 ] && [ "$(panel found "$CID" fd_volumes_in)" = 1 ] && ok "and its port and data folder" || bad "found: port $(panel found "$CID" fd_hostport_in), folders $(panel found "$CID" fd_volumes_in)"
+podu sdh3 "ps --format '{{.Names}}'" | grep -qx "sdh-$CID" && ok "it kept running meanwhile (nothing deleted)" || bad "it was stopped or deleted"
+panel adopt "$CID" 3 | grep -qx ok || bad "adopt: $(panel adopt "$CID" 3)"
+wait_for 180 state_is "$CID" running > /dev/null && [ "$(panel found "$CID" fd_cid_in)" = none ] && ok "given back to client1 as it was" || { bad "not given back: $(panel state "$CID"), $(panel lastjob inspect)"; diag; }
+[ "$(panel lastjob move)" = "" ] && ok "(nothing moved on the node)" || bad "a move ran: $(panel lastjob move)"
+for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "behind a (new) setup password" || bad "given back: HTTP $C"
+# to another customer: the node moves it under that customer's user, the same version and data
+panel forget "$CID" > /dev/null
+panel domainto 4 > /dev/null
+wait_for 120 bash -c "[ \"\$(php '$T/node_real.php' found $CID fd_user_vc)\" = sdh3 ] && echo y" > /dev/null || bad "not found again"
+panel adopt "$CID" 4 | grep -qx ok || bad "adopt to client2: $(panel adopt "$CID" 4)"
+M=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob move | grep -E '^(done moved to sdh4|failed)'"); echo "  $M"
+sleep 2; S=$(panel state "$CID")
+[[ "$S" == running* ]] && [[ "$M" == "done moved to sdh4"* ]] && ok "moved to client2 (sdh4)" || { bad "move: $S / $M / $(panel found "$CID" fd_note_vc)"; diag; }
+podu sdh4 "ps --format '{{.Names}}'" | grep -qx "sdh-$CID" && ! podu sdh3 "ps -a --format '{{.Names}}'" | grep -qx "sdh-$CID" && ok "runs as sdh4; gone from sdh3" || bad "containers: sdh4 [$(podu sdh4 "ps -a --format '{{.Names}}'" | tr '\n' ' ')] sdh3 [$(podu sdh3 "ps -a --format '{{.Names}}'" | tr '\n' ' ')]"
+[ "$(podu sdh4 "exec sdh-$CID cat /app/data/sentora-test.txt" | tr -d '\r')" = "kept-$CID" ] && ok "with its data" || bad "its data was not moved"
+podu sdh4 "inspect --format '{{range .Config.Env}}{{println .}}{{end}}' sdh-$CID" | grep -qx 'SENTORA_TEST=hello there' && ok "and its own settings" || bad "its settings were lost"
+podu sdh3 "volume ls -q" | grep -q "^sdh-$CID-" && bad "sdh3 still has its data folder" || ok "sdh3's copy of the data is gone"
+for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "Caddy serves it (setup password)" || bad "after the move: HTTP $C"
+# and back to client1 (the steps below use sdh3)
+panel forget "$CID" > /dev/null
+panel domainto 3 > /dev/null
+wait_for 120 bash -c "[ \"\$(php '$T/node_real.php' found $CID fd_user_vc)\" = sdh4 ] && echo y" > /dev/null || bad "not found again (sdh4)"
+panel adopt "$CID" 3 | grep -qx ok || bad "adopt back: $(panel adopt "$CID" 3)"
+M=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob move | grep -E '^(done moved to sdh3|failed)'"); echo "  $M"
+sleep 2; S=$(panel state "$CID")
+[[ "$S" == running* ]] && [ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | tr -d '\r')" = "kept-$CID" ] && ok "moved back to client1, data kept" || { bad "back: $S / $(panel lastjob move)"; diag; }
+in_box 'ls /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left in the work folders" || bad "copies left: $(in_box 'ls -la /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>&1')"
+
 say "Restarting the node"
 docker restart "$NAME" > /dev/null
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
