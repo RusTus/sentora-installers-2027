@@ -1,0 +1,103 @@
+#!/bin/bash
+# Sentora backup server: the only thing a panel's SSH key may run here (authorized_keys:
+# restrict,command="/usr/local/sbin/sentora-backup-gate <area>"). Each panel writes and reads only its
+# own area, /srv/sentora-backups/<area>; paths it sends are taken inside that area ("/" is the area).
+# Allowed, nothing else (no shell, no forwarding, no terminal):
+#   rsync --server ...                   copying to or from the area (rsync's own server side)
+#   sentora-backup hello                 says it is a Sentora backup server (and which version)
+#   sentora-backup ready  <dir>          makes <dir>, says "ready" when it can be written
+#   sentora-backup begin  <dir> <date>   makes <dir>/<date>.partial
+#   sentora-backup latest <dir>          "yes" when <dir>/latest is there (the last copy, to link to)
+#   sentora-backup finish <dir> <date> <keep>   <date>.partial becomes <date> and latest, older nights go
+#   sentora-backup count  <dir>          how many nights are kept
+#   sentora-backup list                  every server's nights with their manifest (for restoring)
+# Every call is noted in /var/log/sentora-backup-gate.log.
+set -u
+umask 077
+ROOT=${SENTORA_BACKUP_ROOT:-/srv/sentora-backups}
+AREA=${1:-}
+LOG=${SENTORA_BACKUP_GATELOG:-/var/log/sentora-backup-gate.log}
+CMD=${SSH_ORIGINAL_COMMAND:-}
+FROM=${SSH_CLIENT:-local}; FROM=${FROM%% *}
+note() { echo "$(date '+%F %T') [$AREA] $FROM $*" >> "$LOG" 2> /dev/null; }
+refuse() { note "refused: $1"; echo "sentora-backup: refused: $1" >&2; exit 1; }
+[[ "$AREA" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || refuse "no area for this key"
+BASE="$ROOT/$AREA"
+[ -d "$BASE" ] || mkdir -p "$BASE" || refuse "the area can not be made"
+# (no control characters, no shell's special characters at all: the panel never sends them)
+case "$CMD" in *[\;\&\|\`\$\(\)\<\>\\\"\'\*\?\[\]\{\}]*) refuse "special characters" ;; esac
+[[ "$CMD" =~ [[:cntrl:]] ]] && refuse "control characters"
+read -r -a ARGS <<< "$CMD"
+# a path the panel sent, inside the area (leading slashes dropped, no "..", no way out through a link)
+inside() { # path -> prints the real path, or fails
+    local p=$1 r
+    p=${p#"${p%%[!/]*}"}
+    case "/$p/" in */../*|*/./../*) return 1 ;; esac
+    r=$(realpath -m -- "$BASE/$p") || return 1
+    case "$r/" in "$BASE"/*|"$BASE/") echo "$r" ;; *) return 1 ;; esac
+}
+DATE_RE='^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$'
+if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
+    OUT=(rsync --server)
+    dot=0
+    for a in "${ARGS[@]:2}"; do
+        if [ $dot -eq 1 ]; then
+            r=$(inside "$a") || refuse "a path outside the area: $a"
+            OUT+=("$r")
+            continue
+        fi
+        case "$a" in
+            .) dot=1; OUT+=(.) ;;
+            --link-dest=*|--compare-dest=*|--copy-dest=*)
+                r=$(inside "${a#*=}") || refuse "a path outside the area: $a"
+                OUT+=("${a%%=*}=$r") ;;
+            --daemon*|--config*|--rsh*|--rsync-path*|--log-file*|--write-batch*|--read-batch*|--only-write-batch*|--temp-dir*|-T*|--backup-dir*|--partial-dir*|--remove-*|--files-from*|--exclude-from*|--include-from*|--filter*)
+                refuse "option $a" ;;
+            --*=*|--*) OUT+=("$a") ;;
+            -*) OUT+=("$a") ;;
+            *) refuse "unexpected argument $a" ;;
+        esac
+    done
+    [ $dot -eq 1 ] || refuse "rsync without a path"
+    note "rsync ${ARGS[*]:2}"
+    cd "$BASE" || exit 1
+    exec "${OUT[@]}"
+fi
+[ "${ARGS[0]:-}" = sentora-backup ] || refuse "not allowed: ${CMD:0:80}"
+verb=${ARGS[1]:-}
+note "$verb ${ARGS[*]:2}"
+case "$verb" in
+    hello)
+        echo "sentora-backup 1 $AREA" ;;
+    ready)
+        d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
+        mkdir -p "$d" && [ -w "$d" ] && command -v rsync > /dev/null && echo ready ;;
+    begin)
+        d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
+        [[ "${ARGS[3]:-}" =~ $DATE_RE ]] || refuse "not a date"
+        mkdir -p "$d/${ARGS[3]}.partial" ;;
+    latest)
+        d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
+        [ -d "$d/latest" ] && echo yes || exit 1 ;;
+    finish)
+        d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
+        t=${ARGS[3]:-}; k=${ARGS[4]:-}
+        [[ "$t" =~ $DATE_RE ]] || refuse "not a date"
+        [[ "$k" =~ ^[0-9]{1,3}$ ]] && [ "$k" -ge 1 ] || refuse "not a number of nights"
+        cd "$d" && [ -d "$t.partial" ] || exit 1
+        rm -rf "$t" && mv "$t.partial" "$t" && ln -sfn "$t" latest || exit 1
+        ls -1d 20??-??-?? 2> /dev/null | sort | head -n -"$k" | while read -r old; do [[ "$old" =~ $DATE_RE ]] && rm -rf -- "$old"; done ;;
+    count)
+        d=$(inside "${ARGS[2]:-}") || refuse "a folder outside the area"
+        ls -1d "$d"/20??-??-?? 2> /dev/null | wc -l ;;
+    list)
+        cd "$BASE" || exit 3
+        for h in */; do h=${h%/}; [ -L "$h" ] && continue
+            for d in "$h"/20??-??-??; do [ -d "$d" ] || continue
+                echo "@@SNAPSHOT $d"
+                if [ -f "$d/manifest.json" ]; then cat "$d/manifest.json"; else echo '{"format":1}'; fi
+                echo; echo '@@END'
+            done
+        done ;;
+    *) refuse "unknown: $verb" ;;
+esac
