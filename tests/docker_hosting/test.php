@@ -217,6 +217,34 @@ check(strpos($r['text'], 'Not less than the client uses now') !== false, 'a shar
 $r = req(2);
 check(strpos($r['html'], '3 free') !== false || strpos($r['html'], '>2 free<') !== false, 'res1 sees what it has free', substr(strip_tags($r['html']), 0, 400));
 
+section('Docker plans (a seller\'s own packages)');
+$r = req(2, 'Plan', array('inPlan' => '0', 'inName' => 'Small', 'inCount' => '2', 'inCpu' => '1.5', 'inMem' => '1024', 'inDisk' => '5', 'inApps' => array('uptime-kuma', 'gitea', 'nextcloud')));
+$small = (int) val("SELECT pl_id_pk FROM x_dh_plans WHERE pl_name_vc = 'Small'");
+check($small > 0 && strpos($r['text'], 'Plan "Small" saved') !== false && val("SELECT pl_apps_tx FROM x_dh_plans WHERE pl_id_pk = $small") === 'uptime-kuma,gitea', 'res1 makes a plan (only apps it has)', $r['text']);
+$r = req(2, 'Plan', array('inPlan' => '0', 'inName' => 'small', 'inCount' => '1', 'inCpu' => '1', 'inMem' => '512', 'inDisk' => '1', 'inApps' => array('gitea')));
+check(strpos($r['text'], 'with that name already') !== false, 'not two plans with the same name');
+$r = req(2, 'Plan', array('inPlan' => '0', 'inName' => '<b>x', 'inCount' => '1', 'inCpu' => '1', 'inMem' => '512', 'inDisk' => '1', 'inApps' => array('gitea')));
+check(strpos($r['text'], 'plain characters') !== false, 'a name with markup is refused');
+$r = req(2, 'Grant', array('inAcc' => '3', 'inPlan' => (string) $small));
+$gr = row("SELECT * FROM x_dh_grants WHERE gr_acc_fk = 3");
+check(strpos($r['text'], 'on that plan now') !== false && (int) $gr['gr_plan_fk'] === $small && (int) $gr['gr_mem_in'] === 1024 && (int) $gr['gr_cpu_in'] === 150, 'client1 is put on it: its share is the plan\'s', $r['text']);
+$r = req(2, '', array(), array('tab' => 'shares'));
+check(strpos($r['html'], 'Docker plans') !== false && strpos($r['html'], '1 client') !== false && preg_match('/client1.*?dh-pill is-ok">Small</s', $r['html']) === 1, 'the shares tab shows the plan and who is on it');
+$r = req(2, 'Plan', array('inPlan' => (string) $small, 'inName' => 'Small', 'inCount' => '2', 'inCpu' => '1.5', 'inMem' => '1536', 'inDisk' => '5', 'inApps' => array('uptime-kuma', 'gitea')));
+check((int) val("SELECT gr_mem_in FROM x_dh_grants WHERE gr_acc_fk = 3") === 1536 && strpos($r['text'], 'Its clients follow it') !== false, 'the plan changes: its client follows', $r['text']);
+$r = req(2, 'Plan', array('inPlan' => (string) $small, 'inName' => 'Small', 'inCount' => '2', 'inCpu' => '1.5', 'inMem' => '4000', 'inDisk' => '5', 'inApps' => array('uptime-kuma', 'gitea')));
+check((int) val("SELECT gr_mem_in FROM x_dh_grants WHERE gr_acc_fk = 3") === 1536 && strpos($r['text'], 'keep their amounts for now: client1 (That is more than you have free: check the memory') !== false,
+    'more than res1 has free: client1 keeps its amounts, and is named', $r['text']);
+req(2, 'Plan', array('inPlan' => (string) $small, 'inName' => 'Small', 'inCount' => '2', 'inCpu' => '1.5', 'inMem' => '1024', 'inDisk' => '5', 'inApps' => array('uptime-kuma', 'gitea')));
+check((int) val("SELECT gr_mem_in FROM x_dh_grants WHERE gr_acc_fk = 3") === 1024, '(and back)');
+$r = req(5, 'Grant', array('inAcc' => '6', 'inPlan' => (string) $small));
+check(strpos($r['text'], 'no Docker Hosting share') !== false || strpos($r['text'], 'No such plan') !== false, 'another reseller can not use res1\'s plan', $r['text']);
+$r = req(3, 'Plan', array('inPlan' => (string) $small, 'inName' => 'Mine', 'inCount' => '9', 'inCpu' => '9', 'inMem' => '9000', 'inDisk' => '90', 'inApps' => array('gitea')));
+check(val("SELECT pl_name_vc FROM x_dh_plans WHERE pl_id_pk = $small") === 'Small', 'a client can not change res1\'s plan', $r['text']);
+$r = req(2, 'PlanRemove', array('inPlan' => (string) $small));
+$gr = row("SELECT * FROM x_dh_grants WHERE gr_acc_fk = 3");
+check(strpos($r['text'], 'keep their amounts') !== false && (int) $gr['gr_plan_fk'] === 0 && (int) $gr['gr_mem_in'] === 1024 && $gr['gr_apps_tx'] === 'uptime-kuma,gitea', 'a plan removed: its client keeps its amounts as its own', $r['text']);
+
 section('starting containers');
 $r = req(3);
 check(strpos($r['html'], 'Start an app') !== false && strpos($r['html'], 'Uptime Kuma') !== false && strpos($r['html'], 'Vaultwarden') === false, 'client1 sees its own apps only');
@@ -851,6 +879,16 @@ $zdbh->exec("UPDATE x_dh_found SET fd_volumes_in = 1 WHERE fd_cid_in = 555");
 check(strpos($r['text'], 'it is not that app') !== false, 'not as an app with other data folders', $r['text']);
 $r = req(4, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
 check(row("SELECT fd_step_vc FROM x_dh_found WHERE fd_cid_in = 555")['fd_step_vc'] === '', 'a client can not take a found app');
+$zdbh->exec("UPDATE x_dh_grants SET gr_apps_tx = 'gitea' WHERE gr_acc_fk = 4");
+$r = req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+check(strpos($r['text'], 'may not run Uptime Kuma') !== false, 'not when the owner\'s share does not offer that app', $r['text']);
+$zdbh->exec("UPDATE x_dh_grants SET gr_apps_tx = 'uptime-kuma', gr_mem_in = 100 WHERE gr_acc_fk = 4");
+req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
+agent('once');
+$f2 = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 555");
+check($f2 && $f2['fd_step_vc'] === '' && strpos($f2['fd_note_vc'], 'not enough memory free') !== false && !row("SELECT * FROM x_dh_containers WHERE dc_id_pk = 555 AND dc_deleted_in IS NULL"),
+    'not past the owner\'s share (its real size, read from the node): still on the list, with why', json_encode($f2));
+$zdbh->exec("UPDATE x_dh_grants SET gr_mem_in = 4096 WHERE gr_acc_fk = 4");
 $r = req(1, 'Adopt', array('inFound' => (string) $fd['fd_id_pk'], 'inAcc' => '4', 'inApp' => 'uptime-kuma'));
 check(strpos($r['text'], 'asked for the app') !== false, 'given to client2', $r['text']);
 $o = agent('once') . agent('once');
