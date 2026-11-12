@@ -23,9 +23,10 @@ ROOT="$(sp hosted_dir)$USER/public_html/$DIR"
 echo "        domain $H (id $VID, account $USER, folder $ROOT)"
 cat > "$ROOT/sentora-php-domain-test.php" <<'EOF'
 <?php
-foreach (array('upload_max_filesize', 'post_max_size', 'max_input_vars', 'session.use_strict_mode', 'session.cookie_httponly', 'session.cookie_samesite', 'opcache.validate_permission', 'open_basedir', 'date.timezone') as $k) {
+foreach (array('apcu.shm_size', 'upload_max_filesize', 'post_max_size', 'max_input_vars', 'session.use_strict_mode', 'session.cookie_httponly', 'session.cookie_samesite', 'opcache.validate_permission', 'open_basedir', 'date.timezone') as $k) {
     echo $k, '=', ini_get($k), "\n";
 }
+echo 'apcu=', extension_loaded('apcu') ? 1 : 0, "\n";
 echo 'user=', function_exists('posix_geteuid') ? posix_getpwuid(posix_geteuid())['name'] : get_current_user(), "\n";
 EOF
 chown "web$ACC:web$ACC" "$ROOT/sentora-php-domain-test.php"; chmod 640 "$ROOT/sentora-php-domain-test.php"
@@ -72,5 +73,14 @@ echo "$R" | grep -q '^session.cookie_httponly=1' && ok "session.cookie_httponly 
 [ "$(val "$R" max_input_vars)" = 3000 ] && ok "max_input_vars 3000" || bad "max_input_vars: $(val "$R" max_input_vars) (3000 expected)"
 echo "$R" | grep -q '^opcache.validate_permission=1' && ok "opcache.validate_permission on" || bad "opcache.validate_permission: '$(val "$R" opcache.validate_permission)'"
 
+echo "== PHP extensions (PHP Versions > Extensions): apcu added from the system's package, with a setting"
+V=$(db 'echo sys_phpversions::DefaultVersion();')
+db 'sys_phpext::SaveWanted(array("'"$V"'" => array("apcu" => array("on" => true, "ini" => "apcu.shm_size = 48M", "asked" => time()))));'
+daemon
+grep -A4 'START PHP extensions' /root/php-domain-daemon.txt | sed 's/^/        /'
+E=$(get); echo "$E" | grep -E '^apcu' | sed 's/^/        /'
+[ "$(val "$E" apcu)" = 1 ] && ok "apcu reached the site (PHP $V)" || bad "apcu is not loaded for the site: $(db 'echo json_encode(sys_phpext::Inventory()["'"$V"'"]["results"]["apcu"] ?? null);')"
+[ "$(val "$E" apcu.shm_size)" = 48M ] && ok "its setting apcu.shm_size 48M reached the site" || bad "apcu.shm_size: '$(val "$E" apcu.shm_size)' (48M expected)"
+db '$i = sys_phpext::ParseSettings("apcu", "apcu.shm_size = /etc/passwd\nopcache.preload = x"); echo count($i[1]), "\n";' | grep -qx 2 && ok "a path and another extension's setting are refused" || bad "a refused setting was taken"
 rm -f "$ROOT/sentora-php-domain-test.php"
 [ $FAIL -eq 0 ] && echo "PHPDOMAIN: PASSED" || echo "PHPDOMAIN: FAILED"

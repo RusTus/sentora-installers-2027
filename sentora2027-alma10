@@ -2175,7 +2175,7 @@ so spamass_milter_defaults_template 'EXTRA_FLAGS="{options}"
 SOCKET="{socket}"
 SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
-so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
+so package_install "dnf -y -q install"; so php_ext_package "php-{e}"; so php_pecl_package "php-pecl-{e}"
 so php_cli /usr/bin/php
 so apparmor_dir ""; so firewall_kind firewalld; so firewall_cmd /usr/bin/firewall-cmd; so firewall_service firewalld; so firewall_package firewalld
 so php_bundle_tag alma10; so php_bundle_libs "$PHP_BUNDLE_LIBS"
