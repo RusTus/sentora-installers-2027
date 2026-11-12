@@ -184,6 +184,44 @@ x_logviewer() {
 }
 
 # --- a client, as one uses the panel -----------------------------------------------------------
+x_update_all() { # Repo Browser's "Update all": two add-ons made to look one version behind, both queued with one press
+    need ADMIN "administrator login" || return $?
+    local root; root=$(sp sentora_root)
+    zp() { ( cd "$root" && "${root}bin/zppy" "$@" ); }   # (as the daemon runs it)
+    zp update > /dev/null 2>&1
+    local list m mods=""; list="${root}etc/zppy-cache/package.list"
+    [ -s "$list" ] || { WHY="no package list from the repositories"; return 2; }
+    # two small add-ons that are not installed yet (installed by root here: what is tested is the button)
+    for m in $(awk '{print $1}' "$list" | grep -vxE 'docker_hosting|payment_plans|php_hardening' | sort -u); do
+        [ -n "$(q "SELECT mo_folder_vc FROM x_modules WHERE mo_folder_vc='$m'")" ] && continue
+        zp install "$m" > /dev/null 2>&1 && [ -n "$(q "SELECT mo_folder_vc FROM x_modules WHERE mo_folder_vc='$m'")" ] && mods="$mods $m"
+        [ "$(echo $mods | wc -w)" -ge 2 ] && break
+    done
+    [ "$(echo $mods | wc -w)" -ge 2 ] || { WHY="could not install two add-ons to try it on (got:$mods)"; return 1; }
+    local want=""
+    for m in $mods; do want="$want $m=$(q "SELECT mo_version_in FROM x_modules WHERE mo_folder_vc='$m'")"; q "UPDATE x_modules SET mo_version_in=1 WHERE mo_folder_vc='$m'"; done
+    au -o "$TMP/rb.html" "https://$FQDN/?module=repo_browser"
+    page_ok "$TMP/rb.html" || return 1
+    grep -q 'class="rb-all"' "$TMP/rb.html" || { WHY="no Update all button on the page"; return 1; }
+    local items="" it
+    for m in $mods; do
+        it=$(grep -o "class=\"update\" item_id=\"[^\"]*:::$m\"" "$TMP/rb.html" | head -1 | sed 's/.*item_id="//;s/"$//')
+        [ -n "$it" ] || { WHY="$m is not in the module list"; return 1; }
+        items="$items${items:+,}$it"
+    done
+    au -L -o "$TMP/rb.html" --data-urlencode "inUpdateAll=$items" -d "csfr_token=$(atok repo_browser)" "https://$FQDN/?module=repo_browser&action=UpdateAll"
+    grep -q "Queued 2 module update" "$TMP/rb.html" || { WHY="the page did not say 2 updates were queued: $(grep -o 'zannounce[^>]*>[^<]*' "$TMP/rb.html" | head -1)"; return 1; }
+    daemon_now || { WHY="the daemon run did not finish"; return 1; }
+    local bad=""
+    for p in $want; do
+        m=${p%%=*}
+        [ "$(q "SELECT zq_status_vc FROM x_zppy_queue WHERE zq_args_tx LIKE '%\"upgrade\",\"$m\"%' ORDER BY zq_id_pk DESC LIMIT 1")" = "done" ] || bad="$bad $m(upgrade not done)"
+        [ "$(q "SELECT mo_version_in FROM x_modules WHERE mo_folder_vc='$m'")" = "${p#*=}" ] || bad="$bad $m(version $(q "SELECT mo_version_in FROM x_modules WHERE mo_folder_vc='$m'"), not ${p#*=})"
+    done
+    for m in $mods; do zp remove "$m" > /dev/null 2>&1; done
+    [ -z "$bad" ] || { WHY="after the daemon run:$bad"; return 1; }
+    WHY="updated:$mods"
+}
 x_client() {
     local r; r=$(php_panel 'require "modules/manage_clients/code/controller.ext.php";
         $pkg = (int) $zdbh->query("SELECT pk_id_pk FROM x_packages WHERE pk_reseller_fk = 1 AND pk_deleted_ts IS NULL ORDER BY pk_id_pk LIMIT 1")->fetchColumn();
@@ -465,6 +503,7 @@ ex "Run the check now (Server Monitor, hardening)" x_admin_hardening_button
 ex "Check now (Panel Update)" x_admin_update_check
 ex "Apache Status" x_apache_status
 ex "System Log Viewer: every log" x_logviewer
+ex "Repo Browser: Update all (two add-ons behind)" x_update_all
 ex "A client is made and logs in" x_client
 ex "Domain, subdomain and parked domain (and a daemon run)" x_domains
 ex "The client opens every page" x_client_walk
