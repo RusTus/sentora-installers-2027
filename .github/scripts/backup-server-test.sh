@@ -132,7 +132,9 @@ say "Updating"
 in_box 'bash /usr/local/lib/sentora-backup/installer --update --gate /root/sentora-backup-gate' > "$W/upd.txt" 2>&1
 grep -q '^Done: this backup server is up to date' "$W/upd.txt" && ok "--update" || bad "update: $(tail -3 "$W/upd.txt")"
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "keys and copies kept" || bad "after the update"
-in_box 'systemctl is-active firewalld || ufw status' | grep -qE '^active|Status: active' && ok "the firewall is on" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -15; tail -20 /var/log/firewalld; systemctl status dbus --no-pager | head -5; systemctl stop firewalld; timeout 40 firewalld --nofork --nopid --debug=3 2>&1 | tail -40'; }
+in_box 'systemctl is-active firewalld || ufw status' | grep -qE '^active|Status: active' && ok "the firewall is on" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -15; ufw status verbose'; }
+in_box 'ufw status 2> /dev/null; firewall-cmd --list-all 2> /dev/null' > "$W/fw.txt"
+grep -qE '(^| )22(/tcp)? |ports: 22/tcp|services:.* ssh' "$W/fw.txt" && ok "SSH is open in it" || { bad "SSH not open in the firewall"; cat "$W/fw.txt"; }
 
 echo
 [ $FAILS -eq 0 ] && echo "BACKUP SERVER TEST: all passed" || { echo "BACKUP SERVER TEST: $FAILS FAILED"; exit 1; }

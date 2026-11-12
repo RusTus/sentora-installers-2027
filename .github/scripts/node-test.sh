@@ -90,6 +90,8 @@ wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "no
 in_box '[ ! -e /root/sentora-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
 in_box 'stat -c %a /etc/sentora-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
 in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
+in_box 'systemctl is-active --quiet firewalld && echo firewalld; ufw status 2> /dev/null | grep -q "^Status: active" && echo ufw' > "$OUT/firewall.txt"
+[ -s "$OUT/firewall.txt" ] && ok "the firewall is on ($(head -1 "$OUT/firewall.txt"))" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -8; ufw status verbose'; }
 PF=$(in_box 'cat /etc/sentora-node/platform.conf' 2>&1)
 echo "$PF" | grep -qE '^FAMILY=(el|fedora|deb)$' && echo "$PF" | grep -q '^PHP_BIN=/' && echo "$PF" | grep -q '^CADDY_SERVICE=caddy$' \
     && ok "this system's names kept for the agent: $(echo "$PF" | grep -E '^(FAMILY|PKG|MAC)=' | tr '\n' ' ')" || bad "platform.conf: $PF"

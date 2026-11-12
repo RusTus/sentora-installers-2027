@@ -181,13 +181,15 @@ case "$FAMILY" in
     deb)
         PKG=apt
         PKG_INSTALL="apt-get -y -o Dpkg::Options::=--force-confold install"
-        PACKAGES="openssh-server rsync chrony ca-certificates curl nftables dbus"
+        PACKAGES="openssh-server rsync chrony ca-certificates curl ufw"
+        FIREWALL=ufw
         SSH_SERVICE=ssh
         CHRONY_SERVICE=chrony ;;
     el|fedora)
         PKG=dnf
         PKG_INSTALL="dnf -y install"
         PACKAGES="openssh-server openssh-clients rsync chrony ca-certificates curl firewalld policycoreutils-python-utils"
+        FIREWALL=firewalld
         SSH_SERVICE=sshd
         CHRONY_SERVICE=chronyd ;;
 esac
@@ -306,9 +308,20 @@ fi
 ui_step "Firewall (only SSH open)"
 SSH_PORTS=$(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -u | tr '\n' ' ')
 SSH_PORTS=${SSH_PORTS:-22}
-if command -v ufw > /dev/null 2>&1 && ufw status 2> /dev/null | grep -q '^Status: active'; then
+# (the port of this SSH session too, so it is never cut off)
+[ -n "${SSH_CONNECTION:-}" ] && SSH_PORTS="$SSH_PORTS ${SSH_CONNECTION##* }"
+SSH_PORTS=$(echo $SSH_PORTS | tr ' ' '\n' | sort -un | tr '\n' ' '); SSH_PORTS=${SSH_PORTS% }
+# (the system's own firewall: ufw on Debian/Ubuntu, firewalld elsewhere, as the panel's installers do; one
+# that is already on is kept)
+if systemctl is-active --quiet firewalld 2> /dev/null; then FIREWALL=firewalld
+elif command -v ufw > /dev/null 2>&1 && ufw status 2> /dev/null | grep -q '^Status: active'; then FIREWALL=ufw; fi
+if [ "$FIREWALL" = ufw ]; then
+    command -v ufw > /dev/null 2>&1 || run $PKG_INSTALL ufw || die "Could not install ufw (see $LOG)."
     for p in $SSH_PORTS; do run ufw allow "$p/tcp"; done
-    note "ufw (already on): SSH open (port $SSH_PORTS)."
+    if ! ufw status 2> /dev/null | grep -q '^Status: active'; then
+        run ufw default deny incoming; run ufw default allow outgoing; run ufw --force enable
+    fi
+    if ufw status 2> /dev/null | grep -q '^Status: active'; then note "ufw: only SSH open (port $SSH_PORTS)."; else echo "WARNING: ufw did not switch on (see $LOG): no firewall on this server"; fi
 else
     if ! command -v firewall-cmd > /dev/null 2>&1; then run $PKG_INSTALL "$FIREWALLD_PKG" || die "Could not install firewalld (see $LOG)."; fi
     run systemctl enable --now firewalld
