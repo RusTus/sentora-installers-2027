@@ -2139,6 +2139,7 @@ so dnf_automatic_package dnf5-plugin-automatic; so dnf_automatic_timer dnf5-auto
 # reads its per-mailbox settings with DBD::MariaDB; and "mysql" is only an old name of MariaDB's client)
 so spamassassin_dbi_driver MariaDB; so db_client mariadb
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
+so php_cli /usr/bin/php
 so php_bundle_tag fedora45; so php_bundle_libs "$PHP_BUNDLE_LIBS"
 # ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
 # httpd.conf includes, and the command that keeps the system's own settings off

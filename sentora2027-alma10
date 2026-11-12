@@ -2166,6 +2166,7 @@ SOCKET="{socket}"
 SOCKET_OPTIONS="-g postfix"'
 so crontab_dir /var/spool/cron; so cron_service crond
 so package_install "dnf -y -q install"; so php_ext_package "php-{e}"
+so php_cli /usr/bin/php
 so php_bundle_tag alma10; so php_bundle_libs "$PHP_BUNDLE_LIBS"
 # ModSecurity (Web Hardening switches it on): package, module files, data folder, the folder Sentora's
 # httpd.conf includes, and the command that keeps the system's own settings off
