@@ -29,6 +29,10 @@ on:
         description: Publish without the install tests (only when a test system itself is broken)
         type: boolean
         default: false
+      full_test:
+        description: Full test - also the VM test (real machines with SELinux/AppArmor on, everything used; about 20 minutes more)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -45,13 +49,19 @@ jobs:
     if: ${{ !inputs.skip_tests }}
     uses: ./.github/workflows/install-test.yml
 
+  # Full test (the owner's choice, asked for after a good number of changes): real machines with
+  # SELinux/AppArmor on (.github/workflows/vm-test.yml); an ordinary release runs only the install test
+  vm-test:
+    if: ${{ inputs.full_test && !inputs.skip_tests }}
+    uses: ./.github/workflows/vm-test.yml
+
   # Sentora2027Setup.exe (the Windows setup), built on a Windows machine (.github/workflows/windows-setup.yml)
   windows-setup:
     uses: ./.github/workflows/windows-setup.yml
 
   release:
-    needs: [install-test, windows-setup]
-    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') && needs.windows-setup.result == 'success' }}
+    needs: [install-test, vm-test, windows-setup]
+    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') && (needs.vm-test.result == 'success' || needs.vm-test.result == 'skipped') && needs.windows-setup.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out master2027
