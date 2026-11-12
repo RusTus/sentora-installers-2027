@@ -2099,6 +2099,7 @@ $PANEL_PATH/panel/bin/setso --set modsec_data_dir /var/cache/modsecurity > /dev/
 $PANEL_PATH/panel/bin/setso --set modsec_conf_dir "$PANEL_CONF/apache/modsecurity.d" > /dev/null
 $PANEL_PATH/panel/bin/setso --set modsec_off_cmd "a2dismod -q -f security2" > /dev/null
 $PANEL_PATH/panel/bin/setso --set php_bundle_tag debian13 > /dev/null
+$PANEL_PATH/panel/bin/setso --set ftp_config_file "$FTP_CONF_PATH" > /dev/null
 $PANEL_PATH/panel/bin/setso --set firewall_kind ufw > /dev/null
 $PANEL_PATH/panel/bin/setso --set firewall_cmd /usr/sbin/ufw > /dev/null
 $PANEL_PATH/panel/bin/setso --set firewall_service ufw > /dev/null
