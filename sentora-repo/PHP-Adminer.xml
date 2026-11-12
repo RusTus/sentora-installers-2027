@@ -9,5 +9,5 @@
     <authorname>Sentora-2027 (Adminer 6.3.0 by Jakub Vrana, adminer.org)</authorname>
     <authoremail></authoremail>
     <authorurl>https://www.adminer.org/</authorurl>
-    <updatedesc>Opening PHP-Adminer again takes you straight back to your open Adminer login instead of its login page; the list of open logins (two or more) wraps neatly in the menu instead of running over the form. Includes the security fix from 633.</updatedesc>
+    <updatedesc>Only the author's name changes, to Sentora-2027. Nothing else changes.</updatedesc>
 </updateserver>

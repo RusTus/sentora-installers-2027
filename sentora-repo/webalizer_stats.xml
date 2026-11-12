@@ -9,5 +9,5 @@
     <authorname>Sentora-2027 (Webalizer 2.23)</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
-    <updatedesc>Security: a panel account that is switched off or deleted can no longer open its reports from an open session. Includes the flat graphs from 203.</updatedesc>
+    <updatedesc>Only the author's name changes, to Sentora-2027. Nothing else changes.</updatedesc>
 </updateserver>
