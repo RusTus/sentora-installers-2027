@@ -1,0 +1,84 @@
+# VM test: Sentora on a real virtual machine (KVM on the runner) with the system's own security
+# module on as on a server (SELinux enforcing on AlmaLinux 10, AppArmor on Debian 13 and Ubuntu 26.04),
+# installed, restarted, checked, smoke-tested and then used everywhere (mail, ActiveSync, FTP, sites,
+# cron, backups, every panel page and button, the hourly and daily jobs). Any refusal by SELinux or
+# AppArmor fails it; SELinux's hidden refusals are reported. Results are kept 14 days.
+# The script that does the work: .github/scripts/vm-test.sh (and vm-exercise.sh inside the machine).
+name: VM test
+
+on:
+  workflow_dispatch:
+    inputs:
+      systems:
+        description: Systems to test (alma10 deb13 ub26.04)
+        default: alma10 deb13 ub26.04
+      installers_ref:
+        description: Installers branch to test
+        default: master2027
+      core_ref:
+        description: Core branch to test
+        default: master2027
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  systems:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.pick.outputs.list }}
+    steps:
+      - id: pick
+        env:
+          WANT: ${{ inputs.systems }}
+        run: |
+          want=${WANT:-alma10 deb13 ub26.04}
+          echo "list=$(printf '%s\n' $want | grep -E '^(alma10|deb13|ub26\.04)$' | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  vm:
+    needs: systems
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ${{ fromJSON(needs.systems.outputs.list) }}
+    steps:
+      - name: Check out the installers
+        uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-installers-2027
+          ref: ${{ inputs.installers_ref || 'master2027' }}
+          path: installers
+
+      - name: Check out the core
+        uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-core-2027
+          ref: ${{ inputs.core_ref || 'master2027' }}
+          path: core
+
+      - name: KVM and QEMU
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
+          ls -l /dev/kvm; nproc; free -m; df -h /
+
+      - name: Install, restart, check, use everything (${{ matrix.system }})
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash installers/.github/scripts/vm-test.sh "${{ matrix.system }}" core installers results
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-test-${{ matrix.system }}
+          path: |
+            results/*.txt
+            results/*.summary
+            results/*.log
+            results/*.tgz
+          retention-days: 14
