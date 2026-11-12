@@ -40,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '107';
+    const VERSION = '108';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -647,6 +647,24 @@ class snode
                     return array(false, 'refused: bad email');
                 }
                 return self::Settings($email, !empty($d['local_certs']));
+            case 'network':
+                // the customers (their Linux users) whose apps may reach the local network; kept here, applied at once
+                $users = array();
+                foreach (isset($d['lan_users']) && is_array($d['lan_users']) ? $d['lan_users'] : array() as $u) {
+                    if (is_string($u) && preg_match('/^sdh\d{1,9}$/', $u)) {
+                        $users[] = $u;
+                    }
+                }
+                $users = array_values(array_unique($users));
+                sort($users, SORT_STRING);
+                if (!is_dir(self::$state)) {
+                    mkdir(self::$state, 0700, true);
+                }
+                if (!self::WriteFile(self::$state . '/network.json', json_encode(array('lan_users' => $users)))) {
+                    return array(false, 'network: the setting could not be kept');
+                }
+                $fe = self::Fence(true);
+                return array($fe === '', $fe === '' ? ($users ? 'the local network is open to the apps of ' . implode(', ', $users) . ' only' : 'no app may reach the local network') : $fe);
             case 'uninstall':
                 // a little later, so this answer reaches the panel first
                 $r = $bg(array('/usr/local/sbin/sentora-node-uninstall', '--purge'), 30);
@@ -896,6 +914,9 @@ class snode
         // the node's own settings (so the panel shows what the node really uses)
         $conf = is_file(self::$etc . '/install.conf') ? (string) file_get_contents(self::$etc . '/install.conf') : '';
         $out['cfg_local_certs'] = preg_match('/^LOCAL_CERTS=1$/m', $conf) ? 1 : 0;
+        $lu = self::LanUsers();
+        sort($lu, SORT_STRING);
+        $out['cfg_lan_users'] = $lu;
         $out['cfg_email'] = preg_match('/^EMAIL=([A-Za-z0-9._%+@-]{3,200})$/m', $conf, $m) ? $m[1] : '';
         foreach (array('updates', 'security', 'reboot', 'checked_at', 'last_at', 'last_ok', 'last_kind', 'running') as $k) {
             $out['sys_' . $k] = isset($j[$k]) ? (is_bool($j[$k]) ? (int) $j[$k] : $j[$k]) : 0;
@@ -1085,29 +1106,75 @@ class snode
      * Returns the seconds to wait before the next call.
      */
     /**
-     * The apps may not reach the cloud's metadata address (169.254.169.254 and the rest of link-local):
-     * on a rented server it can hand out the server's own keys. The customers' Linux users (sdh*) are
-     * in an nftables set; their traffic (Podman's network runs as them) to link-local is refused.
-     * Written again when the users change, and every hour (a firewall reload could remove it).
+     * The customers (Linux users) whose apps may reach the local network: the panel's list, nobody until it says so.
+     */
+    static function LanUsers()
+    {
+        $j = @json_decode((string) @file_get_contents(self::$state . '/network.json'), true);
+        $out = array();
+        foreach (is_array($j) && isset($j['lan_users']) && is_array($j['lan_users']) ? $j['lan_users'] : array() as $u) {
+            if (is_string($u) && preg_match('/^sdh\d{1,9}$/', $u)) {
+                $out[] = $u;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Where the apps may not go. The customers' Linux users (sdh*) are in an nftables set; their
+     * traffic (Podman's network runs as them) is refused to link-local, where the cloud's metadata
+     * address 169.254.169.254 hands out the server's own keys, and, unless the panel allows it, to
+     * private addresses (the local network: other servers, routers, the panel by its local address).
+     * The node's own DNS servers stay reachable (the apps' names are looked up through them).
+     * Written again when the users or the setting change, and every hour (a firewall reload could remove it).
      */
     static function Fence($force = false)
     {
-        $uids = array();
+        $uids = $lanUids = array();
+        $lanUsers = self::LanUsers();
         foreach ((array) @file(getenv('SNODE_PASSWD') ?: '/etc/passwd', FILE_IGNORE_NEW_LINES) as $l) {
             $p = explode(':', (string) $l);
             if (count($p) > 2 && preg_match('/^sdh\d{1,9}$/', $p[0]) && ctype_digit($p[2])) {
                 $uids[] = (int) $p[2];
+                if (in_array($p[0], $lanUsers, true)) {
+                    $lanUids[] = (int) $p[2];
+                }
             }
         }
         sort($uids);
-        if (!$force && self::$fence === $uids && time() - self::$fenceAt < 3600) {
+        sort($lanUids);
+        $dns4 = $dns6 = array();
+        foreach ((array) @file(getenv('SNODE_RESOLV') ?: '/etc/resolv.conf', FILE_IGNORE_NEW_LINES) as $l) {
+            if (preg_match('/^\s*nameserver\s+(\S+)/', (string) $l, $m)) {
+                if (filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $dns4[] = $m[1];
+                } elseif (filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                    $dns6[] = $m[1];
+                }
+            }
+        }
+        $key = json_encode(array($uids, $lanUids, $dns4, $dns6));
+        if (!$force && self::$fence === $key && time() - self::$fenceAt < 3600) {
             return '';
         }
         $t = "table inet sentora_node {}\ndelete table inet sentora_node\ntable inet sentora_node {\n"
             . "\tset apps { type uid;" . ($uids ? ' elements = { ' . implode(', ', $uids) . ' };' : '') . " }\n"
-            . "\tchain out {\n\t\ttype filter hook output priority filter; policy accept;\n"
-            . "\t\tmeta skuid @apps ip daddr 169.254.0.0/16 reject\n"
-            . "\t\tmeta skuid @apps ip6 daddr { fe80::/10, fd00:ec2::254/128 } reject\n\t}\n}\n";
+            . "\tset lan { type uid;" . ($lanUids ? ' elements = { ' . implode(', ', $lanUids) . ' };' : '') . " }\n"
+            . "\tchain out {\n\t\ttype filter hook output priority filter; policy accept;\n";
+        // (the node's own DNS servers: the apps' names are looked up through them, also on a local network)
+        {
+            foreach (array('ip' => $dns4, 'ip6' => $dns6) as $fam => $list) {
+                if ($list) {
+                    $t .= "\t\tmeta skuid @apps " . $fam . " daddr { " . implode(', ', $list) . " } meta l4proto { tcp, udp } th dport 53 accept\n";
+                }
+            }
+        }
+        $t .= "\t\tmeta skuid @apps ip daddr 169.254.0.0/16 reject\n"
+            . "\t\tmeta skuid @apps ip6 daddr { fe80::/10, fd00:ec2::254/128 } reject\n";
+        // (the customers the panel allows the local network skip these two)
+        $t .= "\t\tmeta skuid @apps meta skuid != @lan ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } reject\n"
+            . "\t\tmeta skuid @apps meta skuid != @lan ip6 daddr fc00::/7 reject\n";
+        $t .= "\t}\n}\n";
         $f = self::$state . '/fence.nft';
         if (!is_dir(self::$state)) {
             mkdir(self::$state, 0700, true);
@@ -1116,7 +1183,7 @@ class snode
         $r = self::Run(array('nft', '-f', $f), null, 30);
         self::$fenceAt = time();
         if ($r[0] === 0) {
-            self::$fence = $uids;
+            self::$fence = $key;
             return '';
         }
         // (no nft here: said once an hour)

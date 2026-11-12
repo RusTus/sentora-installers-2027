@@ -139,6 +139,18 @@ echo "$META" | tail -2
 echo "$META" | grep -q '^exit=0' && bad "an app reached 169.254.169.254 (the cloud's metadata)" || ok "an app can not reach 169.254.169.254 (the cloud's metadata)"
 ROOTMETA=$(in_box "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 -H Metadata:true 'http://169.254.169.254/metadata/instance?api-version=2021-02-01'" 2>&1)
 echo "  (for comparison, root on the node gets: HTTP $ROOTMETA)"
+# the local network: closed to the apps by default (here: the stand-in panel on the runner's private
+# address $GW), open only for the customers an administrator lets through
+lanprobe() { in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman run --rm docker.io/library/busybox:1 sh -c 'wget -q -T 5 -O - http://$GW:18092/modules/docker_hosting/code/node.php?key=1 2>&1 | head -c 120; echo; nslookup -timeout=5 example.com > /dev/null 2>&1 && echo dns-ok'" 2>&1; }
+L1=$(lanprobe); echo "$L1" | tail -3
+echo "$L1" | grep -q '^v1\.' && bad "an app reached the local network ($GW) while it is closed" || ok "the local network is closed to the apps by default ($GW refused)"
+echo "$L1" | grep -q dns-ok && ok "names still resolve for the apps (the node's DNS servers stay open)" || bad "DNS does not work for the apps with the local network closed"
+panel lan 3 1 | grep -qx ok || bad "lan: $(panel lan 3 1)"
+L2=''; for _ in $(seq 1 20); do L2=$(lanprobe); echo "$L2" | grep -q '^v1\.' && break; sleep 3; done
+echo "$L2" | grep -q '^v1\.' && ok "opened for client1 (sdh3): its app reaches the local network" || { bad "opened for client1, but its app still can not reach $GW"; echo "$L2" | tail -3; }
+panel lan 3 0 > /dev/null
+L3=''; for _ in $(seq 1 20); do L3=$(lanprobe); echo "$L3" | grep -q '^v1\.' || break; sleep 3; done
+echo "$L3" | grep -q '^v1\.' && bad "closed again, but the app still reaches $GW" || ok "closed again: refused"
 panel act "$CID" public > /dev/null
 for _ in $(seq 1 20); do C=$(code ''); case "$C" in 200|302) break ;; esac; sleep 3; done
 case "$C" in 200|302) ok "open to the public: the app answers without a password ($C)" ;; *) bad "public: HTTP $C" ;; esac

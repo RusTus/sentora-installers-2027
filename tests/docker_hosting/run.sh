@@ -20,6 +20,8 @@ export DH_DB="$W/test.sqlite" DH_WEB=http://127.0.0.1:18092 DH_AGENT="$REPO/node
 export FAKE_DIR="$W/fake" SNODE_ETC="$W/node/etc" SNODE_STATE="$W/node/state" SNODE_CADDY="$W/node/caddy" SNODE_RUN="$W/node/run"
 export SNODE_HOME="$W/node/home" SNODE_SUBID="$W/node/sub" SNODE_USERPATH="$T/fakebin:/usr/bin:/bin"
 export SNODE_UPDATE_WAIT=0 SNODE_KEYFILE="$W/node/sentora-node-key.txt" DH_MAIL="$W/mail.txt"
+export SNODE_PASSWD="$W/fake/passwd" SNODE_RESOLV="$W/fake/resolv.conf"
+printf "nameserver 192.168.1.1\nnameserver 8.8.8.8\n" > "$W/fake/resolv.conf"; touch "$W/fake/passwd"
 if [ -n "${DH_MYSQL:-}" ]; then
     php -r 'list($h, $p, $u, $w, $d) = explode(";", getenv("DH_MYSQL")); $x = new PDO("mysql:host=$h;port=$p", $u, $w);
         $x->exec("DROP DATABASE IF EXISTS `$d`"); $x->exec("CREATE DATABASE `$d` CHARACTER SET utf8mb4"); echo "database: ", $x->query("SELECT VERSION()")->fetchColumn(), "\n";' || exit 1

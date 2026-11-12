@@ -671,6 +671,45 @@ check(strpos($r['text'], 'removed') !== false && (int) val("SELECT COUNT(*) FROM
 $r = req(1, '', array(), array('tab' => 'log'));
 check(strpos($r['html'], 'Own app Linkding (my-linkding) added') !== false, 'the log has it');
 
+section('the local network, per customer');
+$f = file_get_contents(getenv('FAKE_DIR') . '/fence.nft');
+check(strpos($f, 'meta skuid @apps meta skuid != @lan ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } reject') !== false
+    && strpos($f, 'ip daddr 169.254.0.0/16 reject') !== false && preg_match('/set lan \{ type uid; \}/', $f) === 1, 'the node fences every app off the local network and the cloud\'s metadata by default', $f);
+check(strpos($f, 'ip daddr { 192.168.1.1, 8.8.8.8 } meta l4proto { tcp, udp } th dport 53 accept') !== false, 'the node\'s own DNS servers stay reachable (also one on the local network)');
+check(preg_match('/set apps \{ type uid; elements = \{ ([0-9, ]+) \}; \}/', $f, $um) === 1, 'the customers\' users are in it', $f);
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'Local network') !== false && strpos($r['html'], 'name="inAcc" value="3"') !== false, 'the administrator sees the accounts with Docker Hosting, each with a switch');
+$r = req(2, 'Lan', array('inAcc' => '3', 'inLan' => '1'));
+check(dh::LanAccounts() === array(), 'a reseller can not open it for its client');
+$r = req(1, 'Lan', array('inAcc' => '3', 'inLan' => '1'));
+check(strpos($r['text'], 'client1\'s apps may reach the local network now') !== false && dh::LanAccounts() === array(3), 'the administrator opens it for client1', $r['text']);
+$j = row("SELECT * FROM x_dh_jobs WHERE jb_node_fk = 1 AND jb_action_vc = 'network' AND jb_state_vc = 'queued'");
+check($j && json_decode(ctrl_secret::Decrypt($j['jb_data_tx']), true) === array('lan_users' => array('sdh3')), 'node 1 gets the list (sdh3)');
+agent('once');
+$f = file_get_contents(getenv('FAKE_DIR') . '/fence.nft');
+check(preg_match('/set lan \{ type uid; elements = \{ (\d+) \}; \}/', $f, $lm) === 1 && $lm[1] === trim(file_get_contents(getenv('FAKE_DIR') . '/users/sdh3')), 'the node lets only sdh3\'s apps through to the local network', $f);
+check(json_decode(row("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")['nd_info_tx'], true)['cfg_lan_users'] === array('sdh3'), 'and reports it');
+// the node lost its setting (set up again): the panel sends it again by itself
+$last = (int) val("SELECT COALESCE(MAX(jb_id_pk), 0) FROM x_dh_jobs WHERE jb_action_vc = 'network'");
+unlink(getenv('SNODE_STATE') . '/network.json');
+agent('once');
+check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_node_fk = 1 AND jb_action_vc = 'network' AND jb_id_pk > :l", array(':l' => $last)) === 1, 'a node that lost the list gets it again by itself (once)');
+agent('once');
+check(strpos(file_get_contents(getenv('FAKE_DIR') . '/fence.nft'), 'set lan { type uid; elements = {') !== false
+    && json_decode(row("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")['nd_info_tx'], true)['cfg_lan_users'] === array('sdh3'), 'and applies it');
+$r = req(1, 'Lan', array('inAcc' => '3', 'inLan' => '0'));
+agent('once');
+check(dh::LanAccounts() === array() && preg_match('/set lan \{ type uid; \}/', file_get_contents(getenv('FAKE_DIR') . '/fence.nft')) === 1, 'closed again: no app may reach the local network');
+// a node that can not load the rules says so
+touch(getenv('FAKE_DIR') . '/nft-fail');
+req(1, 'Lan', array('inAcc' => '3', 'inLan' => '1'));
+agent('once');
+check(strpos((string) val("SELECT jb_result_tx FROM x_dh_jobs WHERE jb_action_vc = 'network' ORDER BY jb_id_pk DESC LIMIT 1"), 'fence:') !== false
+    && val("SELECT jb_state_vc FROM x_dh_jobs WHERE jb_action_vc = 'network' ORDER BY jb_id_pk DESC LIMIT 1") === 'failed', 'rules that do not load: the job fails, with the reason');
+unlink(getenv('FAKE_DIR') . '/nft-fail');
+req(1, 'Lan', array('inAcc' => '3', 'inLan' => '0'));
+agent('once');
+
 section('daemon: account switched off, disk limit, account deleted');
 agent('once');
 $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 3");

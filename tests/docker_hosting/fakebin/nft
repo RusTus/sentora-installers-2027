@@ -1,0 +1,6 @@
+#!/bin/bash
+# the node's fence: the rules it would load are kept for the test to read
+echo "nft $*" >> "$FAKE_DIR/calls.log"
+[ "$1" = -f ] && cp "$2" "$FAKE_DIR/fence.nft"
+[ -f "$FAKE_DIR/nft-fail" ] && { echo "nft: fake failure"; exit 1; }
+exit 0

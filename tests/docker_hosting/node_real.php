@@ -49,6 +49,9 @@ switch ($a[1]) {
     case 'settings':
         echo dh::SetNodeSettings(1, $a[2], $a[3] === '1', 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
         break;
+    case 'lan':
+        echo dh::SetLan(1, (int) $a[2], $a[3] === '1') ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
     case 'info':
         $n = dh::Node(1);
         echo $n ? dh::Info($n)[$a[2]] . "\n" : "gone\n";

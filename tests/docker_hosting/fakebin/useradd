@@ -5,3 +5,4 @@ while [ $# -gt 0 ]; do [ "$1" = --home-dir ] && home=$2; shift; done
 mkdir -p "$FAKE_DIR/users" "$home"
 n=$(ls "$FAKE_DIR/users" | wc -l)
 echo $((3000 + n)) > "$FAKE_DIR/users/$user"
+echo "$user:x:$((3000 + n)):$((3000 + n))::$home:/sbin/nologin" >> "$FAKE_DIR/passwd"
