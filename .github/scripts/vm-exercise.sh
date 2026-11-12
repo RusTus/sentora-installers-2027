@@ -46,7 +46,8 @@ FTPPW="Ftp-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 APW="Adm-$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 TMP=$(mktemp -d); CJ="$TMP/client.jar"; AJ="$TMP/admin.jar"
 ACC_ID=""; WEBU=""; DOMDIR=""; SITE=""; FTPUSER=""; MAILADDR=""; MYUSER=""; MYPW=""; DBNAME=""; LOGGED=""; ADMIN=""
-BANIP=10.99.0.2
+# (each round its own guesser address: fail2ban remembers the first round's ban and unban)
+if [ "${ROUND:-}" = two ]; then BANIP=10.99.0.6; BANGW=10.99.0.5; else BANIP=10.99.0.2; BANGW=10.99.0.1; fi
 
 # the panel in a browser: the client's and the administrator's own sessions
 cu() { curl -sk --max-time 60 --resolve "$FQDN:443:127.0.0.1" -c "$CJ" -b "$CJ" "$@"; }
@@ -503,10 +504,10 @@ x_fail2ban() {
     command -v fail2ban-client > /dev/null || { WHY="fail2ban is not installed"; return 2; }
     # a guesser on its own little network (fail2ban never bans the server's own addresses)
     ip netns add vmx 2> /dev/null; ip link add vmx0 type veth peer name vmx1 2> /dev/null
-    ip link set vmx1 netns vmx; ip addr add 10.99.0.1/30 dev vmx0; ip link set vmx0 up
+    ip link set vmx1 netns vmx; ip addr add "$BANGW/30" dev vmx0; ip link set vmx0 up
     ip netns exec vmx ip addr add "$BANIP/30" dev vmx1; ip netns exec vmx ip link set vmx1 up; ip netns exec vmx ip link set lo up
     local i t j="$TMP/bad.jar" r=0
-    g() { ip netns exec vmx curl -sk --max-time 8 --resolve "$FQDN:443:10.99.0.1" -c "$j" -b "$j" "$@"; }
+    g() { ip netns exec vmx curl -sk --max-time 8 --resolve "$FQDN:443:$BANGW" -c "$j" -b "$j" "$@"; }
     g -o /dev/null "https://$FQDN/" || { WHY="the guesser can not reach the panel at all"; r=1; }
     if [ $r -eq 0 ]; then
         for i in 1 2 3 4 5 6 7; do
