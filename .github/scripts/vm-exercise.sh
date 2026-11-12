@@ -248,12 +248,13 @@ x_logforward() { # Log Forwarder (add-on): the panel's own access log sent live 
     need ADMIN "administrator login" || return $?
     local zpp=/root/log_forwarder.zpp d="$PANEL/modules/log_forwarder" rx=/root/lf-rx port=12514
     [ -f "$zpp" ] || { WHY="no log_forwarder.zpp to install"; return 2; }
-    if [ ! -f "$d/module.xml" ]; then
-        # (installed as Repo Browser installs an uploaded package: the files, the module's row, its install step)
-        mkdir -p "$d" && unzip -qo "$zpp" -d "$d" && chown -R root:root "$d"
-        ( cd "$PANEL" && php -r 'require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php"; ui_module::ModuleInfoToDB("log_forwarder");' \
-            && php -q "$d/deploy/install.run" ) > "$TMP/lf-install.txt" 2>&1 || { WHY="install: $(tail -2 "$TMP/lf-install.txt")"; return 1; }
-    fi
+    # this checkout's version, always (installed as Repo Browser installs an uploaded package: the files,
+    # the module's row, its install step, which repairs an older version's leftovers)
+    rm -rf "$d"; mkdir -p "$d" && unzip -qo "$zpp" -d "$d" && chown -R root:root "$d"
+    ( cd "$PANEL" && php -r 'require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php"; ui_module::ModuleInfoToDB("log_forwarder");' \
+        && php -q "$d/deploy/install.run" ) > "$TMP/lf-install.txt" 2>&1 || { WHY="install: $(tail -2 "$TMP/lf-install.txt")"; return 1; }
+    grep -q "<version>202" "$d/module.xml" || { WHY="not the checkout's version"; return 1; }
+    [ -n "$(ls /usr/lib*/rsyslog/lmnsd_gtls.so /usr/lib/*/rsyslog/lmnsd_gtls.so 2> /dev/null)" ] || { WHY="rsyslog's TLS support was not installed: $(cat "$TMP/lf-install.txt" | tr '\n' ' ' | cut -c1-200)"; return 1; }
     # a receiver with a certificate of its own making, as a self-hosted log server has
     mkdir -p $rx && rm -f $rx/got.txt
     openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=logs.vmtest" -addext "subjectAltName=DNS:logs.vmtest" -keyout $rx/key.pem -out $rx/cert.pem > /dev/null 2>&1
