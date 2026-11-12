@@ -187,7 +187,7 @@ case "$FAMILY" in
     el|fedora)
         PKG=dnf
         PKG_INSTALL="dnf -y install"
-        PACKAGES="openssh-server rsync chrony ca-certificates curl firewalld policycoreutils-python-utils"
+        PACKAGES="openssh-server openssh-clients rsync chrony ca-certificates curl firewalld policycoreutils-python-utils"
         SSH_SERVICE=sshd
         CHRONY_SERVICE=chronyd ;;
 esac
@@ -315,7 +315,7 @@ else
     for p in $SSH_PORTS; do run firewall-cmd --permanent --add-port="$p/tcp"; done
     run firewall-cmd --permanent --add-service=ssh
     run firewall-cmd --reload
-    note "firewalld: only SSH open (port $SSH_PORTS)."
+    if systemctl is-active --quiet firewalld; then note "firewalld: only SSH open (port $SSH_PORTS)."; else echo "WARNING: firewalld did not start (journalctl -u firewalld): no firewall on this server"; fi
 fi
 
 ui_step "The panel's key"

@@ -68,7 +68,7 @@ H=/panel1.example.test
 for night in 2026-11-10 2026-11-11; do
     "${SSH1[@]}" "$B" sentora-backup begin $H $night
     LINK=(); [ "$("${SSH1[@]}" "$B" sentora-backup latest $H 2> /dev/null)" = yes ] && LINK=(--link-dest=$H/latest/)
-    rsync -aHR --delete --numeric-ids --partial "${LINK[@]}" -e "${SSH1[*]}" "$W/src/./" "$B:$H/$night.partial/" > "$W/rsync.out" 2>&1 || { bad "rsync to the backup server ($night): $(tail -2 "$W/rsync.out")"; }
+    rsync -aHR --delete --numeric-ids --partial "${LINK[@]}" -e "${SSH1[*]}" "$W/src/./" "$B:$H/$night.partial/" > "$W/rsync.out" 2>&1 || { bad "rsync to the backup server ($night): $(tail -2 "$W/rsync.out")"; in_box 'tail -4 /var/log/sentora-backup-gate.log'; }
     "${SSH1[@]}" "$B" sentora-backup finish $H $night 14 || bad "finish $night"
 done
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 2 ] && ok "two nights kept" || bad "count: $("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)"
@@ -123,7 +123,7 @@ grep -q 'ready to keep the backups of "panel2.example.test"' "$W/add.txt" && ok 
 [ "$("${SSH2[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel2.example.test" ] && ok "it has its own folder" || bad "panel2 hello"
 [ "$("${SSH2[@]}" "$B" sentora-backup count $H 2>&1)" = 0 ] && ok "it does not see the first panel's nights" || bad "panel2 sees panel1's nights"
 o=$(rsync -a -e "${SSH2[*]}" "$B:/../panel1.example.test/" "$W/p3" 2>&1); [ ! -d "$W/p3/panel1.example.test" ] && [ ! -f "$W/p3/2026-11-05" ] && ok "nor can it reach them" || bad "panel2 reached panel1's folder"
-in_box 'sentora-backup-server list' | grep -q '^panel1.example.test' && ok "sentora-backup-server list shows the panels" || bad "list: $(in_box 'sentora-backup-server list')"
+in_box 'sentora-backup-server list' | grep -q '^panel1.example.test' && ok "sentora-backup-server list shows the panels" || { bad "sentora-backup-server list"; in_box 'sentora-backup-server list; cut -c1-90 /etc/ssh/sentora-backup/authorized_keys'; }
 in_box 'sentora-backup-server remove panel2.example.test' > /dev/null
 "${SSH2[@]}" "$B" sentora-backup hello > /dev/null 2>&1 && bad "a removed panel still gets in" || ok "a removed panel is locked out"
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "the other panel is not touched" || bad "panel1 after removing panel2"
@@ -132,7 +132,7 @@ say "Updating"
 in_box 'bash /usr/local/lib/sentora-backup/installer --update --gate /root/sentora-backup-gate' > "$W/upd.txt" 2>&1
 grep -q '^Done: this backup server is up to date' "$W/upd.txt" && ok "--update" || bad "update: $(tail -3 "$W/upd.txt")"
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "keys and copies kept" || bad "after the update"
-in_box 'systemctl is-active firewalld || ufw status' | grep -qE '^active|Status: active' && ok "the firewall is on" || bad "no firewall"
+in_box 'systemctl is-active firewalld || ufw status' | grep -qE '^active|Status: active' && ok "the firewall is on" || { bad "no firewall"; in_box 'systemctl status firewalld --no-pager | tail -8'; }
 
 echo
 [ $FAILS -eq 0 ] && echo "BACKUP SERVER TEST: all passed" || { echo "BACKUP SERVER TEST: $FAILS FAILED"; exit 1; }
