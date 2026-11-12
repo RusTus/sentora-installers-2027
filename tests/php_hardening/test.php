@@ -597,6 +597,39 @@ $zdbh->exec("UPDATE x_ph_settings SET ph_value_tx = 'bob.example,x\") ctl:ruleEn
 check(ph_modsec::SkipDomains() === array('bob.example'), 'one written straight into the table that is no domain is ignored (nothing reaches Apache\'s settings)');
 page(1, 'Clear', array());
 check(count(ph::Caught()) === 0, 'the list can be emptied');
+
+section('The live list of what was caught');
+check(ph::Get('read_at') !== '' && (int) ph::Get('read_at') > time() - 3600, 'a daemon run notes when it last read the logs');
+$h = page(1);
+$top = ph::NewestId();
+check(strpos($h, 'id="ph-caught"') !== false && strpos($h, 'data-last="' . $top . '"') !== false && strpos($h, 'data-feed="modules/php_hardening/code/caught.php"') !== false, 'the list knows its newest line and where to ask for more');
+check(strpos($h, 'The server last looked at') !== false && strpos($h, 'Look now') !== false && strpos($h, 'Pause') !== false && strpos($h, 'Nothing yet.') !== false, 'says when the server last looked; Look now and Pause; "Nothing yet" while empty');
+check(strpos(file_get_contents("$MOD/module.zpm"), 'modules/php_hardening/assets/ph.js') !== false && is_file("$MOD/assets/ph.js"), 'the page loads its script');
+$f = module_controller::Feed($top);
+check($f['count'] === 0 && $f['rows'] === '' && $f['last'] === $top, 'nothing new: nothing sent');
+$zdbh->prepare("INSERT INTO x_ph_caught (ca_time_in, ca_account_vc, ca_feature_vc, ca_action_vc, ca_message_tx, ca_file_tx, ca_line_in, ca_ip_vc) VALUES (:t, 'bob', 'modsecurity', 'drop', :m, '/x<b>.php', 0, '203.0.113.5')")
+    ->execute(array(':t' => time(), ':m' => 'Rules 1 <script>alert(2)</script>'));
+$zdbh->prepare("INSERT INTO x_ph_caught (ca_time_in, ca_account_vc, ca_feature_vc, ca_action_vc, ca_message_tx, ca_file_tx, ca_line_in, ca_ip_vc) VALUES (:t, '', 'snuffleupagus', 'simulation', 'second', '', 0, '')")
+    ->execute(array(':t' => time()));
+$f = module_controller::Feed($top);
+check($f['count'] === 2 && $f['last'] === ph::NewestId() && strpos($f['rows'], 'second') < strpos($f['rows'], 'alert'), 'new lines come, newest first, with the newest number', json_encode($f));
+check(strpos($f['rows'], '&lt;script&gt;alert(2)') !== false && strpos($f['rows'], '<script>') === false && strpos($f['rows'], '&lt;b&gt;.php') !== false, 'they come escaped by the server');
+check(module_controller::Feed($f['last'])['count'] === 0, 'asked again: nothing twice');
+check(strpos($f['looked'], 'The server last looked at') !== false && strpos($f['looked'], '&') === false, 'the "last looked" words come as plain text');
+$src = file_get_contents("$MOD/code/caught.php");
+check(strpos($src, "(int) \$phUser['usergroupid'] !== 1") !== false && strpos($src, 'http_response_code(403)') !== false && strpos($src, "mo_enabled_en") !== false
+    && strpos($src, 'session_write_close') !== false && preg_match('/after.*\\\\d\{1,10\}/', $src), 'the feed: administrators only, the module switched on, a number only', '');
+$js = file_get_contents("$MOD/assets/ph.js");
+check(strpos($js, 'innerHTML = j.rows') !== false && strpos($js, 'textContent = j.looked') !== false, 'the script puts in only what the server escaped (and the words as text)');
+// Look now
+page(3, 'LookNow', array());
+check(ph::Get('looknow_at') === '', 'a client can not make the server look');
+$h = page(1, 'LookNow', array());
+check(strpos($h, 'could not be asked to look now') !== false && ph::Get('looknow_at') === '', 'without zsudo: told so, nothing noted');
+ph::Set('looknow_at', (string) time());
+$h = page(1, 'LookNow', array());
+check(strpos($h, 'at most once a minute') !== false, 'at most once a minute');
+ph::Set('looknow_at', '');
 page(1, 'Rules', array('inRule' => array_fill_keys(ph::Chosen() ?: array('random', 'xxe', 'samesite', 'mail', 'putenv', 'basedir', 'curl', 'eval'), '1')));
 run_daemon();
 check(ph::Status($v83)['st_state_vc'] === 'watch' && ph::Status('8.4')['st_state_vc'] === 'on', 'the daemon applies what was saved');

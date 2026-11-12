@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>101</latestversion>
+    <latestversion>102</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/php_hardening.zpp</downloadurl>
     <name>Web Hardening</name>
     <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught, the domains, accounts and rules left alone.</desc>
