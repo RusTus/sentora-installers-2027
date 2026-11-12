@@ -193,6 +193,7 @@ in_box 'php -q /etc/sentora/panel/bin/setso --set daemon_hourrun 0 > /dev/null
     if grep -qE "(^| )FAILED[:. ]" /var/sentora/logs/daemon-last-run.log; then grep -E "(^| )FAILED[:. ]" /var/sentora/logs/daemon-last-run.log | cut -c1-600; echo "HOURLY: FAILED"
     else echo "HOURLY: PASSED"; fi' > "$OUT/hourly.txt" 2>&1
 in_box "cat /var/sentora/logs/daemon-last-run.log" > "$OUT/daemon-hourly-run.log" 2>&1
+in_box "cat /var/sentora/logs/matomo-import-error.log" > "$OUT/matomo-import-error.log" 2>&1 || true
 cat "$OUT/hourly.txt"
 
 say "This system's settings for servers installed before a setting existed (sentora-platform-fill)"
