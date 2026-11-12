@@ -108,7 +108,7 @@ if [[ "$S" == running* ]]; then ok "running (panel): $S"; else
     exit 1
 fi
 in_box 'id sdh3' && ok "customer user sdh3" || bad "no user sdh3"
-in_box 'getent passwd sdh3 | cut -d: -f7' | grep -qx /sbin/nologin && ok "sdh3 can not log in" || bad "sdh3 has a login shell"
+in_box 'getent passwd sdh3 | cut -d: -f7' | grep -qxE '(/usr)?/sbin/nologin' && ok "sdh3 can not log in" || bad "sdh3 has a login shell"
 in_box 'grep -q "^sdh3:" /etc/subuid && grep -q "^sdh3:" /etc/subgid' && ok "sdh3 has its own subordinate IDs" || bad "no subuid/subgid for sdh3"
 in_box 'ls /var/lib/systemd/linger/sdh3' > /dev/null && ok "sdh3 lingers" || bad "sdh3 does not linger"
 PS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps --format '{{.Names}} {{.Ports}}'")

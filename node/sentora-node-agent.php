@@ -307,10 +307,46 @@ class snode
     // ----- running things -----
 
     /**
+     * Caddy's word for a password: basic_auth since Caddy 2.8, basicauth before (the version some
+     * systems ship, Debian's and Ubuntu's 2.6).
+     */
+    static function AuthWord()
+    {
+        static $w = null;
+        if ($w === null) {
+            $v = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'version'), null, 20);
+            $w = $v[0] === 0 && preg_match('/^v?2\.([0-7])\./', trim($v[1])) ? 'basicauth' : 'basic_auth';
+        }
+        return $w;
+    }
+
+    /**
+     * Where a command is on the PATH, or ''.
+     */
+    static function Which($cmd)
+    {
+        static $seen = array();
+        if (!isset($seen[$cmd])) {
+            $seen[$cmd] = '';
+            foreach (explode(':', (string) getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin') as $d) {
+                if ($d !== '' && is_file($d . '/' . $cmd) && is_executable($d . '/' . $cmd)) {
+                    $seen[$cmd] = $d . '/' . $cmd;
+                    break;
+                }
+            }
+        }
+        return $seen[$cmd];
+    }
+
+    /**
      * Run a command (no shell). Returns [exit code, output (stdout and stderr together)].
      */
     static function Run(array $argv, $cwd = null, $timeout = 600)
     {
+        // (a command this system does not have, such as getenforce without SELinux: said, not warned about)
+        if (strpos((string) $argv[0], '/') === false && self::Which($argv[0]) === '') {
+            return array(127, $argv[0] . ': not on this system');
+        }
         $p = proc_open($argv, array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $cwd);
         if (!is_resource($p)) {
             return array(127, 'could not run ' . $argv[0]);
@@ -797,6 +833,15 @@ class snode
                     return array(false, 'no such container here');
                 }
                 $r = self::Podman($d['user'], $action === 'start' ? array('start', $name) : array($action, '--time', '20', $name), 300);
+                if ($r[0] === 0) {
+                    // (kept: after a restart of the server only the apps not stopped on purpose are started)
+                    if ($action === 'stop') {
+                        $s['containers'][$key]['stopped'] = 1;
+                    } else {
+                        unset($s['containers'][$key]['stopped']);
+                    }
+                    self::SaveState($s);
+                }
                 return array($r[0] === 0, $r[0] === 0 ? $action . ': done' : $action . ': ' . self::Tail($r[1]));
             case 'limits':
                 if (!isset($s['containers'][$key], $d['cpu'], $d['mem'])) {
@@ -866,7 +911,7 @@ class snode
         foreach ($s['containers'] as $cid => $c) {
             $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
             if (!(int) $c['public'] && $c['auth'] !== '') {
-                $t .= "\tbasic_auth {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
+                $t .= "\t" . self::AuthWord() . " {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
             }
             $t .= "\treverse_proxy 127.0.0.1:" . (int) $c['hostport'] . "\n}\n";
         }
@@ -1007,6 +1052,31 @@ class snode
     }
 
     /**
+     * Once after each start of the server: the apps that were not stopped on purpose are started
+     * (Podman's own podman-restart unit does not start "unless-stopped" containers on every system).
+     */
+    static function BootStart(array &$s)
+    {
+        $boot = trim((string) @file_get_contents('/proc/sys/kernel/random/boot_id'));
+        if ($boot === '' || (isset($s['boot']) && $s['boot'] === $boot)) {
+            return;
+        }
+        foreach ($s['containers'] as $cid => $c) {
+            if (!empty($c['stopped']) || self::Uid($c['user']) < 0) {
+                continue;
+            }
+            $name = self::Name((int) $cid);
+            $st = self::Podman($c['user'], array('container', 'inspect', '--format', '{{.State.Status}}', $name), 60);
+            if ($st[0] === 0 && !in_array(trim($st[1]), array('running', 'paused'), true)) {
+                $r = self::Podman($c['user'], array('start', $name), 300);
+                self::Out('started ' . $name . ' after the restart of the server: ' . ($r[0] === 0 ? 'ok' : self::Tail($r[1])));
+            }
+        }
+        $s['boot'] = $boot;
+        self::SaveState($s);
+    }
+
+    /**
      * The customers' Linux users (sdh*) on this node.
      */
     static function Users()
@@ -1058,7 +1128,7 @@ class snode
                 $domain = $auth = '';
                 if (preg_match('/^# container ' . (int) $cid . ' \(' . $user . '\)\n([a-z0-9.-]{1,253}) \{\n(.*?)\n\}/ms', $sites, $m)) {
                     $domain = $m[1];
-                    $auth = preg_match('#basic_auth \{\n\t\tsetup (\$2[aby]\$\d\d\$[./A-Za-z0-9]{53})\n#', $m[2], $a) ? $a[1] : '';
+                    $auth = preg_match('#basic_?auth \{\n\t\tsetup (\$2[aby]\$\d\d\$[./A-Za-z0-9]{53})\n#', $m[2], $a) ? $a[1] : '';
                 }
                 $s['containers'][$cid] = array('user' => $user, 'domain' => $domain, 'hostport' => $hostport, 'public' => $auth === '' ? 1 : 0, 'auth' => $auth,
                     'volumes' => $nv, 'image' => trim($img[1]), 'found' => 1);
@@ -1539,6 +1609,7 @@ class snode
         $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
         $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
         $s = self::State();
+        self::BootStart($s);
         if (!isset($s['scanned_at']) || time() - (int) $s['scanned_at'] > 3600) {
             if (self::Scan($s) > 0) {
                 self::Proxy($s);
