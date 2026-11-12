@@ -13,3 +13,11 @@
 ; are expected and change nothing (the mail queue is counted, the alerts are sent).
 (dontaudit postfix_postqueue_t httpd_sys_content_t (file (read)))
 (dontaudit system_mail_t httpd_log_t (file (write append)))
+
+; The panel's log viewers (System Log Viewer, DNS Admin) ask whether they may read BIND's and the FTP
+; server's logs, which SELinux keeps from the web server (they hold every client's names and files).
+; The answer stays no; only the asking is not written to the audit log at every page.
+(dontaudit httpd_t named_log_t (dir (read)))
+(dontaudit httpd_t named_log_t (file (read open)))
+(dontaudit httpd_t xferlog_t (dir (read)))
+(dontaudit httpd_t xferlog_t (file (read open)))

@@ -46,7 +46,7 @@ FTPPW="Ftp-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 APW="Adm-$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 TMP=$(mktemp -d); CJ="$TMP/client.jar"; AJ="$TMP/admin.jar"
 ACC_ID=""; WEBU=""; DOMDIR=""; SITE=""; FTPUSER=""; MAILADDR=""; MYUSER=""; MYPW=""; DBNAME=""; LOGGED=""; ADMIN=""
-BANIP=10.99.0.1
+BANIP=10.99.0.2
 
 # the panel in a browser: the client's and the administrator's own sessions
 cu() { curl -sk --max-time 60 --resolve "$FQDN:443:127.0.0.1" -c "$CJ" -b "$CJ" "$@"; }
@@ -390,25 +390,29 @@ x_restore() {
 }
 x_fail2ban() {
     command -v fail2ban-client > /dev/null || { WHY="fail2ban is not installed"; return 2; }
-    ip addr add "$BANIP/32" dev lo 2> /dev/null
-    local i t j="$TMP/bad.jar"
-    for i in 1 2 3 4 5 6 7; do
-        t=$(curl -sk --max-time 20 --interface "$BANIP" --resolve "$FQDN:443:$BANIP" -c "$j" -b "$j" "https://$FQDN/" | grep -o 'name="csfr_token" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"//')
-        curl -sk --max-time 20 --interface "$BANIP" --resolve "$FQDN:443:$BANIP" -c "$j" -b "$j" -o /dev/null -d "inUsername=nosuchuser&inPassword=wrong$i&csfr_token=$t" "https://$FQDN/"
-        sleep 1
-    done
-    wait_for 60 bash -c "fail2ban-client status sentora-panel 2> /dev/null | grep -q '$BANIP'" || {
-        WHY="sentora-panel did not ban $BANIP; the panel's log ($(ls -lZ /var/lib/sentora/sentora-auth.log 2>&1 | awk '{print $1, $3, $4, $5}')): $(tail -2 /var/lib/sentora/sentora-auth.log 2>&1 | tr '\n' '|'); fail2ban: $(fail2ban-client status sentora-panel 2>&1 | grep -E 'failed|banned' | tr -s ' \n' ' '); $(journalctl -u fail2ban -n 3 --no-pager 2> /dev/null | tail -2 | tr '\n' ' ')"
-        ip addr del "$BANIP/32" dev lo 2> /dev/null; return 1; }
-    fail2ban-client set sentora-panel unbanip "$BANIP" > /dev/null 2>&1
-    ip addr del "$BANIP/32" dev lo 2> /dev/null
-    # wrong mail passwords (the mail jails read Dovecot's and Postfix's logs)
-    MAILADDR=${MAILADDR:-nobody@$DOM} MAILPW=wrong python3 -c '
-import imaplib, ssl, os
-c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE
-try: imaplib.IMAP4_SSL("127.0.0.1", 993, ssl_context=c).login(os.environ["MAILADDR"], "wrong")
-except Exception: pass' 2> /dev/null
-    return 0
+    # a guesser on its own little network (fail2ban never bans the server's own addresses)
+    ip netns add vmx 2> /dev/null; ip link add vmx0 type veth peer name vmx1 2> /dev/null
+    ip link set vmx1 netns vmx; ip addr add 10.99.0.1/30 dev vmx0; ip link set vmx0 up
+    ip netns exec vmx ip addr add "$BANIP/30" dev vmx1; ip netns exec vmx ip link set vmx1 up; ip netns exec vmx ip link set lo up
+    local i t j="$TMP/bad.jar" r=0
+    g() { ip netns exec vmx curl -sk --max-time 8 --resolve "$FQDN:443:10.99.0.1" -c "$j" -b "$j" "$@"; }
+    g -o /dev/null "https://$FQDN/" || { WHY="the guesser can not reach the panel at all"; r=1; }
+    if [ $r -eq 0 ]; then
+        for i in 1 2 3 4 5 6 7; do
+            t=$(g "https://$FQDN/" | grep -o 'name="csfr_token" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"//')
+            g -o /dev/null -d "inUsername=nosuchuser&inPassword=wrong$i&csfr_token=$t" "https://$FQDN/"
+            sleep 1
+        done
+        if ! wait_for 60 bash -c "fail2ban-client status sentora-panel 2> /dev/null | grep -q '$BANIP'"; then
+            WHY="sentora-panel did not ban $BANIP; the panel's log: $(tail -2 /var/lib/sentora/sentora-auth.log 2>&1 | tr '\n' '|'); fail2ban: $(fail2ban-client status sentora-panel 2>&1 | grep -E 'failed|banned' | tr -s ' \n' ' ')"; r=1
+        elif g -o /dev/null "https://$FQDN/"; then
+            WHY="banned, but the guesser still reaches the panel"; r=1
+        fi
+        fail2ban-client set sentora-panel unbanip "$BANIP" > /dev/null 2>&1
+        [ $r -eq 0 ] && { sleep 2; g -o /dev/null "https://$FQDN/" || { WHY="after the unban the guesser still can not reach the panel"; r=1; }; }
+    fi
+    ip netns del vmx 2> /dev/null; ip link del vmx0 2> /dev/null
+    return $r
 }
 x_hourly_daily() {
     php -q "$PANEL/bin/setso" --set daemon_hourrun 0 > /dev/null

@@ -120,7 +120,7 @@ vm 'systemctl reboot' > /dev/null 2>&1; sleep 15
 wait_ssh 150 || { tail -40 "$OUT/console.log"; echo "::error::the machine did not come back after the restart"; exit 1; }
 for _ in $(seq 1 90); do vm 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 vm 'systemctl is-system-running; systemctl --failed --no-legend' | tee "$OUT/failed-units.txt"
-[ "$MAC" = selinux ] && vm 'getenforce'
+[ "$MAC" = selinux ] && vm 'getenforce; semodule -l | grep -x sentora || echo "Sentora'"'"'s SELinux rules are NOT loaded"' | tee -a "$OUT/getenforce.txt"
 BOOTED=$(vm 'date +%s')   # (refusals count from here: the machine as it runs after the restart)
 vm 'touch /root/.hushlogin'
 
@@ -207,6 +207,7 @@ ok=1
 [ "${FAILS:-x}" = 0 ] || { echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; }
 grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt" || { echo "::error::$SYS: the smoke test did not pass"; ok=0; }
 grep -q 'EXERCISE: .* 0 FAIL' "$OUT/exercise-1.txt" || { echo "::error::$SYS: some exercises failed (exercise-1.txt)"; ok=0; }
+grep -q "NOT loaded" "$OUT/getenforce.txt" 2> /dev/null && { echo "::error::$SYS: Sentora's SELinux rules (sentora.cil) did not load"; ok=0; }
 [ -s "$OUT/denied.txt" ] && { echo "::error::$SYS: $MAC refused something Sentora does (denied.txt, denied.txt.summary)"; ok=0; }
 [ "$HIDDEN" = 1 ] && [ -s "$OUT/hidden.txt" ] && echo "::warning::$SYS: $(wc -l < "$OUT/hidden.txt") hidden refusal(s) while using everything (hidden.txt.summary): look at them, most are harmless"
 [ $ok -eq 1 ] && echo "$SYS: installed on a real machine with $MAC on, checks and smoke test passed, everything used, nothing refused"

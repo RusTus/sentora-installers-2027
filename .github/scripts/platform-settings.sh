@@ -56,6 +56,9 @@ aa = {}
 d = 'preconf/apparmor/local'
 for p in sorted(os.listdir(d)) if os.path.isdir(d) else []:
     aa[p] = open(os.path.join(d, p)).read()
-json.dump({'systems': systems, 'apparmor_local': aa}, open(out, 'w'), indent=1, sort_keys=True)
-print(out + ': ' + ', '.join('%s %d' % (t, len(v)) for t, v in systems.items()) + '; AppArmor: ' + ', '.join(aa))
+# Sentora's SELinux rules (preconf/selinux/sentora.cil: sentora-update loads them again when they changed,
+# so a new rule reaches servers installed before it)
+cil = open('preconf/selinux/sentora.cil').read() if os.path.isfile('preconf/selinux/sentora.cil') else ''
+json.dump({'systems': systems, 'apparmor_local': aa, 'selinux_cil': cil}, open(out, 'w'), indent=1, sort_keys=True)
+print(out + ': ' + ', '.join('%s %d' % (t, len(v)) for t, v in systems.items()) + '; AppArmor: ' + ', '.join(aa) + '; SELinux rules: ' + str(cil.count('\n(')) )
 EOF
