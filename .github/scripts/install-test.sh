@@ -227,6 +227,8 @@ if [ $AA -eq 1 ]; then
     fi
 fi
 
+in_box "cat /var/sentora/logs/daemon-last-run.log" > "$OUT/daemon-last-run.log" 2>&1
+
 say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
