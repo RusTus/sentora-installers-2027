@@ -419,6 +419,84 @@ $zdbh->exec("UPDATE x_pp_invoices SET in_order_in = in_order_in - 300 WHERE in_i
 daemon();
 check(lastinv(11)['in_status_vc'] === 'paid', 'a client who paid and never came back: the daemon finds it paid');
 
+section('Refunds and chargebacks (looked at once a day after payment)');
+$recheck = function () use ($zdbh) { $zdbh->exec("UPDATE x_pp_invoices SET in_checked_in = 0"); };
+$pp = row("SELECT * FROM x_pp_invoices WHERE in_status_vc = 'paid' AND in_proc_vc = 'paypal' AND in_capture_vc IS NOT NULL ORDER BY in_id_pk DESC LIMIT 1");
+$sp = row("SELECT * FROM x_pp_invoices WHERE in_status_vc = 'paid' AND in_proc_vc = 'stripe' AND in_capture_vc LIKE 'pi_%' ORDER BY in_id_pk LIMIT 1");
+check(is_array($pp) && is_array($sp), 'a paid PayPal invoice and a paid Stripe invoice to look at', json_encode($zdbh->query("SELECT in_id_pk, in_status_vc, in_proc_vc, in_capture_vc, in_test_in FROM x_pp_invoices WHERE in_status_vc = 'paid'")->fetchAll(PDO::FETCH_ASSOC)));
+if (is_array($pp) && is_array($sp)) {
+    $recheck();
+    $out = daemon();
+    $a = row("SELECT in_refund_vc, in_dispute_vc, in_checked_in FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']));
+    check($a['in_refund_vc'] === '' && $a['in_dispute_vc'] === '' && (int) $a['in_checked_in'] > 0 && strpos($out, 'refund') === false, 'nothing refunded: nothing noted, the invoice marked as looked at', $out);
+    $asked = function () { return count(array_filter(fake('state')['calls'], function ($c) { return preg_match('#/v2/payments/captures/|/disputes|/v1/payment_intents/pi_#', $c); })); };
+    $calls = $asked();
+    daemon();
+    check($asked() === $calls, 'and not asked about again the same day', $asked() . ' > ' . $calls);
+    $acc = (int) $pp['in_acc_fk'];
+    $before = (int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = :a", array(':a' => $acc))['ac_enabled_in'];
+    // PayPal: in part, then in full
+    fake('capture', array('c' => $pp['in_capture_vc'], 'status' => 'PARTIALLY_REFUNDED'));
+    $recheck();
+    $out = daemon();
+    $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']));
+    check($a['in_refund_vc'] === 'partial' && $a['in_refunded_in'] === null && strpos($out, 'refunded in part') !== false, 'PayPal: a partial refund is noted (PayPal does not say how much)', $out);
+    check(count(events('notice:pp-reversal-' . $pp['in_id_pk'] . ':%')) === 1 && count(events('email:%Refund on invoice ' . $pp['in_number_vc'] . '%')) === 1, 'the seller gets a notice and an email');
+    fake('capture', array('c' => $pp['in_capture_vc'], 'status' => 'REFUNDED'));
+    $recheck();
+    daemon();
+    $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']));
+    check($a['in_refund_vc'] === 'full' && (int) $a['in_refunded_in'] === (int) $pp['in_total_in'] && $a['in_status_vc'] === 'paid', 'then in full: the whole amount is refunded; the invoice stays paid');
+    $recheck();
+    $n = count(events('email:%Refund on invoice ' . $pp['in_number_vc'] . '%'));
+    daemon();
+    check(count(events('email:%Refund on invoice ' . $pp['in_number_vc'] . '%')) === $n, 'the same refund is told once');
+    // PayPal: a dispute opened, then lost
+    fake('ppdispute', array('c' => $pp['in_capture_vc'], 'status' => 'WAITING_FOR_SELLER_RESPONSE'));
+    $recheck();
+    $out = daemon();
+    check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']))['d'] === 'open' && count(events('email:%Chargeback on invoice ' . $pp['in_number_vc'] . '%')) === 1,
+        'PayPal: a dispute is noted as an open chargeback and the seller told', $out);
+    fake('ppdispute', array('c' => $pp['in_capture_vc'], 'status' => 'RESOLVED', 'outcome' => 'RESOLVED_BUYER_FAVOUR'));
+    $zdbh->exec("UPDATE x_pp_invoices SET in_checked_in = " . (time() - 3600) . " WHERE in_id_pk = " . (int) $pp['in_id_pk']);
+    $zdbh->exec("UPDATE x_pp_invoices SET in_paid_in = " . (time() - 200 * 86400) . " WHERE in_id_pk = " . (int) $pp['in_id_pk']);
+    $zdbh->exec("UPDATE x_pp_invoices SET in_checked_in = 0 WHERE in_id_pk = " . (int) $pp['in_id_pk']);
+    daemon();
+    check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']))['d'] === 'lost', 'an open chargeback is still looked at after 180 days: lost');
+    fake('nodisputes', array('on' => 1));
+    $recheck();
+    daemon();
+    check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']))['d'] === 'lost', 'an app without PayPal\'s disputes feature keeps what is known');
+    fake('nodisputes', array('on' => 0));
+    check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = :a", array(':a' => $acc))['ac_enabled_in'] === $before, 'the client\'s hosting is not touched (the seller decides)');
+    $h = implode(' ', array_column(pp::History((int) $pp['in_id_pk']), 'lg_what_vc'));
+    check(strpos($h, 'partrefund') !== false && strpos($h, 'refunded') !== false && strpos($h, 'dispute ') !== false && strpos($h, 'disputelost') !== false, 'every step is in the invoice\'s history', $h);
+    // Stripe: in part (with the amount), then a dispute won
+    $f = (int) $sp['in_total_in'];
+    fake('charge', array('pi' => $sp['in_capture_vc'], 'amount_refunded' => 100));
+    $recheck();
+    daemon();
+    $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk']));
+    check($a['in_refund_vc'] === 'partial' && $a['in_refunded_in'] !== null && (int) $a['in_refunded_in'] > 0, 'Stripe: a partial refund is noted with its amount', json_encode($a));
+    fake('charge', array('pi' => $sp['in_capture_vc'], 'dispute' => 'needs_response'));
+    $recheck();
+    daemon();
+    check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk']))['d'] === 'open', 'Stripe: a dispute is an open chargeback');
+    fake('charge', array('pi' => $sp['in_capture_vc'], 'dispute' => 'won'));
+    $recheck();
+    daemon();
+    check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk']))['d'] === 'won', 'and won');
+    fake('charge', array('pi' => $sp['in_capture_vc'], 'livemode' => '1'));
+    $recheck();
+    $before = row("SELECT in_refund_vc, in_refunded_in, in_dispute_vc FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk']));
+    daemon();
+    check(row("SELECT in_refund_vc, in_refunded_in, in_dispute_vc FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk'])) == $before, 'a payment in the other mode is not believed');
+    fake('charge', array('pi' => $sp['in_capture_vc'], 'livemode' => (int) $sp['in_test_in'] ? '0' : '1'));
+    // the seller's page shows it
+    $r = req((int) $sp['in_seller_fk']);
+    check(strpos($r['html'], 'Partly refunded') !== false && strpos($r['html'], 'Chargeback won') !== false, 'the seller\'s page shows "Partly refunded" and "Chargeback won"');
+}
+
 section('Unpaid: switched off, then on again');
 req(2, 'InvoiceNow', array('inClient' => '11'));
 $inv = lastinv(11);

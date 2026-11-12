@@ -3,7 +3,7 @@
 // Control: /control/<what>?... changes state the way a client paying (or PayPal/Stripe misbehaving) would.
 $file = getenv('FAKE_STATE');
 $st = is_file($file) ? json_decode(file_get_contents($file), true) : array();
-$st += array('paypal' => array(), 'captures' => array(), 'stripe' => array(), 'pi' => array(), 'n' => 0,
+$st += array('paypal' => array(), 'captures' => array(), 'stripe' => array(), 'pi' => array(), 'charges' => array(), 'ppdisputes' => array(), 'n' => 0,
     'keys' => array('paypal/sandbox' => 'SBCLIENTID01:SBSECRET0001', 'paypal/live' => 'LIVECLIENT01:LIVESECRET01'), 'calls' => array());
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 parse_str((string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY), $q);
@@ -58,6 +58,18 @@ if (preg_match('#^/paypal/(live|sandbox)(/.*)$#', $path, $m)) {
     if (preg_match('#^/v2/payments/captures/([A-Z0-9]+)$#', $p, $mm) && isset($st['captures'][$mm[1]])) {
         $out(200, $st['captures'][$mm[1]]);
     }
+    if ($p === '/v1/customer/disputes' && isset($q['disputed_transaction_id'])) {
+        $d = isset($st['ppdisputes'][$q['disputed_transaction_id']]) ? $st['ppdisputes'][$q['disputed_transaction_id']] : null;
+        if (!empty($st['nodisputes'])) {
+            $out(403, array('name' => 'NOT_AUTHORIZED'));
+        }
+        $out(200, array('items' => $d ? array(array('dispute_id' => 'PP-D-12345', 'status' => $d['status'])) : array()));
+    }
+    if ($p === '/v1/customer/disputes/PP-D-12345') {
+        foreach ((array) (isset($st['ppdisputes']) ? $st['ppdisputes'] : array()) as $d) {
+            $out(200, array('dispute_id' => 'PP-D-12345', 'status' => $d['status'], 'dispute_outcome' => array('outcome_code' => isset($d['outcome']) ? $d['outcome'] : '')));
+        }
+    }
     $out(404, array('message' => 'RESOURCE_NOT_FOUND'));
 }
 
@@ -96,7 +108,19 @@ if (preg_match('#^/stripe(/.*)$#', $path, $m)) {
         $out(200, $st['stripe'][$mm[1]]);
     }
     if (preg_match('#^/v1/payment_intents/(pi_\w+)$#', $p, $mm) && isset($st['pi'][$mm[1]])) {
-        $out(200, $st['pi'][$mm[1]]);
+        $pi = $st['pi'][$mm[1]];
+        // (asked with expand[]=latest_charge: the charge, with its refunds and dispute)
+        if (isset($q['expand']) && in_array('latest_charge', (array) $q['expand'], true)) {
+            $c = isset($st['charges'][$mm[1]]) ? $st['charges'][$mm[1]] : array();
+            $pi['latest_charge'] = array('id' => 'ch_' . substr($mm[1], 3), 'amount_refunded' => isset($c['amount_refunded']) ? (int) $c['amount_refunded'] : 0,
+                'refunded' => !empty($c['refunded']), 'disputed' => !empty($c['dispute']), 'livemode' => $live);
+            $pi['livemode'] = isset($c['livemode']) ? $c['livemode'] === '1' : $live;
+        }
+        $out(200, $pi);
+    }
+    if ($p === '/v1/disputes' && isset($q['payment_intent'])) {
+        $c = isset($st['charges'][$q['payment_intent']]) ? $st['charges'][$q['payment_intent']] : array();
+        $out(200, array('object' => 'list', 'data' => !empty($c['dispute']) ? array(array('id' => 'dp_1', 'status' => $c['dispute'], 'payment_intent' => $q['payment_intent'])) : array()));
     }
     $out(404, array('error' => array('message' => 'No such resource')));
 }
@@ -144,6 +168,22 @@ if (strpos($path, '/control/') === 0) {
             $s['livemode'] = $q['livemode'] === '1';
         }
         $out(200, array('ok' => 1, 'pi' => $s['payment_intent']));
+    }
+    if ($what === 'charge') { // a Stripe payment refunded or disputed after it was paid
+        foreach (array('amount_refunded', 'refunded', 'dispute', 'livemode') as $k) {
+            if (isset($q[$k])) {
+                $st['charges'][$q['pi']][$k] = $q[$k];
+            }
+        }
+        $out(200, array('ok' => 1));
+    }
+    if ($what === 'ppdispute') { // a PayPal dispute: status, and its outcome once resolved
+        $st['ppdisputes'][$q['c']] = array('status' => $q['status'], 'outcome' => isset($q['outcome']) ? $q['outcome'] : '');
+        $out(200, array('ok' => 1));
+    }
+    if ($what === 'nodisputes') { // an app without PayPal's disputes feature
+        $st['nodisputes'] = !empty($q['on']);
+        $out(200, array('ok' => 1));
     }
     if ($what === 'pi') {
         $st['pi'][$q['pi']]['status'] = $q['status'];

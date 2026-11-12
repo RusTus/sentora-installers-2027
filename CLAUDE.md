@@ -148,7 +148,7 @@ installer really finished (/etc/sentora/.installing gone), ends with a short log
 Backup / Uninstall files in Sentora's folder; read-only disks (WSL's kernel headers) no longer raise disk alerts.
 Restart test passed (panel answered from another PC after a reboot). **Next (the owner's list):** open; ask the owner. Debian VM confirmed 2027.65 (smoke 26/26).
 
-**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 104):** billing belongs to each seller
+**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 105):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
 off (off skips the payment check). The page opens with the seller's packages; each package has its own
 page where its price is set (prices in the module's x_pp_prices; the panel's package tables are only read:
@@ -156,7 +156,7 @@ the owner's rule, nothing of the core or its tables changes for an add-on). Proc
 module's `code/processors/` (PayPal, Stripe; `pp_pay::Processors()` lists them), and every payment is
 checked by `pp_pay::Apply`. New clients on priced packages are billed automatically. Figures at the top
 of the seller's page; every step noted in `x_pp_log`. Security-reviewed in 103 (see the CHANGELOG). Not yet tried against real MySQL or the real
-PayPal/Stripe test modes; no webhooks yet, so a refund or chargeback after payment is not noticed. The module is only kept as the .zpp: unzip it to change it. Its tests:
+PayPal/Stripe test modes; refunds and chargebacks (105): no webhooks (no public address, owner's rule: less exposed); `pp_daemon` step 4 asks each processor's `Reversals()` once a day for invoices paid within 180 days and while a chargeback is open (columns in_refund_vc, in_refunded_in, in_dispute_vc, in_checked_in), `pp_pay::Reversals` notes it on the invoice and history and tells the seller (`pp::TellSeller`); the client's hosting is never touched by it. The module is only kept as the .zpp: unzip it to change it. Its tests:
 `tests/payment_plans/run.sh` in sentora-installers-2027 (stand-in panel, fake PayPal and Stripe; run
 before publishing a change; `run.sh <unzipped module folder>` tests a working copy, without it the .zpp).
 
