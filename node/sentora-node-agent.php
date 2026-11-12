@@ -35,7 +35,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '101';
+    const VERSION = '102';
     const V = 1;
     const SKEW = 300;
     const PORT_FIRST = 20000;
@@ -147,6 +147,9 @@ class snode
         $err = curl_error($c);
         curl_close($c);
         if ($body === false || $code !== 200) {
+            if ($body === false && stripos($err, 'certificate') !== false && !empty($cfg['tls_verify'])) {
+                $err .= ' (the panel has a self-signed certificate: add --no-tls-check to the install command; safe, every reply is signed with the panel\'s key)';
+            }
             self::Out('panel: ' . ($body === false ? $err : 'HTTP ' . $code . ($code === 400 ? ' (the panel refused the message: wrong keys, expired code, or the clocks differ by more than 5 minutes)' : '')));
             return null;
         }
