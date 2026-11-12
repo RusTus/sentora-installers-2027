@@ -482,7 +482,7 @@ x_protect() {
     cu -o "$TMP/c.html" -d "inId=$id&inUser=vm&inPassword=Pd-$RND-x9&csfr_token=$(ctok protected_directories)" "https://$FQDN/?module=protected_directories&action=AddUser"
     local c; c=$(site -o /dev/null -w '%{http_code}' "http://$DOM/private/")
     [ "$c" = 401 ] || { WHY="without a password: $c"; return 1; }
-    site -u "vm:Pd-$RND-x9" "http://$DOM/private/" | grep -q "secret $RND" || { WHY="with the password: refused"; return 1; }
+    wait_for 60 bash -c "curl -sk --max-time 20 --resolve '$DOM:80:127.0.0.1' -u 'vm:Pd-$RND-x9' 'http://$DOM/private/' | grep -q 'secret $RND'" || { WHY="with the password: refused ($(site -o /dev/null -w '%{http_code}' -u "vm:Pd-$RND-x9" "http://$DOM/private/"))"; return 1; }
 }
 x_backup() {
     need SITE "domains" || return $?
@@ -532,7 +532,8 @@ x_hourly_daily() {
     local f=/var/sentora/logs/daemon-panel-run.log
     cp "$f" "/var/sentora/logs/vm-daemon-hourly-$ROUND.log"
     if grep -qE "(^| )FAILED[:. ]|PHP (Fatal|Warning)" "$f"; then WHY="$(grep -m2 -E "(^| )FAILED[:. ]|PHP (Fatal|Warning)" "$f" | cut -c1-200 | tr '\n' ' ')"; return 1; fi
-    grep -q "Daily" "$f" || grep -qi "day" "$f" || { WHY="no daily jobs in the run"; return 1; }
+    # (the daily jobs ran: in this run, or in cron's when it got there first)
+    [ "$(php -q "$PANEL/bin/setso" --get daemon_dayrun)" -gt "$(( $(date +%s) - 900 ))" ] 2> /dev/null || { WHY="the daily jobs did not run (daemon_dayrun $(php -q "$PANEL/bin/setso" --get daemon_dayrun))"; return 1; }
 }
 x_cron_daemon() { # the daemon as cron starts it (every 5 minutes)
     local f=/var/sentora/logs/daemon-last-run.log; local before; before=$(stat -c %Y "$f" 2> /dev/null || echo 0)
