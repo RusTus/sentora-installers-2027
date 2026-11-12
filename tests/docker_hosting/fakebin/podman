@@ -36,10 +36,13 @@ case "$1" in
     done
     [ -d "$P/c/$name" ] && { echo "Error: name in use"; exit 125; }
     mkdir -p "$P/c/$name"; printf '%s\n' "$@" > "$P/c/$name/args"; echo created > "$P/c/$name/state"
-    f="$P/i/$(echo "$last" | tr '/:' '__')"; [ -f "$f" ] && cut -d' ' -f1 "$f" > "$P/c/$name/imageid" || echo none > "$P/c/$name/imageid"; echo id123; exit 0 ;;
+    f="$P/i/$(echo "$last" | tr '/:' '__')"; if [ -f "$f" ]; then cut -d' ' -f1 "$f" > "$P/c/$name/imageid"; elif [[ "$last" != */* ]]; then echo "$last" > "$P/c/$name/imageid"; else echo none > "$P/c/$name/imageid"; fi; echo id123; exit 0 ;;
   start) [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }; [ -f "$FAKE_DIR/start-fail" ] && { echo "Error: crun: OCI runtime error"; exit 126; }
     # an image that crashes at once (for the update's rollback)
-    if [ -f "$FAKE_DIR/crash-id" ] && [ "$(cat "$P/c/$last/imageid")" = "$(cat "$FAKE_DIR/crash-id")" ]; then echo exited > "$P/c/$last/state"; else echo running > "$P/c/$last/state"; fi; echo "$last"; exit 0 ;;
+    # (and one with a setting it does not start with)
+    if [ -f "$FAKE_DIR/crash-id" ] && [ "$(cat "$P/c/$last/imageid")" = "$(cat "$FAKE_DIR/crash-id")" ]; then echo exited > "$P/c/$last/state";
+    elif [ -f "$FAKE_DIR/crash-env" ] && grep -qxF "$(cat "$FAKE_DIR/crash-env")" "$P/c/$last/args"; then echo exited > "$P/c/$last/state";
+    else echo running > "$P/c/$last/state"; fi; echo "$last"; exit 0 ;;
   stop) [ -d "$P/c/$last" ] || exit 125; echo exited > "$P/c/$last/state"; exit 0 ;;
   restart) [ -d "$P/c/$last" ] || exit 125; echo running > "$P/c/$last/state"; exit 0 ;;
   update) [ -d "$P/c/$last" ] || exit 125; echo "$*" >> "$P/c/$last/updates"; exit 0 ;;

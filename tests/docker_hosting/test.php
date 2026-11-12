@@ -422,6 +422,50 @@ $o = agent('once');
 check(strpos($o, 'update container ' . $c1['dc_id_pk'] . ': ok') !== false && trim(file_get_contents($cdir . '/imageid')) === 'id-kuma-3', 'updated by itself', $o);
 agent('once');
 
+section("an app's own settings (Advanced)");
+$cid = (int) $c1['dc_id_pk'];
+agent('once');
+agent('once');
+$zdbh->prepare("UPDATE x_dh_containers SET dc_state_vc = 'running', dc_note_vc = '' WHERE dc_id_pk = :c")->execute(array(':c' => $cid));
+$r = req(3, '', array(), array('settings' => (string) $cid));
+check(strpos($r['html'], 'Advanced: the app&#039;s own settings') !== false && strpos($r['html'], 'name="inEnv"') !== false && strpos($r['html'], 'some apps read a setting only the first time') !== false, 'Settings has an Advanced part: the app\'s own settings, the owner\'s lines, and what to know');
+$r = req(3, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=America/Chicago\nNOT A SETTING"));
+check(strpos($r['text'], 'one line NAME=value') !== false && strpos($r['html'], 'NOT A SETTING') !== false, 'a bad line is refused (what was typed stays in the box)');
+$r = req(4, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=UTC"));
+check(strpos($r['text'], 'No such app') !== false, 'another client can not change them');
+$before = calls();
+$r = req(3, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=America/Chicago\nAPP_URL=https://{domain}\n"));
+check(strpos($r['text'], 'ok: Saved') !== false && row("SELECT dc_state_vc FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid))['dc_state_vc'] === 'applying', 'saved: the app takes its new settings', $r['text']);
+check(strpos((string) row("SELECT dc_env_tx FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid))['dc_env_tx'], 'enc1:') === 0, 'kept encrypted');
+check(strpos(req(3)['html'], 'Taking its new settings') !== false, 'shown as "Taking its new settings"');
+$imgBefore = trim(file_get_contents($cdir . '/imageid'));
+$o = agent('once');
+$args = file($cdir . '/args', FILE_IGNORE_NEW_LINES);
+check(strpos($o, 'recreate container ' . $cid . ': ok') !== false && in_array('TZ=America/Chicago', $args, true) && in_array('APP_URL=https://kuma.example.com', $args, true), 'the node made it again with them', $o . implode(' ', $args));
+check(trim(file_get_contents($cdir . '/imageid')) === $imgBefore && strpos(substr(calls(), strlen($before)), ' pull ') === false && trim(file_get_contents($cdir . '/state')) === 'running', 'the same version (nothing downloaded), running, its data kept');
+agent('once');
+$cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid));
+check($cu['dc_state_vc'] === 'running' && $cu['dc_envprev_tx'] === null, 'the panel: running with them');
+$r = req(3, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=America/Chicago\nAPP_URL=https://{domain}\n"));
+check(strpos($r['text'], 'Nothing changed') !== false, 'saved unchanged: nothing to do');
+// settings the app does not start with: back to the ones before
+file_put_contents(getenv('FAKE_DIR') . '/crash-env', 'TZ=Mars/Olympus');
+req(3, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=Mars/Olympus"));
+$o = agent('once');
+check(strpos($o, 'failed') !== false && strpos($o, 'runs again with its old settings') !== false && in_array('TZ=America/Chicago', file($cdir . '/args', FILE_IGNORE_NEW_LINES), true), 'it does not start with them: the node puts the app back as it was', $o);
+unlink(getenv('FAKE_DIR') . '/crash-env');
+agent('once');
+$cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid));
+check($cu['dc_state_vc'] === 'running' && strpos($cu['dc_note_vc'], 'new settings did not work') !== false && dh::OwnerEnv($cu) === array('TZ' => 'America/Chicago', 'APP_URL' => 'https://{domain}'), 'the panel: running, told so, and the settings before are back', json_encode($cu));
+// a node with an older agent can not do it yet
+$ni = json_decode((string) val("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1"), true);
+$ni['agent'] = '105';
+$zdbh->prepare("UPDATE x_dh_nodes SET nd_info_tx = :i WHERE nd_id_pk = 1")->execute(array(':i' => json_encode($ni)));
+$r = req(3, 'CtEnv', array('inId' => (string) $cid, 'inEnv' => "TZ=UTC"));
+check(strpos($r['text'], 'older agent') !== false && dh::OwnerEnv(row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid)))['TZ'] === 'America/Chicago', 'a node with an agent before 106: told to update it first, nothing changed', $r['text']);
+agent('once');
+$c1 = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $cid));
+
 section('the node from the panel');
 foreach (array('node-update' => 'updates itself', 'sys-security' => 'security updates', 'reboot' => 'restarts') as $w => $txt) {
     $r = req(1, 'NodeAct', array('inId' => '1', 'inWhat' => $w));

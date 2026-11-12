@@ -40,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '105';
+    const VERSION = '106';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -452,7 +452,7 @@ class snode
         if (isset($d['mem']) && (!is_int($d['mem']) || $d['mem'] < 16 || $d['mem'] > 4194304)) {
             return 'bad memory';
         }
-        if ($action === 'create' || $action === 'update') {
+        if ($action === 'create' || $action === 'update' || $action === 'recreate') {
             if (!isset($d['image']) || !is_string($d['image']) || strlen($d['image']) > 255
                 || !preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+(:[A-Za-z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$#', $d['image'])) {
                 return 'bad image';
@@ -512,22 +512,31 @@ class snode
      * Update an app to its image's newest version: the new one replaces the old with the same data;
      * when it does not start, the old one runs again. [ok, output]
      */
-    static function Update(array $d, array &$s)
+    static function Update(array $d, array &$s, $pull = true)
     {
         $name = self::Name($d['cid']);
         $u = $d['user'];
-        $pull = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
-        if ($pull[0] !== 0) {
-            return array(false, 'pull: ' . self::Tail($pull[1]));
-        }
-        $new = self::Podman($u, array('image', 'inspect', '--format', '{{.Id}}', $d['image']));
         $cur = self::Podman($u, array('container', 'inspect', '--format', '{{.Image}}', $name));
         if ($cur[0] !== 0) {
             return array(false, 'no such container here');
         }
-        if ($new[0] === 0 && trim($new[1]) === trim($cur[1])) {
-            $s['updates'][(string) $d['cid']] = false;
-            return array(true, 'already the newest version');
+        if ($pull) {
+            $p = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
+            if ($p[0] !== 0) {
+                return array(false, 'pull: ' . self::Tail($p[1]));
+            }
+            $new = self::Podman($u, array('image', 'inspect', '--format', '{{.Id}}', $d['image']));
+            if ($new[0] === 0 && trim($new[1]) === trim($cur[1])) {
+                $s['updates'][(string) $d['cid']] = false;
+                return array(true, 'already the newest version');
+            }
+        } else {
+            // (new settings, the same version: the image the container runs now, by its ID)
+            $id = trim($cur[1]);
+            if (!preg_match('/^(sha256:)?[A-Za-z0-9._-]{3,128}$/', $id)) {
+                return array(false, 'the version the app runs could not be read');
+            }
+            $d['image'] = $id;
         }
         $old = $name . '-old';
         self::Podman($u, array('rm', '--force', '--ignore', $old));
@@ -537,27 +546,30 @@ class snode
             self::Podman($u, array('start', $name));
             return array(false, 'rename: ' . self::Tail($rn[1]));
         }
-        $back = function ($why) use ($u, $name, $old) {
+        $back = function ($why) use ($u, $name, $old, $pull) {
             self::Podman($u, array('rm', '--force', '--ignore', $name));
             self::Podman($u, array('rename', $old, $name));
             self::Podman($u, array('start', $name));
-            return array(false, $why . ': the old version runs again');
+            return array(false, $why . ($pull ? ': the old version runs again' : ': it runs again with its old settings'));
         };
         $cr = self::Podman($u, self::CreateArgs($d, $name));
         if ($cr[0] !== 0) {
-            return $back('the new version could not be made (' . self::Tail($cr[1]) . ')');
+            return $back(($pull ? 'the new version' : 'the app with its new settings') . ' could not be made (' . self::Tail($cr[1]) . ')');
         }
         $st = self::Podman($u, array('start', $name));
         if ($st[0] !== 0) {
-            return $back('the new version did not start (' . self::Tail($st[1]) . ')');
+            return $back(($pull ? 'the new version' : 'the app with its new settings') . ' did not start (' . self::Tail($st[1]) . ')');
         }
         // it must still run after a while (an app that crashes at once comes back as the old one)
         sleep((int) (getenv('SNODE_UPDATE_WAIT') !== false ? getenv('SNODE_UPDATE_WAIT') : 20));
         $state = self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name));
         if (trim($state[1]) !== 'running') {
-            return $back('the new version stopped after starting (' . trim($state[1]) . ')');
+            return $back(($pull ? 'the new version' : 'the app with its new settings') . ' stopped after starting (' . trim($state[1]) . ')');
         }
         self::Podman($u, array('rm', '--force', $old));
+        if (!$pull) {
+            return array(true, 'running with its new settings');
+        }
         self::Podman($u, array('image', 'prune', '--force'), 300);
         $s['updates'][(string) $d['cid']] = false;
         return array(true, 'updated to the newest version');
@@ -727,6 +739,16 @@ class snode
                 $res = self::Update($d, $s);
                 $s['containers'][$key]['image'] = $d['image'];
                 return $res;
+            case 'recreate':
+                // the app's settings changed (its owner's): made again from the same version, with the
+                // same data; when it does not start with them, the old one runs again
+                if (!isset($s['containers'][$key])) {
+                    return array(false, 'no such container here');
+                }
+                if ((int) $s['containers'][$key]['hostport'] !== $d['hostport'] || $s['containers'][$key]['domain'] !== $d['domain']) {
+                    return array(false, 'refused: the address or port of an app does not change with its settings');
+                }
+                return self::Update($d, $s, false);
             case 'start':
             case 'stop':
             case 'restart':

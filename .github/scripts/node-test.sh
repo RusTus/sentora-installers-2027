@@ -146,6 +146,14 @@ echo "$L" | tail -3
 panel limits "$CID" 75 384 2 | grep -qx ok || bad "limits refused"
 for _ in $(seq 1 20); do MEMMAX=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/memory.max" | tr -d '\r'); [ "$MEMMAX" = 402653184 ] && break; sleep 3; done
 [ "$MEMMAX" = 402653184 ] && ok "new limits applied to the running container (384 MB)" || { bad "memory.max after the change: '$MEMMAX'"; diag; }
+say "The app's own settings (Advanced)"
+panel env "$CID" "SENTORA_TEST=hello there" | grep -qx ok || bad "settings refused: $(panel env "$CID" "SENTORA_TEST=hello there")"
+wait_for 180 state_is "$CID" running > /dev/null && ok "running again with its new settings" || { bad "not running after the settings: $(panel state "$CID")"; diag; }
+ENVS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' sdh-$CID")
+echo "$ENVS" | grep -qx 'SENTORA_TEST=hello there' && ok "the container has the new setting" || { bad "setting not in the container"; echo "$ENVS"; }
+in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps -a --format '{{.Names}}'" | grep -qx "sdh-$CID-old" && bad "the old container was left behind" || ok "no old container left"
+for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "Caddy serves it after the settings change" || bad "after the settings change: HTTP $C"
 panel act "$CID" stop > /dev/null
 wait_for 120 state_is "$CID" stopped > /dev/null && ok "stopped" || bad "not stopped: $(panel state "$CID")"
 panel act "$CID" start > /dev/null

@@ -85,6 +85,9 @@ switch ($a[1]) {
     case 'limits':
         echo dh::Limits(3, 3, (int) $a[2], (int) $a[3], (int) $a[4], (int) $a[5] * 1024) ? "ok\n" : 'refused: ' . dh::$why . "\n";
         break;
+    case 'env':
+        echo dh::SetOwnerEnv(3, (int) $a[2], $a[3]) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
     case 'logs':
         echo dh::Logs((int) $a[2])[0] . "\n";
         break;
