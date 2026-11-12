@@ -74,9 +74,9 @@ done
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 2 ] && ok "two nights kept" || bad "count: $("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)"
 in_box "[ \$(stat -c %i /srv/sentora-backups/panel1.example.test$H/2026-11-10/databases/big.sql.gz) = \$(stat -c %i /srv/sentora-backups/panel1.example.test$H/2026-11-11/databases/big.sql.gz) ]" \
     && ok "the second night links to the first (an unchanged file is stored once)" || bad "no hard links between nights"
-rm -rf "$W/back"; rsync -a -e "${SSH1[*]}" "$B:$H/latest/var/" "$W/back/" > /dev/null 2>&1
+rm -rf "$W/back"; rsync -a -e "${SSH1[*]}" "$B:$H/latest/var/" "$W/back/" > "$W/rsync.out" 2>&1 || tail -3 "$W/rsync.out"
 [ "$(cat "$W/back/sentora/hostdata/acc1/public_html/index.html" 2> /dev/null)" = "night one" ] && ok "read back (as a restore does)" || bad "could not read the copy back"
-"${SSH1[@]}" "$B" sentora-backup list 2>&1 | grep -q '^@@SNAPSHOT panel1.example.test/2026-11-11$' && ok "list: its nights with their manifest" || bad "list: $("${SSH1[@]}" "$B" sentora-backup list 2>&1 | head -3)"
+L=$("${SSH1[@]}" "$B" sentora-backup list 2>&1); echo "$L" | grep -q '^@@SNAPSHOT panel1.example.test/2026-11-11$' && ok "list: its nights with their manifest" || bad "list: $(echo "$L" | head -8)"
 for n in 03 04 05; do "${SSH1[@]}" "$B" sentora-backup begin $H 2026-11-$n > /dev/null 2>&1; "${SSH1[@]}" "$B" sentora-backup finish $H 2026-11-$n 3 > /dev/null 2>&1; done
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "older nights removed (3 kept)" || bad "keep 3: $("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)"
 

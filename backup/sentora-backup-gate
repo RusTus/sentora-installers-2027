@@ -34,7 +34,10 @@ inside() { # path -> prints the real path, or fails
     p=${p#"${p%%[!/]*}"}
     case "/$p/" in */../*|*/./../*) return 1 ;; esac
     r=$(realpath -m -- "$BASE/$p") || return 1
-    case "$r/" in "$BASE"/*|"$BASE/") echo "$r" ;; *) return 1 ;; esac
+    case "$r/" in "$BASE"/*|"$BASE/") ;; *) return 1 ;; esac
+    # (a trailing slash means "what is in it" to rsync: kept)
+    case "$1" in */) r=${r%/}/ ;; esac
+    echo "$r"
 }
 DATE_RE='^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$'
 if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
