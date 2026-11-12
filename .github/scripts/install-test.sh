@@ -175,6 +175,15 @@ in_box 'echo "$(date "+%b %d %H:%M:%S") imap(test@example.test): Error: sentora-
     [ $ok -eq 1 ] && echo "PROBLEMS: PASSED" || { tail -5 $P; echo "PROBLEMS: FAILED"; }' > "$OUT/problems-log.txt" 2>&1
 cat "$OUT/problems-log.txt"
 
+say "The hourly jobs (Matomo's log import of the smoke test's site, its reports, statistics)"
+in_box 'php -q /etc/sentora/panel/bin/setso --set daemon_hourrun 0 > /dev/null
+    php -q /etc/sentora/panel/bin/daemon.php > /var/sentora/logs/daemon-last-run.log 2>&1
+    grep -iE "matomo|import|reports" /var/sentora/logs/daemon-last-run.log | grep -vE "^(START|END) " | head -20 | sed "s/^/  /"
+    if grep -qE "(^| )FAILED[:. ]" /var/sentora/logs/daemon-last-run.log; then grep -E "(^| )FAILED[:. ]" /var/sentora/logs/daemon-last-run.log | cut -c1-600; echo "HOURLY: FAILED"
+    else echo "HOURLY: PASSED"; fi' > "$OUT/hourly.txt" 2>&1
+in_box "cat /var/sentora/logs/daemon-last-run.log" > "$OUT/daemon-hourly-run.log" 2>&1
+cat "$OUT/hourly.txt"
+
 say "This system's settings for servers installed before a setting existed (sentora-platform-fill)"
 ( cd "$INST" && bash .github/scripts/platform-settings.sh "$OUT/platform-settings.json" ) > /dev/null
 docker cp "$OUT/platform-settings.json" "$NAME:/root/platform-settings.json"
@@ -235,6 +244,7 @@ if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check ha
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
 if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
+if ! grep -q 'HOURLY: PASSED' "$OUT/hourly.txt"; then echo "::error::$SYS: an hourly job failed (hourly.txt)"; ok=0; fi
 if ! grep -q 'PLATFORM: PASSED' "$OUT/platform-settings.txt"; then echo "::error::$SYS: this system's settings were not filled in as its installer sets them (platform-settings.txt)"; ok=0; fi
 if ! grep -q 'HARDENING: PASSED' "$OUT/hardening.txt" || grep -q 'HARDENING: FAILED' "$OUT/hardening.txt"; then echo "::error::$SYS: the hardening report was not written as it should (hardening.txt)"; ok=0; fi
 if ! grep -q 'ZSUDO: PASSED' "$OUT/zsudo-test.txt"; then echo "::error::$SYS: the panel's root actions (zsudo's queue) did not work (zsudo-test.txt)"; ok=0; fi

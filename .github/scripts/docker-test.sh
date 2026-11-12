@@ -163,6 +163,7 @@ if [ $BACKUP_TEST -eq 1 ]; then
     after=$(page); echo "the smoke test's site $H after the restore: $after"
     [ -n "$H" ] && [[ "$before" == 200\ * ]] && [ "$before" = "$after" ] || { echo "the site did not come back the same"; restored=0; }
     in_box 'sentora-post-install-check' > "$OUT/post-install-check-restored.txt" 2>&1
+    in_box "cat /var/sentora/logs/daemon-last-run.log" > "$OUT/daemon-last-run-restored.log" 2>&1
     grep -E '^\s+FAIL|^Result' "$OUT/post-install-check-restored.txt"
     grep -qE 'Result: .* 0 FAIL' "$OUT/post-install-check-restored.txt" || { echo "the restored server's check has FAIL lines"; restored=0; }
 fi
