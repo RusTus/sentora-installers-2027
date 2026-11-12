@@ -51,7 +51,7 @@ docker cp "$REPO/backup/sentora-backup-gate" "$NAME:/root/sentora-backup-gate"
 START=$(date +%s)
 in_box "cd /root && bash sentora2027-backup-server --key '$(cat "$W/k1.pub")' --gate /root/sentora-backup-gate" 2>&1 | tee "$OUT/install-screen.txt"
 echo "installed in $(( $(date +%s) - START )) seconds"
-grep -q '^Done: this server is ready to keep the backups of "panel1.example.test"' "$OUT/install-screen.txt" && ok "installer finished (the panel's name from its key)" || { bad "installer did not finish"; in_box 'tail -30 /var/log/sentora2027-backup-server.log'; exit 1; }
+grep -q '^Done: this server is ready to keep the backups of "panel1.example.test"' "$OUT/install-screen.txt" && ok "installer finished (the panel's name from its key)" || { bad "installer did not finish"; in_box "tail -30 /var/log/sentora2027-backup-server.log"; exit 1; }
 FP=$(grep -oE 'SHA256:[A-Za-z0-9+/]{43}' "$OUT/install-screen.txt" | head -1)
 ssh-keyscan -t ed25519 "$IP" 2> /dev/null > "$W/known_hosts"
 [ -n "$FP" ] && ssh-keygen -lf "$W/known_hosts" | grep -qF "$FP" && ok "the fingerprint it shows is its real SSH key ($FP)" || bad "fingerprint shown ($FP) is not the server's"

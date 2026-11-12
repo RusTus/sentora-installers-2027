@@ -282,12 +282,21 @@ Match User $BACKUP_USER
     PermitUserRC no
 # END Sentora backup server
 EOF
+# (a fresh server may not have its SSH keys yet: they are made the first time SSH starts)
+run ssh-keygen -A
 if ! run sshd -t; then
     cp -p "$SSHD_CONFIG.before-sentora-backup" "$SSHD_CONFIG"
     die "SSH did not accept Sentora's settings: put back as they were (see $LOG)."
 fi
-run systemctl enable "$SSH_SERVICE"
-run systemctl try-reload-or-restart "$SSH_SERVICE" || run systemctl restart "$SSH_SERVICE"
+if systemctl is-enabled "$SSH_SERVICE.socket" > /dev/null 2>&1; then
+    # (SSH started by its socket, as Ubuntu does: each connection reads the settings anew)
+    run systemctl restart "$SSH_SERVICE.socket"
+else
+    run systemctl enable --now "$SSH_SERVICE"
+    run systemctl reload-or-restart "$SSH_SERVICE"
+fi
+for _ in 1 2 3 4 5 6 7 8 9 10; do ssh-keyscan -T 2 127.0.0.1 > /dev/null 2>&1 && break; sleep 1; done
+ssh-keyscan -T 3 127.0.0.1 > /dev/null 2>&1 || die "SSH does not answer on this server (see $LOG and journalctl -u $SSH_SERVICE)."
 if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
     # (SELinux: sshd may read the keys file in /etc/ssh; the copies are plain files in /srv)
     run restorecon -R "$KEYDIR" "$ROOT"

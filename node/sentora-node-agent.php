@@ -78,6 +78,10 @@ class snode
     static function Init()
     {
         self::$etc = getenv('SNODE_ETC') ?: '/etc/sentora-node';
+        // (a service has no HOME; Caddy before 2.8 will not even check its settings without one)
+        if ((string) getenv('HOME') === '') {
+            putenv('HOME=/root');
+        }
         foreach ((array) @file(self::$etc . '/platform.conf', FILE_IGNORE_NEW_LINES) as $l) {
             if (preg_match('/^([A-Z_]{1,32})=([A-Za-z0-9_.\/@:+-]{0,200})$/', (string) $l, $m)) {
                 self::$platform[$m[1]] = $m[2];

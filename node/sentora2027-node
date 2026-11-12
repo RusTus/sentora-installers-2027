@@ -462,6 +462,7 @@ ExecStart=$PHP_BIN $LIB/sentora-node-agent.php run
 Restart=always
 RestartSec=10
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
 
 [Install]
 WantedBy=multi-user.target
