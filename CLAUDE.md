@@ -40,7 +40,9 @@ released together.
 ## Standing rules from the owner
 
 - Explain in plain words; check (test) before saying something works.
-- Add-on modules (sentora-repo/*.zpp) must install and repair themselves without changes to the core.
+- Add-on modules (sentora-repo/*.zpp) must install and repair themselves without changes to the core: they work
+  by themselves with the panel's own framework (dryden, x_settings, notices, the daemon hooks), and a core
+  function newer than the oldest panel in use is only used behind method_exists() with a fallback.
 - An add-on works on every supported system (Ubuntu, Debian, AlmaLinux/Rocky/RHEL, Fedora) unless a real
   security reason stops it (owner, 2026-11-12): paths, packages and services from x_settings, not one distribution's.
 - Changing the panel's own host name stays an SSH-only command (sentora-change-domain).
