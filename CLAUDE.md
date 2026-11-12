@@ -41,6 +41,8 @@ released together.
 
 - Explain in plain words; check (test) before saying something works.
 - Add-on modules (sentora-repo/*.zpp) must install and repair themselves without changes to the core.
+- An add-on works on every supported system (Ubuntu, Debian, AlmaLinux/Rocky/RHEL, Fedora) unless a real
+  security reason stops it (owner, 2026-11-12): paths, packages and services from x_settings, not one distribution's.
 - Changing the panel's own host name stays an SSH-only command (sentora-change-domain).
 - When something is less secure, it is not done that way.
 - Only ask questions when the answer is really needed.

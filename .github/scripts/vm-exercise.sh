@@ -222,6 +222,26 @@ x_update_all() { # Repo Browser's "Update all": two add-ons made to look one ver
     [ -z "$bad" ] || { WHY="after the daemon run:$bad"; return 1; }
     WHY="updated:$mods"
 }
+x_autoupdate() { # "Keep the panel up to date": the published release installs itself, is checked, and the administrators are told
+    local st=/var/lib/sentora-update l
+    l=$(bash "$PANEL/bin/sentora-update" --status 2> /dev/null | tail -1)
+    case "$l" in available*) ;; *) WHY="no newer release to install ($l)"; return 2 ;; esac
+    [ -s "$st/available-sum" ] || { WHY="sentora-update --status did not note which release it is"; return 1; }
+    php -q "$PANEL/bin/setso" --set panel_autoupdate true > /dev/null
+    php -q "$PANEL/bin/setso" --set panel_autoupdate_hour "$(date +%-H)" > /dev/null
+    # (as if this server had seen the release a day ago)
+    printf '{"sum":"%s","seen":%s}' "$(cat "$st/available-sum")" "$(( $(date +%s) - 90000 ))" > /var/lib/sentora/panel-autoupdate.json
+    rm -f "$st/autoupdate-last"
+    daemon_now || { WHY="the daemon run did not finish"; return 1; }
+    grep -q "installing the new release now" /var/sentora/logs/daemon-panel-run.log || { WHY="the daemon did not start the update: $(grep -i 'up to date' /var/sentora/logs/daemon-panel-run.log | head -2 | tr '\n' ' ')"; return 1; }
+    wait_for 1200 bash -c "grep -qE '^[0-9]+ (ok|rolledback|failed|same) ' $st/autoupdate-last 2> /dev/null" || { WHY="no result after 20 minutes: $(tail -3 /var/sentora/logs/autoupdate.log 2> /dev/null | tr '\n' ' ')"; return 1; }
+    php -q "$PANEL/bin/setso" --set panel_autoupdate false > /dev/null
+    read -r _ res ver _ < "$st/autoupdate-last"
+    [ "$res" = ok ] || { WHY="the update ended '$res': $(tail -3 /var/sentora/logs/autoupdate.log | tr '\n' ' ')"; return 1; }
+    [ "$(q "SELECT nt_title_vc FROM x_notices WHERE nt_key_vc='panel-autoupdate' AND nt_deleted_ts IS NULL ORDER BY nt_id_pk DESC LIMIT 1")" = "The panel was updated to Sentora $ver" ] \
+        || { WHY="no notice saying the panel was updated to $ver"; return 1; }
+    WHY="updated to $ver, checked, notice sent"
+}
 x_client() {
     local r; r=$(php_panel 'require "modules/manage_clients/code/controller.ext.php";
         $pkg = (int) $zdbh->query("SELECT pk_id_pk FROM x_packages WHERE pk_reseller_fk = 1 AND pk_deleted_ts IS NULL ORDER BY pk_id_pk LIMIT 1")->fetchColumn();
@@ -528,6 +548,7 @@ ex "The client's cron task ran as the client" x_cron_ran
 ex "The daemon as cron runs it" x_cron_daemon
 ex "Restart every Sentora service" x_services_restart
 ex "Remove the client (and a daemon run)" x_remove_client
+ex "Keep the panel up to date (installs the published release)" x_autoupdate
 rm -rf "$TMP" "$MYCNF"
 echo "EXERCISE: $OKS OK, $FAILS FAIL, $SKIPS SKIP"
 [ $FAILS -eq 0 ]
