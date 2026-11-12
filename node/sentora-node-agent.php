@@ -40,7 +40,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '103';
+    const VERSION = '104';
     const V = 1;
     const SKEW = 300;
     const PORT_FIRST = 20000;
@@ -844,6 +844,10 @@ class snode
             self::Run(array('systemd-run', '--unit', 'sentora-node-syscheck-' . time(), '--collect', '--quiet', '/usr/local/sbin/sentora-node-sysupdate', '--check'), null, 30);
         }
         $out = array();
+        // the node's own settings (so the panel shows what the node really uses)
+        $conf = is_file(self::$etc . '/install.conf') ? (string) file_get_contents(self::$etc . '/install.conf') : '';
+        $out['cfg_local_certs'] = preg_match('/^LOCAL_CERTS=1$/m', $conf) ? 1 : 0;
+        $out['cfg_email'] = preg_match('/^EMAIL=([A-Za-z0-9._%+@-]{3,200})$/m', $conf, $m) ? $m[1] : '';
         foreach (array('updates', 'security', 'reboot', 'checked_at', 'last_at', 'last_ok', 'last_kind', 'running') as $k) {
             $out['sys_' . $k] = isset($j[$k]) ? (is_bool($j[$k]) ? (int) $j[$k] : $j[$k]) : 0;
         }
