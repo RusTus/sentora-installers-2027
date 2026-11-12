@@ -976,6 +976,38 @@ $c = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c5)
 check((int) $c['dc_node_fk'] === 1 && $c['dc_state_vc'] === 'running' && is_dir("$fake/podman/sdh4/c/sdh-$c5") && strpos(sites(), 'kuma5.other.com') !== false, 'started on node1, fresh', $r['text'] . json_encode($c));
 check(row("SELECT dn_target_vc FROM x_dns WHERE dn_id_pk = :d", array(':d' => $dn))['dn_target_vc'] === dh::PublicIp(dh::Node(1)), 'its DNS record points to node1 now');
 check((int) dh::Placed($old)['count'] === 0, 'nothing left on the old node');
+// an older Caddy (Debian's and Ubuntu's 2.6): the password block under its old name, the hash base64-encoded
+putenv('FAKE_CADDY_VERSION=v2.6.2');
+$c7 = dh::Container(777);
+$h = password_hash('pw-777', PASSWORD_BCRYPT);
+dh::Queue(1, 777, 'proxy', dh::Who($c7) + array('domain' => 'kuma3.other.com', 'hostport' => 20050, 'public' => 0, 'auth' => $h));
+agent('once');
+putenv('FAKE_CADDY_VERSION');
+check(strpos(sites(), "kuma3.other.com {\n\tencode zstd gzip\n\tbasicauth {\n\t\tsetup " . base64_encode($h) . "\n") !== false, 'Caddy 2.6: basicauth with the hash base64-encoded', sites());
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+unset($st['containers']['777']);
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+unset($st['scanned_at']);
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+agent('once');
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+check(isset($st['containers']['777']) && $st['containers']['777']['auth'] === $h, 'and read back from it when the list is lost (the hash decoded)', json_encode($st['containers']['777'] ?? null));
+// after a restart of the server: apps not stopped on purpose are started again (by the agent itself)
+file_put_contents("$fake/podman/sdh4/c/sdh-777/state", "exited\n");
+file_put_contents("$fake/podman/sdh4/c/sdh-$c5/state", "exited\n");
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+$st['containers'][(string) $c5]['stopped'] = 1;
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
+@unlink(getenv('SNODE_RUNMARK') . '/started');
+$o = agent('once');
+check(strpos($o, 'started sdh-777 after the restart of the server: ok') !== false && trim(file_get_contents("$fake/podman/sdh4/c/sdh-777/state")) === 'running'
+    && trim(file_get_contents("$fake/podman/sdh4/c/sdh-$c5/state")) === 'exited', 'after a restart: the app is started again, the one stopped on purpose is not', $o);
+$o = agent('once');
+check(strpos($o, 'after the restart of the server') === false, '(only once per start of the server)');
+$st = json_decode(file_get_contents(getenv('SNODE_STATE') . '/state.json'), true);
+unset($st['containers'][(string) $c5]['stopped']);
+file_put_contents(getenv('SNODE_STATE') . '/state.json', json_encode($st));
 // tidy up: node1 empty again, the old node gone
 foreach (array(555, 777, $c5) as $id) {
     req(4, 'Act', array('inId' => (string) $id, 'inWhat' => 'delete'));

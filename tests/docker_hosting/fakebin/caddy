@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "caddy $*" >> "$FAKE_DIR/calls.log"
 case "$1" in
-  version) echo "v2.10.2 h1:fake"; exit 0 ;;
+  version) echo "${FAKE_CADDY_VERSION:-v2.10.2} h1:fake"; exit 0 ;;
   validate) if grep -q BADCADDY "$SNODE_CADDY"/sentora/*.caddy 2>/dev/null || [ -f "$FAKE_DIR/caddy-fail" ]; then echo "Error: adapting config: bad"; exit 1; fi; exit 0 ;;
 esac
 exit 0

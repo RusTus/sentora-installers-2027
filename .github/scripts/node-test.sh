@@ -32,7 +32,7 @@ wait_for() { # wait_for <seconds> <command...>: until the command prints somethi
     while [ "$(date +%s)" -lt "$end" ]; do out=$("$@" 2>/dev/null); case "$out" in ''|0) sleep 3 ;; *) echo "$out"; return 0 ;; esac; done
     return 1
 }
-diag() { panel log | tail -8; in_box 'journalctl -u sentora-node --no-pager | tail -15'; }
+diag() { panel log | tail -8; in_box 'journalctl -u sentora-node --no-pager | tail -15; journalctl -u caddy --no-pager | tail -6'; }
 state_is() { local s; s=$(panel state "$1"); case "$s" in "$2"*) echo "$s" ;; esac; }
 
 say "Stand-in panel with the add-on"
@@ -108,7 +108,7 @@ if [[ "$S" == running* ]]; then ok "running (panel): $S"; else
     exit 1
 fi
 in_box 'id sdh3' && ok "customer user sdh3" || bad "no user sdh3"
-in_box 'getent passwd sdh3 | cut -d: -f7' | grep -qxE '(/usr)?/sbin/nologin' && ok "sdh3 can not log in" || bad "sdh3 has a login shell"
+in_box 'getent passwd sdh3 | cut -d: -f7' | grep -qE '^/[a-z/]*/nologin$' && ok "sdh3 can not log in" || bad "sdh3 has a login shell"
 in_box 'grep -q "^sdh3:" /etc/subuid && grep -q "^sdh3:" /etc/subgid' && ok "sdh3 has its own subordinate IDs" || bad "no subuid/subgid for sdh3"
 in_box 'ls /var/lib/systemd/linger/sdh3' > /dev/null && ok "sdh3 lingers" || bad "sdh3 does not linger"
 PS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps --format '{{.Names}} {{.Ports}}'")

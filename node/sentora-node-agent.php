@@ -307,17 +307,17 @@ class snode
     // ----- running things -----
 
     /**
-     * Caddy's word for a password: basic_auth since Caddy 2.8, basicauth before (the version some
-     * systems ship, Debian's and Ubuntu's 2.6).
+     * Whether Caddy is older than 2.8 (the version some systems ship: Debian's and Ubuntu's 2.6),
+     * which spells a password block basicauth and wants its hash base64-encoded.
      */
-    static function AuthWord()
+    static function CaddyOld()
     {
-        static $w = null;
-        if ($w === null) {
+        static $old = null;
+        if ($old === null) {
             $v = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'version'), null, 20);
-            $w = $v[0] === 0 && preg_match('/^v?2\.([0-7])\./', trim($v[1])) ? 'basicauth' : 'basic_auth';
+            $old = $v[0] === 0 && preg_match('/^v?2\.[0-7]\./', trim($v[1])) === 1;
         }
-        return $w;
+        return $old;
     }
 
     /**
@@ -911,7 +911,8 @@ class snode
         foreach ($s['containers'] as $cid => $c) {
             $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
             if (!(int) $c['public'] && $c['auth'] !== '') {
-                $t .= "\t" . self::AuthWord() . " {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
+                // (Caddy before 2.8 wants the hash base64-encoded, under its older name)
+                $t .= self::CaddyOld() ? "\tbasicauth {\n\t\tsetup " . base64_encode($c['auth']) . "\n\t}\n" : "\tbasic_auth {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
             }
             $t .= "\treverse_proxy 127.0.0.1:" . (int) $c['hostport'] . "\n}\n";
         }
@@ -1057,9 +1058,13 @@ class snode
      */
     static function BootStart(array &$s)
     {
-        $boot = trim((string) @file_get_contents('/proc/sys/kernel/random/boot_id'));
-        if ($boot === '' || (isset($s['boot']) && $s['boot'] === $boot)) {
+        // (a mark in /run, which every start of the server, or of its container, begins empty)
+        $mark = (getenv('SNODE_RUNMARK') ?: '/run/sentora-node') . '/started';
+        if (is_file($mark)) {
             return;
+        }
+        if (!is_dir(dirname($mark))) {
+            @mkdir(dirname($mark), 0700, true);
         }
         foreach ($s['containers'] as $cid => $c) {
             if (!empty($c['stopped']) || self::Uid($c['user']) < 0) {
@@ -1072,8 +1077,7 @@ class snode
                 self::Out('started ' . $name . ' after the restart of the server: ' . ($r[0] === 0 ? 'ok' : self::Tail($r[1])));
             }
         }
-        $s['boot'] = $boot;
-        self::SaveState($s);
+        @touch($mark);
     }
 
     /**
@@ -1128,7 +1132,12 @@ class snode
                 $domain = $auth = '';
                 if (preg_match('/^# container ' . (int) $cid . ' \(' . $user . '\)\n([a-z0-9.-]{1,253}) \{\n(.*?)\n\}/ms', $sites, $m)) {
                     $domain = $m[1];
-                    $auth = preg_match('#basic_?auth \{\n\t\tsetup (\$2[aby]\$\d\d\$[./A-Za-z0-9]{53})\n#', $m[2], $a) ? $a[1] : '';
+                    $auth = preg_match('#basic_?auth \{\n\t\tsetup ([A-Za-z0-9+/=$./]{60,90})\n#', $m[2], $a) ? $a[1] : '';
+                    // (an older Caddy's base64-encoded hash)
+                    if ($auth !== '' && strpos($auth, '$2') !== 0) {
+                        $auth = (string) base64_decode($auth, true);
+                    }
+                    $auth = preg_match('#^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$#', $auth) ? $auth : '';
                 }
                 $s['containers'][$cid] = array('user' => $user, 'domain' => $domain, 'hostport' => $hostport, 'public' => $auth === '' ? 1 : 0, 'auth' => $auth,
                     'volumes' => $nv, 'image' => trim($img[1]), 'found' => 1);
