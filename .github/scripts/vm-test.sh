@@ -121,14 +121,22 @@ wait_ssh 150 || { tail -40 "$OUT/console.log"; echo "::error::the machine did no
 for _ in $(seq 1 90); do vm 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 vm 'systemctl is-system-running; systemctl --failed --no-legend' | tee "$OUT/failed-units.txt"
 [ "$MAC" = selinux ] && vm 'getenforce'
-SKIP=0   # (refusals counted from the restart; the second round counts only lines after the first's)
+BOOTED=$(vm 'date +%s')   # (refusals count from here: the machine as it runs after the restart)
+vm 'touch /root/.hushlogin'
 
 say "The panel from outside the machine (through its firewall)"
 curl -sk -o /dev/null -w "  https: HTTP %{http_code}\n" --resolve panel.example.test:8443:127.0.0.1 https://panel.example.test:8443/ | tee "$OUT/outside.txt"
 timeout 10 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8025; head -1 <&3' 2> /dev/null | sed 's/^/  smtp: /' | tee -a "$OUT/outside.txt"
 
-say "sentora-post-install-check"
+say "One whole daemon run first (as the panel's Run the daemon now starts it)"
 for _ in $(seq 1 60); do vm 'mysqladmin ping > /dev/null 2>&1 || mariadb-admin ping > /dev/null 2>&1' && break; sleep 2; done
+vm 'f=/var/sentora/logs/daemon-panel-run.log; rm -f $f; runuser -u sentora -- /etc/sentora/panel/bin/zsudo daemon-run
+    for i in $(seq 1 300); do grep -q "Daemon run complete" $f 2> /dev/null && break; sleep 2; done
+    # (and none from cron still busy)
+    for i in $(seq 1 150); do pgrep -f "bin/daemon.php" > /dev/null || break; sleep 2; done
+    tail -1 $f'
+
+say "sentora-post-install-check"
 vm 'sentora-post-install-check' > "$OUT/post-install-check.txt" 2>&1
 grep -E '^\s+(FAIL|WARN)|^Result' "$OUT/post-install-check.txt"
 FAILS=$(grep -oE 'Result: .* ([0-9]+) FAIL' "$OUT/post-install-check.txt" | grep -oE '[0-9]+ FAIL' | grep -oE '[0-9]+')
@@ -141,35 +149,56 @@ say "Using everything (round 1: the system's rules as they are)"
 to_vm "$INST/.github/scripts/vm-exercise.sh" /root/vm-exercise.sh
 vm 'bash /root/vm-exercise.sh one' 2>&1 | tee "$OUT/exercise-1.txt"
 
-# what the security module refused since the restart
-refusals() { # refusals <file>: since the restart, after the first $SKIP lines
+# what the security module refused between two moments (seconds since 1970, the machine's clock)
+refusals() { # refusals <file> <from> <to>
     if [ "$MAC" = selinux ]; then
-        vm "ausearch -m AVC,USER_AVC,SELINUX_ERR,USER_SELINUX_ERR -ts boot -i 2> /dev/null" > "$1.raw" 2>&1
-        grep -E 'avc: +denied|SELINUX_ERR' "$1.raw" | tail -n +$((SKIP + 1)) > "$1" || true
-        # one line per kind: what, which program in which domain, on what type
-        sed -E 's/.*denied +\{ ([^}]*)\}.*comm=([^ ]*).*scontext=[^:]*:[^:]*:([^:]*):.*tcontext=[^:]*:[^:]*:([^:]*):.*tclass=([^ ]*).*/\3 \2 { \1} \4 \5/' "$1" | sort | uniq -c | sort -rn > "$1.summary"
+        vm 'cat /var/log/audit/audit.log.1 /var/log/audit/audit.log 2> /dev/null' > "$VMDIR/audit.log"
+        python3 - "$VMDIR/audit.log" "$2" "$3" "$1" <<'EOF_PY'
+import re, sys, collections
+src, a, b, out = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+lines, kinds = [], collections.Counter()
+def f(rx, l, d=''):
+    m = re.search(rx, l); return m.group(1) if m else d
+for l in open(src, errors='replace'):
+    if not re.search(r'type=(AVC|USER_AVC|SELINUX_ERR|USER_SELINUX_ERR) ', l) or ('denied' not in l and 'SELINUX_ERR' not in l):
+        continue
+    t = float(f(r'audit\(([\d.]+)', l, '0'))
+    if t < a or t > b:
+        continue
+    lines.append(l.rstrip())
+    what = f(r' (?:name|path)="([^"]*)"', l) or ('capability ' + f(r'capability=(\d+)', l) if 'capability=' in l else '')
+    kinds['%-22s %-16s {%s} %s -> %s (%s)' % (f(r'scontext=\w+:\w+:(\w+)', l), f(r'comm="([^"]*)"', l), f(r'denied\s+\{ ([^}]*) \}', l), what,
+          f(r'tcontext=\w+:\w+:(\w+)', l), f(r'tclass=(\w+)', l))] += 1
+open(out, 'w').write(''.join(x + '\n' for x in lines))
+open(out + '.summary', 'w').write(''.join('%5d  %s\n' % (n, k) for k, n in kinds.most_common()))
+EOF_PY
     else
-        vm "journalctl -k -b --no-pager 2> /dev/null | grep 'apparmor=\"DENIED\"'" 2>&1 | tail -n +$((SKIP + 1)) > "$1" || true
+        # (Ubuntu's own profile for "who", which its login message runs as root at every SSH login, is the
+        # system's, not Sentora's; the test's SSH logins would otherwise count against Sentora)
+        vm 'journalctl -k -b -o short-unix --no-pager 2> /dev/null' | grep 'apparmor="DENIED"' \
+            | awk -v a="$2" -v b="$3" '{t = $1 + 0} t >= a && t <= b' | grep -v 'profile="who"' > "$1" || true
         awk '{o="";n=split("operation profile name requested_mask capname",k," ");for(i=1;i<=n;i++)if(match($0,k[i]"=\"[^\"]*\""))o=o" "substr($0,RSTART,RLENGTH);print o}' "$1" | sort | uniq -c | sort -rn > "$1.summary"
     fi
 }
-say "What $MAC refused (must be nothing)"
-refusals "$OUT/denied.txt"
+END1=$(vm 'date +%s')
+say "What $MAC refused since the restart (must be nothing)"
+refusals "$OUT/denied.txt" "$BOOTED" "$END1"
 if [ -s "$OUT/denied.txt" ]; then head -60 "$OUT/denied.txt.summary"; else echo "  nothing refused"; fi
 
 HIDDEN=0
 if [ "$MAC" = selinux ]; then
     say "Hidden refusals: dontaudit rules shown (semodule -DB), everything used once more"
     vm 'semodule -DB' && HIDDEN=1
-    SKIP=$(wc -l < "$OUT/denied.txt")
+    FROM2=$(vm 'date +%s')
     vm 'bash /root/vm-exercise.sh two' 2>&1 | tee "$OUT/exercise-2.txt"
-    refusals "$OUT/hidden.txt"
+    END2=$(vm 'date +%s')
     vm 'semodule -B'
+    refusals "$OUT/hidden.txt" "$FROM2" "$END2"
     if [ -s "$OUT/hidden.txt" ]; then echo "  (reported, not failed)"; head -80 "$OUT/hidden.txt.summary"; else echo "  nothing hidden either"; fi
 fi
 
 say "Logs kept"
-vm 'tar czf /root/logs.tgz /var/sentora/logs /var/log/audit 2> /dev/null; journalctl -b --no-pager > /root/journal.txt 2>&1; true'
+vm 'tar czf /root/logs.tgz /var/sentora/logs /var/log/audit /var/lib/sentora/*.log /etc/fail2ban/jail.d 2> /dev/null; journalctl -b --no-pager > /root/journal.txt 2>&1; true'
 scp "${SSHO[@]}" -P "$SSHP" -q root@127.0.0.1:/root/logs.tgz "$OUT/logs.tgz" 2> /dev/null
 scp "${SSHO[@]}" -P "$SSHP" -q root@127.0.0.1:/root/journal.txt "$OUT/journal.log" 2> /dev/null
 

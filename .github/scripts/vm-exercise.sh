@@ -145,21 +145,21 @@ x_admin_walk() { need ADMIN "administrator login" || return $?; walk a; }
 x_admin_daemon_button() {
     need ADMIN "administrator login" || return $?
     local f=/var/sentora/logs/daemon-panel-run.log; rm -f "$f"
-    au -o "$TMP/a.html" -d "csfr_token=$(atok sentoraconfig)" "https://$FQDN/?module=sentoraconfig&action=RunDaemon"
+    au -L -o "$TMP/a.html" -d "csfr_token=$(atok sentoraconfig)" "https://$FQDN/?module=sentoraconfig&action=RunDaemon"
     page_ok "$TMP/a.html" || return 1
     wait_for 600 bash -c "grep -q 'Daemon run complete' $f 2> /dev/null" || { WHY="the daemon did not run (zsudo.log: $(tail -2 /var/sentora/logs/zsudo.log 2> /dev/null))"; return 1; }
 }
 x_admin_hardening_button() {
     need ADMIN "administrator login" || return $?
     local h=/var/sentora/logs/hardening.json; local before; before=$(stat -c %Y "$h" 2> /dev/null || echo 0)
-    au -o "$TMP/a.html" -d "csfr_token=$(atok server_monitor)" "https://$FQDN/?module=server_monitor&action=HardeningCheck"
+    au -L -o "$TMP/a.html" -d "csfr_token=$(atok server_monitor)" "https://$FQDN/?module=server_monitor&action=HardeningCheck"
     page_ok "$TMP/a.html" || return 1
     wait_for 400 bash -c "[ \$(stat -c %Y $h 2> /dev/null || echo 0) -gt $before ]" || { WHY="no new hardening report"; return 1; }
     WHY="score $(php -r 'echo json_decode(file_get_contents("/var/sentora/logs/hardening.json"), true)["score"];')"
 }
 x_admin_update_check() {
     need ADMIN "administrator login" || return $?
-    au -o "$TMP/a.html" -d "csfr_token=$(atok panel_update)" "https://$FQDN/?module=panel_update&action=CheckNow"
+    au -L -o "$TMP/a.html" -d "csfr_token=$(atok panel_update)" "https://$FQDN/?module=panel_update&action=CheckNow"
     page_ok "$TMP/a.html" || return 1
     wait_for 300 bash -c "grep -q 'panel-check' /var/sentora/logs/zsudo.log" || { WHY="zsudo never ran panel-check"; return 1; }
 }
@@ -341,7 +341,12 @@ x_phpmyadmin() {
 x_dns() {
     need SITE "domains" || return $?
     command -v dig > /dev/null || { WHY="no dig"; return 2; }
-    local a; wait_for 60 bash -c "dig +short @127.0.0.1 $DOM SOA | grep -q ." || { WHY="no SOA for $DOM"; return 1; }
+    # DNS Manager: "Create these records" for the domain, then the daemon writes the zone and reloads BIND
+    local vid; vid=$(q "SELECT vh_id_pk FROM x_vhosts WHERE vh_name_vc='$DOM' AND vh_deleted_ts IS NULL")
+    cu -L -o "$TMP/c.html" -d "inDomain=$vid&inUserID=$ACC_ID&csfr_token=$(ctok dns_manager)" "https://$FQDN/?module=dns_manager&action=CreateDefaultRecords"
+    [ "$(q "SELECT COUNT(*) FROM x_dns WHERE dn_vhost_fk=$vid AND dn_deleted_ts IS NULL")" -gt 0 ] || { WHY="no records were made"; return 1; }
+    daemon_now || { WHY="the daemon run did not finish"; return 1; }
+    local a; wait_for 60 bash -c "dig +short @127.0.0.1 $DOM SOA | grep -q ." || { WHY="no SOA for $DOM (named: $(journalctl -u "$(sp bind_service)" -n 3 --no-pager 2> /dev/null | tail -2 | tr '\n' ' '))"; return 1; }
     a=$(dig +short @127.0.0.1 "www2.$DOM" A; dig +short @127.0.0.1 "mail.$DOM" A; dig +short @127.0.0.1 "$DOM" MX)
     [ -n "$a" ] || { WHY="no records for the subdomain, mail and MX"; return 1; }
 }
@@ -392,7 +397,9 @@ x_fail2ban() {
         curl -sk --max-time 20 --interface "$BANIP" --resolve "$FQDN:443:$BANIP" -c "$j" -b "$j" -o /dev/null -d "inUsername=nosuchuser&inPassword=wrong$i&csfr_token=$t" "https://$FQDN/"
         sleep 1
     done
-    wait_for 60 bash -c "fail2ban-client status sentora-panel 2> /dev/null | grep -q '$BANIP'" || { WHY="sentora-panel did not ban $BANIP: $(fail2ban-client status sentora-panel 2>&1 | tr '\n' ' ' | cut -c1-160)"; ip addr del "$BANIP/32" dev lo 2> /dev/null; return 1; }
+    wait_for 60 bash -c "fail2ban-client status sentora-panel 2> /dev/null | grep -q '$BANIP'" || {
+        WHY="sentora-panel did not ban $BANIP; the panel's log ($(ls -lZ /var/lib/sentora/sentora-auth.log 2>&1 | awk '{print $1, $3, $4, $5}')): $(tail -2 /var/lib/sentora/sentora-auth.log 2>&1 | tr '\n' '|'); fail2ban: $(fail2ban-client status sentora-panel 2>&1 | grep -E 'failed|banned' | tr -s ' \n' ' '); $(journalctl -u fail2ban -n 3 --no-pager 2> /dev/null | tail -2 | tr '\n' ' ')"
+        ip addr del "$BANIP/32" dev lo 2> /dev/null; return 1; }
     fail2ban-client set sentora-panel unbanip "$BANIP" > /dev/null 2>&1
     ip addr del "$BANIP/32" dev lo 2> /dev/null
     # wrong mail passwords (the mail jails read Dovecot's and Postfix's logs)

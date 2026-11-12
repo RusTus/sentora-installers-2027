@@ -1060,15 +1060,18 @@ ui_step "Checking the package sources"
     # - the install DVD/USB (cdrom:) is switched off, it is not there after the install
     # - with no network mirror at all (installed without one), Debian's own is added
     # - with no security updates source, Debian's is added
+    # (cloud images name their mirrors in a list file: "mirror+file:///etc/apt/mirrors/debian.list";
+    # that is a network source too. What is added goes in files of Sentora's own, never over the
+    # system's: overwriting debian.sources once took a cloud image's security source away.)
     # Every package Sentora uses is in "main".
     CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
     [ -f /etc/apt/sources.list ] && sed -i 's|^[[:space:]]*deb\(-src\)\?[[:space:]]\+\(\[[^]]*\][[:space:]]\+\)\?cdrom:|# (switched off by the Sentora installer) &|' /etc/apt/sources.list
     APT_ACTIVE=$( { [ -f /etc/apt/sources.list ] && grep -hE '^[[:space:]]*deb[[:space:]]' /etc/apt/sources.list; \
         grep -hsE '^[[:space:]]*deb[[:space:]]' /etc/apt/sources.list.d/*.list; \
         for f in /etc/apt/sources.list.d/*.sources; do [ -f "$f" ] && awk 'BEGIN{RS=""} !/Enabled:[[:space:]]*no/' "$f"; done; } 2> /dev/null )
-    if ! printf '%s\n' "$APT_ACTIVE" | grep -qE 'https?://'; then
+    if ! printf '%s\n' "$APT_ACTIVE" | grep -qE '(https?|mirror(\+[a-z]+)?|tor\+https?)://|mirror\+file:'; then
         echo "No network package source: adding Debian's (deb.debian.org)"
-        cat > /etc/apt/sources.list.d/debian.sources <<EOF
+        cat > /etc/apt/sources.list.d/sentora-debian.sources <<EOF
 Types: deb
 URIs: http://deb.debian.org/debian
 Suites: $CODENAME $CODENAME-updates
@@ -1080,7 +1083,7 @@ http://deb.debian.org/debian"
     fi
     if ! printf '%s\n' "$APT_ACTIVE" | grep -qE "$CODENAME-security|debian-security"; then
         echo "No security updates source: adding Debian's (security.debian.org)"
-        cat > /etc/apt/sources.list.d/debian-security.sources <<EOF
+        cat > /etc/apt/sources.list.d/sentora-debian-security.sources <<EOF
 Types: deb
 URIs: http://security.debian.org/debian-security
 Suites: $CODENAME-security
