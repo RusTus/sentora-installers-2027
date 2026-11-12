@@ -6,7 +6,7 @@
     <name>Web Hardening</name>
     <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught, the domains, accounts and rules left alone.</desc>
     <ostype>lin</ostype>
-    <authorname>Sentora for Ubuntu 26.04</authorname>
+    <authorname>Sentora-2027</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
 </updateserver>

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>200</latestversion>
+    <latestversion>201</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/log_forwarder.zpp</downloadurl>
     <name>Log Forwarder</name>
     <desc>Send your websites' logs live to your own log server (ELK, OpenSearch, Grafana Loki, Graylog), as syslog over TLS: each line within a second or two of being written.</desc>
     <ostype>lin</ostype>
-    <authorname>Sentora for Ubuntu 26.04 (rsyslog)</authorname>
+    <authorname>Sentora-2027 (rsyslog)</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
 </updateserver>

@@ -19,7 +19,7 @@ Service configuration, database setup and build sources used by the Sentora-2027
 This repository ([RusTus/sentora-installers-2027](https://github.com/RusTus/sentora-installers-2027), branch `master2027`) becomes `sentora-installers-2027.zip`. The panel itself is in [RusTus/sentora-core-2027](https://github.com/RusTus/sentora-core-2027). The installer (`sentora2027-ub26.04` for Ubuntu 26.04, `sentora2027-deb13` for Debian 13, `sentora2027-alma10` for AlmaLinux 10) downloads it with the panel and copies these files into place. It isn't run on its own.
 
 > [!NOTE]
-> This is a private build of Sentora for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9) and Debian 13 (Debian's own packages: PHP 8.4, MariaDB 11.8, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.8). It downloads from these GitHub releases only, not from sentora.org.
+> This is a private build of Sentora-2027 for Ubuntu 26.04 (PHP 8.5, MySQL 8.4, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.9) and Debian 13 (Debian's own packages: PHP 8.4, MariaDB 11.8, Apache 2.4, Postfix 3.10, Dovecot 2.4, BIND 9.20, ProFTPD 1.3.8). It downloads from these GitHub releases only, not from sentora.org.
 
 ## Release files
 

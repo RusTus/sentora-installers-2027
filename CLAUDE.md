@@ -152,9 +152,9 @@ Fixed on the way (released in 2027.72): Windows PowerShell 5.1 mangled the quote
 wsl.exe (InLinux now sends base64 into a file run with --exec), the installer needs -d with -i, the script checks the
 installer really finished (/etc/sentora/.installing gone), ends with a short login block, leaves double-click Status /
 Backup / Uninstall files in Sentora's folder; read-only disks (WSL's kernel headers) no longer raise disk alerts.
-Restart test passed (panel answered from another PC after a reboot). **Next (the owner's list, 2026-11-12):** the owner tests the panel; open from that night: his node to agent 106 (Update node in Manage), 75 "Remote file inclusion" lines from his PC on the panel by IP (URI not seen yet: ask for a screenshot if they come back), 8 add-ons still have "Sentora for Ubuntu 26.04" as author (tidy-up). His panel's time zone was America/Catamarca by mistake; fixed to America/Chicago (timedatectl + date.timezone in every php.ini). Debian VM confirmed 2027.65 (smoke 26/26).
+Restart test passed (panel answered from another PC after a reboot). **Next (the owner's list, 2026-11-12):** the owner tests the panel; open from that night: his node to agent 106 (Update node in Manage), 75 "Remote file inclusion" lines from his PC on the panel by IP (URI not seen yet: ask for a screenshot if they come back). His panel's time zone was America/Catamarca by mistake; fixed to America/Chicago (timedatectl + date.timezone in every php.ini). Debian VM confirmed 2027.65 (smoke 26/26).
 
-**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 105):** billing belongs to each seller
+**Payment Plans (add-on, sentora-repo/payment_plans.zpp, 106):** billing belongs to each seller
 (administrator or reseller); the panel's administrator does not manage it. Each seller turns it on or
 off (off skips the payment check). The page opens with the seller's packages; each package has its own
 page where its price is set (prices in the module's x_pp_prices; the panel's package tables are only read:

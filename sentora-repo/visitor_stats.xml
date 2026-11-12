@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>205</latestversion>
+    <latestversion>206</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/visitor_stats.zpp</downloadurl>
     <name>Visitor Stats</name>
     <desc>See who has been visiting your websites: visitors per day and month, pages, referrers, search terms, browsers and the busiest hours, made every hour with Visitors 0.7.</desc>
     <ostype>lin</ostype>
-    <authorname>Sentora for Ubuntu 26.04 (Visitors 0.7)</authorname>
+    <authorname>Sentora-2027 (Visitors 0.7)</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
     <updatedesc>Security: a panel account that is switched off or deleted can no longer open its reports from an open session. Includes the reports folder repair from 203.</updatedesc>
