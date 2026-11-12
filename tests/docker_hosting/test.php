@@ -159,7 +159,7 @@ check($n['nd_seen_in'] >= time() - 5 && $info['podman'] === '5.6.0' && $info['cp
 $r = req(1, '', array(), array('tab' => 'nodes'));
 check(strpos($r['html'], '>online<') !== false && strpos($r['html'], 'public address: 127.0.0.1') !== false, 'the page shows it online, with its address');
 preg_match("/const VERSION = '([^']+)'/", file_get_contents(getenv('DH_AGENT')), $vm);
-check(strpos($r['html'], 'Version ' . $vm[1]) !== false, 'and the version of its agent (' . $vm[1] . ')');
+check(strpos($r['html'], 'agent ' . $vm[1]) !== false, 'and the version of its agent on its row (' . $vm[1] . ')');
 check(preg_match('/class="dh-fp">([A-Z2-9]{4}-[A-Z2-9]{4})</', $r['html'], $fpm) === 1 && $fpm[1] === dh::Fingerprint(), 'the page shows the panel\'s code for new nodes');
 // a message played back, tampered with, or from another key
 $k = dh::Keys();
@@ -302,7 +302,7 @@ agent('once');
 $r = req(3, '', array(), array('logs' => (string) $c1['dc_id_pk']));
 check(strpos($r['html'], 'fake log of sdh-' . $c1['dc_id_pk']) !== false, 'logs shown');
 $r = req(3, '', array(), array('settings' => (string) $c1['dc_id_pk']));
-check(strpos($r['html'], 'class="dh-settings"') !== false && strpos($r['html'], 'name="inCpu"') !== false && strpos($r['html'], 'Nightly updates') !== false
+check(strpos($r['html'], 'dh-settings"') !== false && strpos($r['html'], 'name="inCpu"') !== false && strpos($r['html'], 'Nightly updates') !== false
     && preg_match('#name="inWhat" value="public"><label class="sf-switch"><input type="checkbox"#', $r['html']) === 1 && strpos($r['html'], 'Open to everyone') !== false
     && strpos($r['html'], 'Password protected') !== false && strpos($r['html'], '>Running<') !== false, 'Settings opens under the row (size); switches for nightly updates and open to everyone; status in words');
 $set = array('inId' => (string) $c1['dc_id_pk'], 'inCpu' => '0.5', 'inMem' => '256', 'inDisk' => '1');
@@ -485,7 +485,7 @@ check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = 0 AND jb_state_
 // what the node's system reports
 file_put_contents(getenv('SNODE_STATE') . '/sysupdate.json', json_encode(array('updates' => 7, 'security' => 2, 'reboot' => 1, 'checked_at' => time(), 'last_at' => time() - 60, 'last_ok' => 1, 'last_kind' => 'security', 'running' => '')));
 agent('once');
-$r = req(1, '', array(), array('tab' => 'nodes'));
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
 check(strpos($r['html'], '7 updates waiting, 2 of them security fixes') !== false && strpos($r['html'], 'A restart is needed') !== false, 'the page shows the waiting updates and that a restart is needed');
 check(strpos($r['html'], 'Needs a look') !== false && strpos($r['html'], 'has 2 security updates waiting') !== false, 'and lists it under "Needs a look"');
 $r = req(1);
@@ -503,7 +503,7 @@ check(!is_file(getenv('DH_MAIL')), 'not again on the next run (only again after 
 $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'installs its security updates') === false, 'security updates wait while automatic is off');
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autosec', 'inAutosec' => '1'));
-check(preg_match('#name="inAutosec" value="0"><label class="sf-switch"><input type="checkbox" onchange="this.form.submit\(\)" checked#', req(1, '', array(), array('tab' => 'nodes'))['html']) === 1, 'the node: a "Nightly security updates" switch, now on');
+check(preg_match('#name="inAutosec" value="0"><label class="sf-switch"><input type="checkbox" onchange="this.form.submit\(\)" checked#', req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'))['html']) === 1, 'the node: a "Nightly security updates" switch, now on');
 $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'installs its security updates') !== false, 'with automatic on, they install at night', (string) $d);
 $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
@@ -513,7 +513,8 @@ dh::Set('latest_agent', '9999');
 dh::Set('latest_agent_at', (string) time());
 $r = req(1, '', array(), array('tab' => 'nodes'));
 check(strpos($r['html'], 'Update available: 9999') !== false, 'a node behind the newest agent is flagged on its row');
-check(strpos($r['html'], '>Update now<') !== false || strpos($r['html'], 'Update now</button>') !== false, 'and its Manage has "Update now"');
+check(strpos($r['html'], 'Update now') !== false && strpos($r['html'], 'name="inAutoagent"') === false, '"Update now" is on the row itself; Manage opens under the row only when pressed');
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
 check(preg_match('#name="inAutoagent" value="0"><label class="sf-switch"><input type="checkbox" onchange="this.form.submit\(\)" checked#', $r['html']) === 1, '"Nightly node updates" is on by default');
 $d = shell_exec('DH_TEST_HOUR=14 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'updates to agent') === false, 'not during the day');
@@ -542,7 +543,7 @@ $cf = (string) @file_get_contents(getenv('SNODE_CADDY') . '/Caddyfile');
 check(strpos($cf, "\temail certs@example.com\n\tlocal_certs\n\tskip_install_trust") !== false && strpos($cf, 'import /etc/caddy/sentora/*.caddy') !== false, 'the node rewrote Caddy\'s settings', $cf);
 check(strpos((string) @file_get_contents(getenv('SNODE_ETC') . '/install.conf'), "EMAIL=certs@example.com\nLOCAL_CERTS=1") !== false, 'and kept them for its own updates (install.conf)');
 agent('once');
-$r = req(1, '', array(), array('tab' => 'nodes'));
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
 check(strpos($r['html'], 'value="certs@example.com"') !== false && preg_match('/name="inLocal" value="1" checked/', $r['html']) === 1, 'the page shows the settings the node reports it uses');
 touch(getenv('FAKE_DIR') . '/caddy-fail');
 req(1, 'NodeSettings', array('inId' => '1', 'inEmail' => '', 'inLocal' => '0'));
