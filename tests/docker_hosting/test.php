@@ -508,6 +508,28 @@ $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') .
 check(strpos((string) $d, 'installs its security updates') !== false, 'with automatic on, they install at night', (string) $d);
 $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'installs its security updates') === false, 'once a night');
+// node updates: flagged with Update now; installed at night only while "Nightly node updates" is on (on by default)
+dh::Set('latest_agent', '9999');
+dh::Set('latest_agent_at', (string) time());
+$r = req(1, '', array(), array('tab' => 'nodes'));
+check(strpos($r['html'], 'Update available: 9999') !== false, 'a node behind the newest agent is flagged on its row');
+check(strpos($r['html'], '>Update now<') !== false || strpos($r['html'], 'Update now</button>') !== false, 'and its Manage has "Update now"');
+check(preg_match('#name="inAutoagent" value="0"><label class="sf-switch"><input type="checkbox" onchange="this.form.submit\(\)" checked#', $r['html']) === 1, '"Nightly node updates" is on by default');
+$d = shell_exec('DH_TEST_HOUR=14 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'updates to agent') === false, 'not during the day');
+$d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'updates to agent 9999') !== false, 'at night the node is asked to update', (string) $d);
+check((int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_node_fk = 1 AND jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 1, 'one node-update job queued');
+$d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'updates to agent') === false, 'once a night');
+$zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'");
+dh::Set('autoagent_1', '0');
+req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autoagent', 'inAutoagent' => '0'));
+$d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
+check(strpos((string) $d, 'updates to agent') === false, 'switched off, it waits for "Update now"');
+check((int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 0, 'and nothing is queued');
+req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autoagent', 'inAutoagent' => '1'));
+dh::Set('latest_agent', '');
 agent('once');
 agent('once');
 // settings
