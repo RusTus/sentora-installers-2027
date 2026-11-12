@@ -17,5 +17,17 @@ require $root . '/modules/docker_hosting/code/controller.ext.php';
 if (!empty($in['action'])) {
     call_user_func(array('module_controller', 'do' . $in['action']));
 }
-$html = module_controller::getPage();
+// the page as the panel builds it: every <@ X @> in module.zpm is module_controller::getX()
+$html = '';
+foreach (preg_split('/(<@\s*\w+\s*@>)/', file_get_contents($root . '/modules/docker_hosting/module.zpm'), -1, PREG_SPLIT_DELIM_CAPTURE) as $part) {
+    if (preg_match('/^<@\s*(\w+)\s*@>$/', $part, $m)) {
+        if (!method_exists('module_controller', 'get' . $m[1])) {
+            fwrite(STDERR, "PHP problem: module.zpm asks for module_controller::get{$m[1]}(), which is missing\n");
+            exit(3);
+        }
+        $html .= (string) call_user_func(array('module_controller', 'get' . $m[1]));
+    } else {
+        $html .= $part;
+    }
+}
 echo json_encode(array('msg' => module_controller::$msg, 'command' => module_controller::$command, 'html' => $html));

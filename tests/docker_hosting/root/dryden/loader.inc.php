@@ -157,4 +157,19 @@ class fs_filehandler
 
 class ctrl_module
 {
+    // (as the core's: the module's name, description and icon for module.zpm)
+    public static function getModuleName()
+    {
+        return 'Docker Hosting';
+    }
+
+    public static function getModuleDesc()
+    {
+        return 'desc';
+    }
+
+    public static function getModuleIcon()
+    {
+        return 'modules/docker_hosting/assets/icon.png';
+    }
 }
