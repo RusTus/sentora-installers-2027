@@ -106,6 +106,7 @@ check(strpos((string) val("SELECT st_value_tx FROM x_dh_settings WHERE st_name_v
 section('pages before anything');
 $r = req(1);
 check(strpos($r['html'], 'Nodes and apps') !== false && strpos($r['html'], 'no limit') !== false, 'administrator: nodes tab, no limit');
+check(strpos($r['html'], 'has no domain yet') !== false && strpos($r['html'], 'module=domains') !== false && strpos($r['html'], 'start one below') === false, 'without a domain: told to add one (with links), not "start one below"');
 $r = req(3);
 check(strpos($r['html'], 'not part of your account') !== false && strpos($r['html'], 'Nodes and apps') === false, 'client without a share: told to ask; no nodes tab');
 $r = req(3, 'AddNode', array('inName' => 'sneaky'));
