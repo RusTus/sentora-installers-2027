@@ -174,7 +174,7 @@ if [ "$ADDONS" = 1 ]; then
     addon memcached "$(pdir memcached)" --with-libmemcached-dir=/usr --with-zlib-dir=/usr --disable-memcached-sasl
     addon imagick "$(pdir imagick)" --with-imagick=/usr
     # (imap left PHP in 8.4; c-client is in /usr/lib, OpenSSL found through pkg-config)
-    [ -d "$SRC/ext/imap" ] && [ -e /usr/include/c-client/c-client.h ] && addon imap "$SRC/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
+    [ -f "$SRC/ext/imap/config.m4" ] && [ -e /usr/include/c-client/c-client.h ] && addon imap "$SRC/ext/imap" --with-imap=/usr --with-kerberos --with-imap-ssl --with-libdir=lib
     cat > "$P/bin/sentora-php-addons" <<EOF_HEAD
 #!/bin/bash
 # (1: this script switches the add-ons on; 0: PHP Versions > Extensions does, when asked)
