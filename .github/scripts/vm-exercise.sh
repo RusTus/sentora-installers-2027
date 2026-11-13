@@ -535,6 +535,24 @@ x_offsite() {
         elif [ ! -f "$snap/manifest.json" ]; then WHY="the copy has no manifest"; r=1
         fi
     fi
+    # Restore tab: Read the backups, then restore the client's websites from that copy (rsync from the
+    # backup machine, started by root's service as well)
+    local cat=/var/lib/sentora/restore-catalog.json rs=/var/lib/sentora/panel-restore.json srv day t0
+    if [ $r -eq 0 ]; then
+        rm -f "$cat"
+        au -L -o "$TMP/a.html" -d "csfr_token=$(atok backup_admin)" "https://$FQDN/?module=backup_admin&action=RestoreList"
+        if ! wait_for 120 bash -c "grep -q '\"snapshots\":\[{' $cat 2> /dev/null"; then WHY="Read the backups listed nothing: $(head -c 200 "$cat" 2> /dev/null)"; r=1; fi
+    fi
+    if [ $r -eq 0 ]; then
+        read -r srv day < <(php -r '$d = json_decode(file_get_contents($argv[1]), true); $s = $d["snapshots"][0]; echo $s["server"], " ", $s["date"];' "$cat")
+        rm -f "$SITE/vmtest.php"; t0=$(date +%s)
+        au -L -o "$TMP/a.html" -d "csfr_token=$(atok backup_admin)&inServer=$srv&inDate=$day&inAccount=$U&inPart_files=1" "https://$FQDN/?module=backup_admin&action=RestoreAccount&snap=$srv/$day"
+        if ! wait_for 300 bash -c "php -r '\$d = json_decode((string) @file_get_contents(\$argv[1]), true); exit(is_array(\$d) && empty(\$d[\"running\"]) && (\$d[\"finished\"] ?? 0) >= $t0 ? 0 : 1);' $rs"; then
+            WHY="the restore did not finish: $(head -c 200 "$rs" 2> /dev/null)"; r=1
+        elif ! grep -q '"result":"ok"' "$rs"; then WHY="the restore failed: $(head -c 250 "$rs")"; r=1
+        elif ! site "http://$DOM/vmtest.php" | grep -q VMJSON; then WHY="the restored page does not run"; r=1
+        fi
+    fi
     # as it was: no off-server backup, no user
     for k in "offsite_server=" "offsite_user=sentora-backup" "offsite_path=/srv/sentora-backups" "offsite_hostkey=" "offsite_target=" "offsite_mail=true" "offsite_request="; do
         q "UPDATE x_settings SET so_value_tx='${k#*=}' WHERE so_name_vc='${k%%=*}'"
@@ -639,7 +657,7 @@ ex "DNS answers for the domains" x_dns
 ex "Protected directory (password, 401, 200)" x_protect
 ex "Backup Now (Backup Manager)" x_backup
 ex "Restore from that backup" x_restore
-ex "Off-server backup: Back up now to an SSH server" x_offsite
+ex "Off-server backup: Back up now, read it, restore a site" x_offsite
 ex "fail2ban bans password guessing" x_fail2ban
 ex "Hourly and daily jobs (forced daemon run)" x_hourly_daily
 ex "logrotate (its own service)" x_logrotate
