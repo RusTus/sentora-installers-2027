@@ -65,7 +65,6 @@ function post($body)
     curl_setopt_array($c, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $body));
     $r = curl_exec($c);
     $code = curl_getinfo($c, CURLINFO_HTTP_CODE);
-    curl_close($c);
     return array($code, (string) $r);
 }
 function sites()
@@ -687,7 +686,7 @@ $kn = row("SELECT * FROM x_dh_nodes WHERE nd_name_vc = 'keynode'");
 check((int) $n2['node'] === (int) $kn['nd_id_pk'] && !isset($n2['claim']) && $kn['nd_claim_vc'] === '' && $kn['nd_signpk_vc'] !== '', 'both sides agree; the key can not be used again');
 $o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1; echo exit=$?');
 check(strpos($o, 'panel:') === false && dh::Online(dh::Node((int) $kn['nd_id_pk'])), 'and it calls as a node from then on', $o);
-list($c, $body) = (function () use ($web) { $c = curl_init($web . '/modules/docker_hosting/code/node.php?key=1'); curl_setopt($c, CURLOPT_RETURNTRANSFER, true); $b = curl_exec($c); $h = curl_getinfo($c, CURLINFO_HTTP_CODE); curl_close($c); return array($h, $b); })();
+list($c, $body) = (function () use ($web) { $c = curl_init($web . '/modules/docker_hosting/code/node.php?key=1'); curl_setopt($c, CURLOPT_RETURNTRANSFER, true); $b = curl_exec($c); $h = curl_getinfo($c, CURLINFO_HTTP_CODE); return array($h, $b); })();
 check($c === 200 && $body === dh::PanelKey(), 'the panel\'s public keys are offered (they are not secret)');
 // removing an online node: it removes itself
 $r = req(1, 'Node', array('inId' => (string) $kn['nd_id_pk'], 'inRemove' => '1'));

@@ -1409,7 +1409,6 @@ class dh
         curl_setopt_array($c, array(CURLOPT_NOBODY => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_TIMEOUT => 6, CURLOPT_FOLLOWLOCATION => false));
         curl_exec($c);
         $errno = curl_errno($c);
-        curl_close($c);
         // 51 the name does not match, 60 nobody vouches for it (self-signed), 58/77/83 certificate problems
         return in_array($errno, array(51, 58, 60, 77, 83), true);
     }

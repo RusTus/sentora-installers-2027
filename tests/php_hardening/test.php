@@ -148,7 +148,8 @@ function runIn($dir, $code, $rules)
     file_put_contents("$W/run.rules", str_replace('sp.log_media("syslog");', '', $rules));
     file_put_contents("$dir/t.php", "<?php\n" . $code . "\necho \"|END\";\n");
     list(, $out) = sh(escapeshellarg($PHP) . ' -n -d display_errors=stderr -d log_errors=0 -d extension=' . escapeshellarg($SO) . ' -d sp.configuration_file=' . escapeshellarg("$W/run.rules") . ' ' . escapeshellarg("$dir/t.php"));
-    return $out;
+    // PHP 8.5 adds a stack trace to a fatal error, naming the blocked call's arguments: only what ran counts
+    return preg_replace('/\nStack trace:\n.*$/s', '', $out);
 }
 $bob = "$W/hosted/bob/public_html";
 $alice = "$W/hosted/alice/public_html";

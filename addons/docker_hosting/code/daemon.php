@@ -146,7 +146,6 @@ class dh_daemon
             }));
         $body = curl_exec($c);
         $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
-        curl_close($c);
         if ($code === 200 && is_string($body) && preg_match("/^    const VERSION = '(\\d{1,6})';/m", $body, $m)) {
             dh::Set('latest_agent', $m[1]);
             dh::Set('latest_agent_etag', $got);

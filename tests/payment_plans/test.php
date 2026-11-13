@@ -55,7 +55,6 @@ function web($url, $post = false)
     $r = curl_exec($c);
     $h = curl_getinfo($c, CURLINFO_HEADER_SIZE);
     $code = curl_getinfo($c, CURLINFO_HTTP_CODE);
-    curl_close($c);
     return array($code, substr($r, 0, $h), substr($r, $h));
 }
 function row($sql, $a = array())

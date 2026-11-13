@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>106</latestversion>
+    <latestversion>107</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/payment_plans.zpp</downloadurl>
     <name>Payment Plans</name>
     <desc>Bill your clients through the panel: prices for your packages, monthly or yearly plans (new clients on a priced package are billed by themselves), numbered invoices, reminders, and payment with PayPal or Stripe (your choice) straight into your own account. An unpaid invoice switches the client off after your grace days; paying switches it on again.</desc>

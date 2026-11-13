@@ -173,7 +173,6 @@ class quickfig
             }
             $body = curl_exec($c);
             $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
-            curl_close($c);
             $j = $code === 200 && is_string($body) ? json_decode($body, true) : null;
             return is_array($j) ? $j : null;
         };

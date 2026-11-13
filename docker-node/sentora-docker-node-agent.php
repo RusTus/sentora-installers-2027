@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '113';
+    const VERSION = '114';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -199,7 +199,6 @@ class snode
             $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
             $errno = curl_errno($c);
             $err = curl_error($c);
-            curl_close($c);
             if ($body !== false && $code === 200 && preg_match('/^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/', trim($body))) {
                 return array(trim($body), $v);
             }
@@ -236,7 +235,6 @@ class snode
             $body = curl_exec($c);
             $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
             $err = curl_error($c);
-            curl_close($c);
             if ($code !== 400) {
                 break;
             }

@@ -524,7 +524,6 @@ class pp_pay
         $out = curl_exec($c);
         $code = (int) curl_getinfo($c, CURLINFO_HTTP_CODE);
         $err = $out === false ? curl_error($c) : '';
-        curl_close($c);
         $j = is_string($out) ? json_decode($out, true) : null;
         return array($code, is_array($j) ? $j : null, $err);
     }

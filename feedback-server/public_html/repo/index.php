@@ -74,7 +74,9 @@ function fb_repo_get($name)
         CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_USERAGENT => 'Sentora-2027-feedback-server', CURLOPT_MAXFILESIZE => 2097152));
     $body = curl_exec($h);
     $code = (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
-    curl_close($h);
+    if (PHP_VERSION_ID < 80000) {
+        curl_close($h); // (no effect since PHP 8.0, deprecated in 8.5)
+    }
     if ($code === 200 && is_string($body)) {
         @file_put_contents($f . '.new', $body);
         @rename($f . '.new', $f);
