@@ -23,6 +23,8 @@
 //   node_real.php backup <id>           back the app up now (as client1)
 //   node_real.php restore <id>          put its newest backup back (as client1)
 //   node_real.php backupstate <id>      its newest backup's state, size and note
+//   node_real.php private <image> <port> an app of the administrator's own from that image, in every share: prints its ID
+//   node_real.php registry <host> <user> <secret>   save a registry login ('-' as the user: remove it)
 set_error_handler(function ($no, $str, $file, $line) {
     fwrite(STDERR, "PHP problem: $str in $file:$line\n");
     exit(3);
@@ -108,9 +110,23 @@ switch ($a[1]) {
         $n = dh::Node(1);
         echo $n && dh::Online($n) ? "1\n" : "0\n";
         break;
+    case 'private':
+        $id = dh::SaveApp(1, array('name' => 'Private web', 'desc' => 'A test image from a registry with a login', 'image' => $a[2], 'port' => $a[3], 'volumes' => '', 'env' => '',
+            'web' => '', 'minmem' => 64, 'mem' => 128, 'cpu' => 25, 'disk' => 512), '');
+        if (!$id) {
+            die('refused: ' . dh::$why . "\n");
+        }
+        $all = array_keys(dh_catalog::Apps());
+        dh::SetGrant(1, 2, array('count' => 5, 'cpu' => 400, 'mem' => 4096, 'disk' => 20480, 'apps' => $all)) || die(dh::$why . "\n");
+        dh::SetGrant(2, 3, array('count' => 3, 'cpu' => 200, 'mem' => 2048, 'disk' => 10240, 'apps' => $all)) || die(dh::$why . "\n");
+        echo $id . "\n";
+        break;
+    case 'registry':
+        echo ($a[3] === '-' ? dh::RemoveRegistry(1, $a[2]) : dh::SaveRegistry(1, $a[2], $a[3], $a[4])) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
     case 'deploy':
         $app = dh_catalog::App($a[2]);
-        $id = dh::Deploy(3, 3, array('app' => $a[2], 'label' => '', 'cpu' => $app['cpu'], 'mem' => $app['mem'], 'disk' => 2048, 'vhost' => 10, 'name' => $a[3], 'dns' => true));
+        $id = dh::Deploy(3, 3, array('app' => $a[2], 'label' => '', 'cpu' => $app['cpu'], 'mem' => $app['mem'], 'disk' => isset($a[4]) ? (int) $a[4] : 2048, 'vhost' => 10, 'name' => $a[3], 'dns' => true));
         echo $id ? $id . "\n" : 'refused: ' . dh::$why . "\n";
         break;
     case 'state':
