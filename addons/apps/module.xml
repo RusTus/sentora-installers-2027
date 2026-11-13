@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <module>
     <name>Apps</name>
-    <version>106</version>
+    <version>107</version>
     <defaultcat>Domain Management</defaultcat>
     <desc>Install WordPress, an OpenCart shop or Snipe-IT (IT asset management) into one of your websites in a few clicks, or deploy your own app from Git (GitHub, GitLab, any Git server, private ones with a deploy key): the panel makes its database, installs it as your own account, and a Git app is deployed again with one click or when you push. No setup page is ever left open on the internet.</desc>
     <authorname>Sentora-2027</authorname>

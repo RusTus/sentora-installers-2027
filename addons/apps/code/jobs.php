@@ -970,7 +970,17 @@ class apps_jobs
             && sys_phpversions::IsEnabled($version) && is_executable(sys_phpversions::BASE_DIR . $version . '/bin/php')) {
             return sys_phpversions::BASE_DIR . $version . '/bin/php';
         }
-        return '/usr/bin/php' . sys_phpversions::DefaultVersion();
+        // the system's own PHP: its command as this system's installer set it (php_cli: /usr/bin/php8.3 on
+        // Debian/Ubuntu, /usr/bin/php on AlmaLinux/Rocky/RHEL/Fedora); panels from before that setting: the
+        // Debian/Ubuntu name, else plain php
+        $v = (string) sys_phpversions::DefaultVersion();
+        if (class_exists('sys_platform') && method_exists('sys_platform', 'Get')) {
+            $cli = (string) sys_platform::Get('php_cli', array('v' => $v));
+            if ($cli !== '' && is_executable($cli)) {
+                return $cli;
+            }
+        }
+        return is_executable('/usr/bin/php' . $v) ? '/usr/bin/php' . $v : '/usr/bin/php';
     }
 
     /**

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>106</latestversion>
+    <latestversion>107</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/apps.zpp</downloadurl>
     <name>Apps</name>
     <desc>Install WordPress, an OpenCart shop or Snipe-IT (IT asset management) into one of your websites in a few clicks, or deploy your own app from Git (GitHub, GitLab, any Git server, private ones with a deploy key): the panel makes its database, installs it as your own account, and a Git app is deployed again with one click or when you push. No setup page is ever left open on the internet.</desc>
