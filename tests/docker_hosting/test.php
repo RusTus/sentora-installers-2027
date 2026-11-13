@@ -266,6 +266,9 @@ $r = req(3, 'Deploy', array_merge($base, array('inMem' => '2048')));
 check(strpos($r['text'], 'more than your share') !== false, 'over the share is refused');
 $r = req(3, 'Deploy', array_merge($base, array('inDomain' => '11')));
 check(strpos($r['text'], 'no DNS records yet') !== false, 'DNS for a domain without DNS is refused (does not make a zone)');
+check(strpos($r['html'], 'Node (administrators only)') === false, 'a client is not shown the node box');
+$r = req(3, 'Deploy', array_merge($base, array('inNode' => '1')));
+check(strpos($r['text'], 'Only an administrator chooses the node') !== false && !row("SELECT * FROM x_dh_containers WHERE dc_domain_vc = 'kuma.example.com'"), 'a client can not choose the node', $r['text']);
 $r = req(3, 'Deploy', $base);
 check(strpos($r['text'], 'ok: Starting Uptime Kuma at kuma.example.com') !== false, 'Uptime Kuma started at kuma.example.com', $r['text']);
 $c1 = row("SELECT * FROM x_dh_containers WHERE dc_domain_vc = 'kuma.example.com'");
@@ -1120,6 +1123,26 @@ $o = agent('once') . agent('once');
 $rn = row("SELECT * FROM x_dh_nodes WHERE nd_name_vc = 'relinked'");
 $fd = row("SELECT * FROM x_dh_found WHERE fd_cid_in = 990");
 check(strpos($o, 'found sdh-990 of sdh4') !== false && $fd && (int) $fd['fd_node_fk'] === (int) $rn['nd_id_pk'] && dh::Suggest($fd)['acc'] === 4, 'linked as a new node: its app is found there, client2 suggested', $o);
+
+section('an administrator chooses the node');
+$r = req(1);
+check(strpos($r['html'], 'Node (administrators only)') !== false && strpos($r['html'], 'relinked - free:') !== false, 'the administrator sees the node box, with each node\'s free room', substr(strip_tags($r['html']), 0, 300));
+$rid = (int) $rn['nd_id_pk'];
+$dv = array('app' => 'gitea', 'label' => '', 'cpu' => 50, 'mem' => 512, 'disk' => 1024, 'vhost' => 20, 'name' => 'picked', 'dns' => false);
+check(!dh::Deploy(1, 2, $dv + array('node' => $rid)) && strpos(dh::$why, 'Only an administrator') !== false, 'not for a client, also not called directly');
+check(!dh::Deploy(1, 1, $dv + array('node' => 9999)) && strpos(dh::$why, 'not online') !== false, 'a node that is not there: refused');
+check(!dh::Deploy(1, 1, array_merge($dv, array('mem' => 9000000)) + array('node' => $rid)) && (strpos(dh::$why, 'has not got room') !== false || strpos(dh::$why, 'share') !== false), 'more than the node has free: refused', dh::$why);
+$pid = dh::Deploy(1, 1, $dv + array('node' => $rid));
+$pc = $pid ? dh::Container($pid) : null;
+check($pc && (int) $pc['dc_node_fk'] === $rid, 'the administrator\'s choice is where it goes', dh::$why);
+$r = req(1);
+check(strpos($r['html'], 'On node relinked') !== false, 'the administrator sees which node each app is on');
+$r3 = req(3);
+check(strpos($r3['html'], 'On node') === false, 'a client does not see which node its apps are on');
+if ($pid) {
+    $zdbh->exec("UPDATE x_dh_containers SET dc_deleted_in = " . time() . " WHERE dc_id_pk = " . (int) $pid);
+    $zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_ct_fk = " . (int) $pid);
+}
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');

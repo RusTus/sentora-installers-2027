@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>124</latestversion>
+    <latestversion>125</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/docker_hosting.zpp</downloadurl>
     <name>Docker Hosting</name>
     <desc>Run apps in containers (Gitea, Nextcloud, Uptime Kuma, Vaultwarden) on separate servers ("nodes") linked to the panel. The administrator gives resellers a share (containers, CPU, memory, disk), resellers give their clients part of theirs; each app gets its own address under the customer's domain, with its certificate.</desc>
