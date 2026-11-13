@@ -11,6 +11,7 @@
 #   sentora-backup finish <dir> <date> <keep>   <date>.partial becomes <date> and latest, older nights go
 #   sentora-backup count  <dir>          how many nights are kept
 #   sentora-backup list [<dir>]          every server's nights with their manifest (for restoring)
+#   sentora-backup space                 the disk of the copies: bytes free, bytes in all, bytes of this area
 # Every call is noted in /var/log/sentora-backup-gate.log.
 set -u
 umask 077
@@ -111,5 +112,10 @@ case "$verb" in
                 echo; echo '@@END'
             done
         done ;;
+    space)
+        # (for the panel's status card: is the backup node's disk filling up?)
+        mkdir -p "$BASE"
+        df -PB1 "$BASE" 2> /dev/null | awk 'NR == 2 { printf "%s %s ", $4, $2 }'
+        du -sB1 "$BASE" 2> /dev/null | awk '{ print $1 }' ;;
     *) refuse "unknown: $verb" ;;
 esac

@@ -100,6 +100,8 @@ B=sentora-backup@$IP
 
 say "What a panel's key may do"
 [ "$("${SSH1[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel1.example.test" ] && ok "it says it is a Sentora backup node, for this panel's folder" || bad "hello: $("${SSH1[@]}" "$B" sentora-backup hello 2>&1)"
+sp=$("${SSH1[@]}" "$B" sentora-backup space 2>&1)
+[[ "$sp" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] && [ "$(echo "$sp" | cut -d' ' -f2)" -gt 0 ] && ok "space: its disk's free and total bytes, and this panel's ($sp)" || bad "space: $sp"
 [ "$("${SSH1[@]}" "$B" sentora-backup ready /panel1.example.test 2>&1)" = ready ] && ok "ready: its folder made and writable" || bad "ready: $("${SSH1[@]}" "$B" sentora-backup ready /panel1.example.test 2>&1)"
 mkdir -p "$W/src/var/sentora/hostdata/acc1/public_html" "$W/src/databases"
 echo "night one" > "$W/src/var/sentora/hostdata/acc1/public_html/index.html"; echo '{"format":2}' > "$W/src/manifest.json"; head -c 200000 /dev/urandom > "$W/src/databases/big.sql.gz"
