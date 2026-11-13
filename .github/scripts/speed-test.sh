@@ -104,6 +104,8 @@ for f in $(grep -o '\(href\|src\)="[^"]*\.\(css\|js\)[^"]*"' "$TMP/p.html" | cut
     printf '  %-60s %s | %s | %s\n' "${f:0:60}" "$(echo "$h" | sed -n 's/^[Cc]ontent-[Ee]ncoding: //p' | head -1 | sed 's/^$/-/;s/^/enc /')" "$(echo "$h" | sed -n 's/^[Cc]ache-[Cc]ontrol: //p' | head -1)" "$(echo "$h" | grep -ci '^expires:') expires" | tee -a "$R"
 done
 say ""
+pe=$(pcurl -o /dev/null -D - -H 'Accept-Encoding: gzip, br' "https://$FQDN/" | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ee]ncoding: //p')
+say "The panel's pages themselves: $([ -z "$pe" ] && echo 'not compressed (as they must be: BREACH)' || echo "COMPRESSED ($pe): they must not be")"
 say "The dashboard page asks the browser for $(grep -o '\(href\|src\)="[^"]*\.\(css\|js\|png\|svg\|woff2\?\)[^"]*"' "$TMP/p.html" | wc -l) files."
 
 say ""
