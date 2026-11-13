@@ -43,6 +43,8 @@ jobs:
         addon: [docker_hosting, payment_plans, php_hardening]
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # Payment Plans' test upgrades from an old version taken from git history
       - name: PHP for the tests
         run: php -m | grep -qi sodium && php -m | grep -qi pdo_sqlite || sudo apt-get install -y php-cli php-sqlite3 php-curl
       - name: Tests of ${{ matrix.addon }}
