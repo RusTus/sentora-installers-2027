@@ -540,6 +540,11 @@ check(strpos($mail, 'To: admin@example.com') !== false && strpos($mail, 'has 2 s
 daemon();
 check(!is_file(getenv('DH_MAIL')), 'not again on the next run (only again after a day)');
 // (130) the same as a panel notice to the administrators, one per node, gone once the node is fine
+// (134: only urgent things are notices; the node is made low on disk here, whatever the test machine has)
+$li = json_decode((string) val("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1"), true);
+$li['disk_total_mb'] = 100000; $li['disk_free_mb'] = 1500;
+$zdbh->prepare("UPDATE x_dh_nodes SET nd_info_tx = :i WHERE nd_id_pk = 1")->execute(array(':i' => json_encode($li)));
+daemon();
 $nt = json_decode((string) @file_get_contents(getenv('DH_W') . '/notices.json'), true);
 $n1 = isset($nt['docker-hosting-node-1']) && is_array($nt['docker-hosting-node-1']) ? $nt['docker-hosting-node-1'] : array();
 check($n1 && $n1['scope'] === 'groups' && $n1['targets'] === array(1) && $n1['type'] === 'warning' && strpos($n1['title'], 'node "node1" needs a look') !== false
