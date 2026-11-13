@@ -479,6 +479,39 @@ class snode
         return self::Run(array_merge(array('runuser', '-u', $user, '--'), $env, $argv), self::$home . '/' . $user, $timeout);
     }
 
+    /**
+     * Download an image as the customer's user. When the panel sent a login for the image's registry
+     * (a private image, or Docker Hub's higher download limit), it goes into a file only that user can
+     * read, for this one download, and is deleted right after: no login stays on the node.
+     */
+    static function Pull($user, $image, array $d)
+    {
+        $auth = '';
+        $r = isset($d['registry']) && is_array($d['registry']) ? $d['registry'] : null;
+        if ($r && isset($r['host'], $r['user'], $r['secret']) && is_string($r['host']) && is_string($r['user']) && is_string($r['secret'])
+            && preg_match('/^[a-z0-9.-]+(:\d{1,5})?$/', $r['host']) && preg_match('/^[\x21-\x7e]{1,255}$/', $r['user']) && preg_match('/^[\x21-\x7e]{1,4096}$/', $r['secret'])
+            && explode('/', $image)[0] === $r['host']) {
+            $e = self::Session($user);
+            if ($e !== '') {
+                return array(125, $e);
+            }
+            $auth = self::$run . '/' . self::Uid($user) . '/sentora-pull-' . bin2hex(random_bytes(8)) . '.json';
+            $old = umask(077);
+            $ok = file_put_contents($auth, json_encode(array('auths' => array($r['host'] => array('auth' => base64_encode($r['user'] . ':' . $r['secret']))))));
+            umask($old);
+            if ($ok === false) {
+                return array(125, 'the registry login could not be written for the download');
+            }
+            @chown($auth, $user);
+            @chmod($auth, 0600);
+        }
+        $p = self::Podman($user, array_merge(array('pull', '--quiet'), $auth !== '' ? array('--authfile', $auth) : array(), array($image)), 1800);
+        if ($auth !== '') {
+            @unlink($auth);
+        }
+        return $p;
+    }
+
     static function Podman($user, array $args, $timeout = 600)
     {
         $e = self::Session($user);
@@ -580,7 +613,7 @@ class snode
             return array(false, 'no such container here');
         }
         if ($pull) {
-            $p = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
+            $p = self::Pull($u, $d['image'], $d);
             if ($p[0] !== 0) {
                 return array(false, 'pull: ' . self::Tail($p[1]));
             }
@@ -792,7 +825,7 @@ class snode
                 }
                 $exists = self::Podman($d['user'], array('container', 'exists', $name));
                 if ($exists[0] !== 0) {
-                    $pull = self::Podman($d['user'], array('pull', '--quiet', $d['image']), 1800);
+                    $pull = self::Pull($d['user'], $d['image'], $d);
                     if ($pull[0] !== 0) {
                         return array(false, 'pull: ' . self::Tail($pull[1]));
                     }
@@ -1683,11 +1716,11 @@ class snode
             $was = trim(self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name))[1]);
         } else {
             $ref = isset($d['image_ref']) && is_string($d['image_ref']) && preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$#', $d['image_ref']) ? $d['image_ref'] : '';
-            $pull = $ref !== '' ? self::Podman($u, array('pull', '--quiet', $ref), 1800) : array(1, '');
+            $pull = $ref !== '' ? self::Pull($u, $ref, $d) : array(1, '');
             if ($pull[0] === 0) {
                 $d['image'] = $ref;
             } else {
-                $pull = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
+                $pull = self::Pull($u, $d['image'], $d);
                 if ($pull[0] !== 0) {
                     $clean();
                     return array(false, 'pull: ' . self::Tail($pull[1]));

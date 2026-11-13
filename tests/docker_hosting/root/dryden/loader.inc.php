@@ -174,6 +174,36 @@ class sys_email
     }
 }
 
+// (panel notices, as the core's ctrl_notices: kept in DH_W/notices.json, key => the notice or 'withdrawn')
+class ctrl_notices
+{
+    static function All()
+    {
+        $f = getenv('DH_W') . '/notices.json';
+        $a = is_file($f) ? json_decode((string) file_get_contents($f), true) : array();
+        return is_array($a) ? $a : array();
+    }
+
+    static function Send(array $n)
+    {
+        $a = self::All();
+        $a[(string) $n['key']] = $n;
+        file_put_contents(getenv('DH_W') . '/notices.json', json_encode($a));
+        return 1;
+    }
+
+    static function Withdraw($key, $from = null)
+    {
+        $a = self::All();
+        if (!isset($a[$key]) || $a[$key] === 'withdrawn') {
+            return 0;
+        }
+        $a[$key] = 'withdrawn';
+        file_put_contents(getenv('DH_W') . '/notices.json', json_encode($a));
+        return 1;
+    }
+}
+
 class ctrl_module
 {
     // (as the core's: the module's name, description and icon for module.zpm)

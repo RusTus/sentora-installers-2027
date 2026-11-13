@@ -539,6 +539,20 @@ check(strpos($mail, 'To: admin@example.com') !== false && strpos($mail, 'has 2 s
 @unlink(getenv('DH_MAIL'));
 daemon();
 check(!is_file(getenv('DH_MAIL')), 'not again on the next run (only again after a day)');
+// (130) the same as a panel notice to the administrators, one per node, gone once the node is fine
+$nt = json_decode((string) @file_get_contents(getenv('DH_W') . '/notices.json'), true);
+$n1 = isset($nt['docker-hosting-node-1']) && is_array($nt['docker-hosting-node-1']) ? $nt['docker-hosting-node-1'] : array();
+check($n1 && $n1['scope'] === 'groups' && $n1['targets'] === array(1) && $n1['type'] === 'warning' && strpos($n1['title'], 'node "node1" needs a look') !== false
+    && strpos($n1['body'], '- Security updates waiting') !== false && strpos($n1['body'], '- Needs a restart') !== false && strpos($n1['body'], '(./?module=docker_hosting&tab=nodes)') !== false
+    && strpos($n1['body'], 'GB free') === false, 'a panel notice to the administrators (group 1), without figures that change, with the link to Nodes and apps', json_encode($nt));
+$info = json_decode((string) val("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1"), true);
+$keep = $info;
+$info['disk_free_mb'] = $info['disk_total_mb'] = 900000; $info['sys_security'] = 0; $info['sys_reboot'] = 0;
+$zdbh->prepare("UPDATE x_dh_nodes SET nd_info_tx = :i WHERE nd_id_pk = 1")->execute(array(':i' => json_encode($info)));
+$d = daemon();
+$nt = json_decode((string) @file_get_contents(getenv('DH_W') . '/notices.json'), true);
+check(isset($nt['docker-hosting-node-1']) && $nt['docker-hosting-node-1'] === 'withdrawn', 'once the node is fine, its notice is taken away', json_encode($nt));
+$zdbh->prepare("UPDATE x_dh_nodes SET nd_info_tx = :i WHERE nd_id_pk = 1")->execute(array(':i' => json_encode($keep)));
 $d = shell_exec('DH_TEST_HOUR=3 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'installs its security updates') === false, 'security updates wait while automatic is off');
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autosec', 'inAutosec' => '1'));
@@ -672,6 +686,28 @@ foreach ($refused as $x) {
 }
 $r = req(1, 'App', array_merge($own, array('inCpu' => 'x')), array('tab' => 'nodes'));
 check(strpos($r['html'], 'value="x"') !== false && strpos($r['html'], 'Linkding') !== false, 'a refused form is shown again with what was typed');
+// (130) a docker run line from an image's page fills the form: only read, never run, nothing saved
+$r1 = dh::FromDockerRun('docker run -d --name linkding -p 9090:9090 -v "$(pwd)/data:/etc/linkding/data" -e LD_SUPERUSER_NAME=admin --restart unless-stopped sissbruecker/linkding:latest');
+check($r1 && $r1['fields']['image'] === 'docker.io/sissbruecker/linkding:latest' && $r1['fields']['port'] === '9090' && $r1['fields']['volumes'] === '/etc/linkding/data'
+    && $r1['fields']['env'] === 'LD_SUPERUSER_NAME=admin' && $r1['fields']['name'] === 'linkding' && count($r1['left']) === 1 && strpos($r1['left'][0], 'its folder on the host is not used') !== false,
+    'docker run: image (with docker.io), port, data folder, setting, name; the host folder named as not used', json_encode($r1));
+$r2 = dh::FromDockerRun("sudo docker run --privileged --network host --cap-add NET_ADMIN -v /var/run/docker.sock:/var/run/docker.sock --device /dev/sda -p 53:53/udp -p 80:80 -p 443:443 -e FROMHOST nginx");
+$l2 = implode(' | ', $r2 ? $r2['left'] : array());
+check($r2 && $r2['fields']['image'] === 'docker.io/library/nginx' && $r2['fields']['port'] === '80' && $r2['fields']['volumes'] === '' && substr_count($l2, 'never allowed') === 5
+    && strpos($l2, '53:53/udp') !== false && strpos($l2, 'port 443') !== false && strpos($l2, '-e FROMHOST') !== false,
+    'docker run: privileged, host network, capabilities, the docker socket and devices are left out and named; one web port', $l2);
+$r3 = dh::FromDockerRun("docker run \\\n  -m 1g --cpus=1.5 \\\n  -p 127.0.0.1:3001:3001 ghcr.io/maker/app:2 --debug");
+check($r3 && $r3['fields']['mem'] === 1024 && $r3['fields']['cpu'] === 150 && $r3['fields']['port'] === '3001' && $r3['fields']['image'] === 'ghcr.io/maker/app:2' && strpos(implode(' ', $r3['left']), '--debug') !== false,
+    'docker run over several lines: memory, CPU, the port; what follows the image is named', json_encode($r3));
+check(dh::FromDockerRun('rm -rf /') === false && dh::FromDockerRun('docker run -d -p 80:80') === false, 'not a docker run line, or no image: refused');
+$p1 = $r1['fields'];
+check(is_array(dh::CheckApp(array('name' => $p1['name'], 'desc' => '', 'image' => $p1['image'], 'port' => $p1['port'], 'volumes' => $p1['volumes'], 'env' => $p1['env'], 'web' => '', 'minmem' => 128, 'mem' => 256, 'cpu' => 50, 'disk' => 1024))),
+    'what it fills in passes the same checks as an app typed in', dh::$why);
+$before = (int) val("SELECT COUNT(*) FROM x_dh_apps");
+$r = req(1, 'AppFromRun', array('inRun' => 'docker run -d -p 9090:9090 -v ./data:/etc/linkding/data --privileged sissbruecker/linkding:latest'), array('tab' => 'nodes'));
+check(strpos($r['html'], 'value="docker.io/sissbruecker/linkding:latest"') !== false && strpos($r['html'], 'value="9090"') !== false && strpos($r['html'], 'class="dh-msg is-warn"') !== false
+    && strpos($r['text'], 'Left out') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps") === $before, 'Fill in: the form is filled, what was left out is named (amber), nothing is saved', $r['text']);
+check(strpos(req(3, 'AppFromRun', array('inRun' => 'docker run nginx'), array('tab' => 'nodes'))['html'], 'docker.io/library/nginx') === false, 'a client can not');
 $r = req(1, 'App', $own);
 check(strpos($r['text'], 'ok: Linkding was added') !== false, 'the administrator adds an app of its own', $r['text']);
 $ap = row("SELECT * FROM x_dh_apps");
@@ -690,10 +726,26 @@ $r = req(1);
 check(strpos($r['html'], 'Linkding') !== false && strpos($r['html'], 'Bookmarks you keep and share.') !== false, 'offered to the administrator at once');
 $r = req(3);
 check(strpos($r['html'], 'Linkding') === false, 'not to a client until it is in their share');
+// (130) registry logins: kept encrypted, never shown again, sent only for a download from that registry
+check(!is_file(getenv('FAKE_DIR') . '/authfiles.log'), 'until now every download went without a login');
+$r = req(1, 'Registry', array('inHost' => 'https://GHCR.io/', 'inUser' => 'bot', 'inSecret' => 'tok-123-SECRET'), array('tab' => 'nodes'));
+check(strpos($r['text'], 'ok: The login for ghcr.io was saved') !== false, 'an administrator adds a login (the registry as images name it)', $r['text']);
+check(strpos($r['html'], '<b>ghcr.io</b>') !== false && strpos($r['html'], 'user bot') !== false && strpos($r['html'], 'tok-123-SECRET') === false, 'listed with its user; the token is never shown');
+check(strpos((string) val("SELECT st_value_tx FROM x_dh_settings WHERE st_name_vc = 'registries'"), 'tok-123-SECRET') === false, 'kept encrypted in the database');
+check(strpos(req(1, 'Registry', array('inHost' => 'not a host', 'inUser' => 'bot', 'inSecret' => 'x'))['text'], 'error:') !== false
+    && strpos(req(1, 'Registry', array('inHost' => 'quay.io', 'inUser' => 'bot', 'inSecret' => 'has space'))['text'], 'error:') !== false, 'a wrong registry or a token with spaces is refused');
+req(3, 'Registry', array('inHost' => 'quay.io', 'inUser' => 'evil', 'inSecret' => 'x1'));
+check(!isset(dh::Registries()['quay.io']), 'a client can not add one');
+check(dh::RegistryFor('docker.io/library/nginx:1') === array() && dh::RegistryFor('ghcr.io/sissbruecker/linkding:1')['registry']['secret'] === 'tok-123-SECRET', 'only images from that registry get it');
 $r = req(1, 'Deploy', array('inApp' => 'my-linkding', 'inName' => 'links', 'inDomain' => '20', 'inCpu' => '0.5', 'inMem' => '256', 'inDisk' => '1', 'inDns' => '1'));
 check(strpos($r['text'], 'ok: Starting Linkding at links.admin.test') !== false, 'started like any app', $r['text']);
 $lc = row("SELECT * FROM x_dh_containers WHERE dc_domain_vc = 'links.admin.test'");
 agent('once');
+$al = (string) @file_get_contents(getenv('FAKE_DIR') . '/authfiles.log');
+check(strpos($al, base64_encode('bot:tok-123-SECRET')) !== false && strpos($al, '"ghcr.io"') !== false && strpos($al, 'mode=600') !== false && preg_match('/at=(\S+)/', $al, $am) && !is_file($am[1]),
+    'the node downloads it with the login, from a file only the user may read, deleted right after', $al);
+check(strpos((string) @file_get_contents(getenv('SNODE_STATE') . '/state.json'), 'tok-123-SECRET') === false, 'no login stays in the node\'s state');
+check(strpos(req(1, 'RegistryRemove', array('inHost' => 'ghcr.io'), array('tab' => 'nodes'))['text'], 'ok: The login was removed') !== false && dh::Registries() === array(), 'and is removed again');
 $args = file(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $lc['dc_id_pk'] . '/args', FILE_IGNORE_NEW_LINES);
 $a = implode(' ', $args);
 check(strpos($a, '--publish 127.0.0.1:' . $lc['dc_port_in'] . ':9090') !== false && strpos($a, '--volume sdh-' . $lc['dc_id_pk'] . '-0:/etc/linkding/data') !== false

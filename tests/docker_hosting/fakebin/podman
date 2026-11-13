@@ -25,7 +25,8 @@ case "$1" in
           *State.Status*) cat "$P/c/$last/state"; exit 0 ;;
         esac ;;
     esac ;;
-  pull) case "$last" in *nopull*) echo "Error: initializing source: manifest unknown"; exit 125 ;; esac; reg "$last" > "$P/i/$(echo "$last" | tr '/:' '__')"; echo sha256:abc; exit 0 ;;
+  pull) for ((k=1; k<=$#; k++)); do [ "${!k}" = --authfile ] && { j=$((k+1)); f=${!j}; [ -f "$f" ] && { cat "$f"; echo " mode=$(stat -c %a "$f") at=$f"; } >> "$FAKE_DIR/authfiles.log"; }; done
+        case "$last" in *nopull*) echo "Error: initializing source: manifest unknown"; exit 125 ;; esac; reg "$last" > "$P/i/$(echo "$last" | tr '/:' '__')"; echo sha256:abc; exit 0 ;;
   image)
     f="$P/i/$(echo "$last" | tr '/:' '__')"
     case "$*" in
