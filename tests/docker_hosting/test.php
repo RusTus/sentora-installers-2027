@@ -526,7 +526,7 @@ file_put_contents(getenv('SNODE_STATE') . '/sysupdate.json', json_encode(array('
 agent('once');
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
 check(strpos($r['html'], '7 updates waiting, 2 of them security fixes') !== false && strpos($r['html'], 'A restart is needed') !== false, 'the page shows the waiting updates and that a restart is needed');
-check(strpos($r['html'], 'Needs a look') !== false && strpos($r['html'], 'has 2 security updates waiting') !== false, 'and lists it under "Needs a look"');
+check(strpos($r['html'], 'Needs a look') !== false && strpos($r['html'], '<b>node1</b>: ') !== false && strpos($r['html'], '2 security updates waiting') !== false, 'and lists it under "Needs a look": one line for the node, its fix buttons under it');
 $r = req(1);
 check(strpos($r['html'], 'Needs a look') !== false && strpos($r['html'], 'Needs a look') < strpos($r['html'], 'class="dh-tabs"') && strpos($r['html'], 'tab=nodes">Nodes and apps</a>') !== false, 'administrators see it at the top of every tab (above the tabs), with a link to Nodes and apps');
 $r = req(3);
@@ -555,10 +555,10 @@ check(strpos($r['html'], 'Update available: 9999') !== false, 'a node behind the
 check(strpos($r['html'], 'Update now') !== false && strpos($r['html'], 'name="inAutoagent"') === false, '"Update now" is on the row itself; Manage opens under the row only when pressed');
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'node-update'));
 $h = req(1, '', array(), array('tab' => 'nodes'))['html'];
-check(strpos($h, '>Queued</button>') !== false && strpos($h, 'Update now</button>') === false, 'after Update now the button says Queued (as in Repo Browser)');
+check(strpos($h, '>Update now (queued)</button>') !== false && strpos($h, 'Update now</button>') === false, 'after Update now the button says Update now (queued) (as in Repo Browser, and which one)');
 $zdbh->exec("UPDATE x_dh_jobs SET jb_state_vc = 'sent' WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'");
 $h = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'))['html'];
-check(strpos($h, '>In progress</button>') !== false && strpos($h, 'Look for updates now</button>') !== false, 'once the node took it: In progress; the other buttons stay as they are', implode(' | ', array_map('strip_tags', preg_match_all('#<button[^>]*>.*?</button>#s', $h, $bm) ? $bm[0] : array())));
+check(strpos($h, '>Update now (in progress)</button>') !== false && strpos($h, 'Look for updates now</button>') !== false, 'once the node took it: In progress; the other buttons stay as they are', implode(' | ', array_map('strip_tags', preg_match_all('#<button[^>]*>.*?</button>#s', $h, $bm) ? $bm[0] : array())));
 $zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'sent'");
 check(strpos(req(1, '', array(), array('tab' => 'nodes'))['html'], 'Update now') !== false, 'and back to Update now once it is no longer waiting');
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
@@ -577,6 +577,17 @@ $d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') .
 check(strpos((string) $d, 'updates to agent') === false, 'switched off, it waits for "Update now"');
 check((int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 0, 'and nothing is queued');
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autoagent', 'inAutoagent' => '1'));
+// (129) a button brings you back where you pressed it; the red box has one line for nodes behind, with its button
+$h = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'))['html'];
+check(strpos($h, 'action="./?module=docker_hosting&amp;tab=nodes&amp;manage=1&amp;action=NodeAct"') !== false, 'a node\'s buttons come back to Nodes and apps, its Manage still open');
+check(strpos(req(1, '', array(), array('tab' => 'nodes', 'manage' => '1"><script>'))['html'], '<script>') === false, 'only a number is kept from the address');
+check(preg_match('#runs agent [0-9]+ \\(9999 is out\\)\\.<div class="dh-msg-act">.*name="inWhat" value="node-update"#s', $h) === 1 && strpos($h, 'in the node\'s Manage') === false, 'Needs a look: the node behind says so in a few words, its Update now button under the line');
+$r = req(1, 'NodeUpdateAll', array(), array('tab' => 'nodes'));
+check(strpos($r['text'], 'These nodes update themselves') !== false && (int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 1, 'Update all asks each node that is behind', $r['text']);
+check(strpos($r['html'], 'action=NodeUpdateAll') === false && strpos($r['html'], '(queued)</button>') !== false, 'then its button says queued (as Repo Browser)');
+check(strpos(req(1, 'NodeUpdateAll', array(), array('tab' => 'nodes'))['text'], 'No node needs an update') !== false, 'pressed again: nothing asked twice');
+check(strpos(req(3, 'NodeUpdateAll', array(), array('tab' => 'nodes'))['text'], 'These nodes') === false, 'a client can not do it');
+$zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'");
 dh::Set('latest_agent', '');
 agent('once');
 agent('once');
@@ -854,7 +865,7 @@ function seed($u, $cid, $port, $domain, $private, array $env)
 }
 $zdbh->prepare("INSERT INTO x_dh_grants (gr_acc_fk, gr_by_fk, gr_count_in, gr_cpu_in, gr_mem_in, gr_disk_in, gr_apps_tx, gr_updated_in) VALUES (4, 2, 5, 400, 4096, 20480, 'uptime-kuma', :t)")->execute(array(':t' => time()));
 $r = req(1, '', array(), array('tab' => 'nodes'));
-check(strpos($r['html'], 'Found on the nodes') !== false && strpos($r['html'], 'ghost.example.com') !== false && strpos($r['html'], 'app(s) the panel does not know') !== false,
+check(strpos($r['html'], 'Found on the nodes') !== false && strpos($r['html'], 'ghost.example.com') !== false && strpos($r['html'], 'apps the panel does not know are still running on it') !== false,
     'administrator: the found app is shown (and in Needs a look)', substr(strip_tags($r['html']), 0, 3000));
 check(strpos($r['html'], 'Its owner is not known here') !== false, 'its account is not on this panel: no owner suggested');
 $r = req(4, 'FoundDelete', array('inFound' => (string) $fd['fd_id_pk']));
