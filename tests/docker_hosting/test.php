@@ -73,6 +73,14 @@ function sites()
     $f = getenv('SNODE_CADDY') . '/sentora/sites.caddy';
     return is_file($f) ? (string) file_get_contents($f) : '';
 }
+function dump($name, $html)
+{
+    $d = getenv('DH_DUMP');
+    if ($d) {
+        @mkdir($d, 0755, true);
+        file_put_contents($d . '/' . $name . '.html', $html);
+    }
+}
 function calls()
 {
     $f = getenv('FAKE_DIR') . '/calls.log';
@@ -1128,7 +1136,7 @@ check(strpos($o, 'found sdh-990 of sdh4') !== false && $fd && (int) $fd['fd_node
 
 section('an administrator chooses the node');
 $r = req(1);
-check(strpos($r['html'], 'Node (administrators only)') !== false && strpos($r['html'], 'relinked - free:') !== false, 'the administrator sees the node box, with each node\'s free room', substr(strip_tags($r['html']), 0, 300));
+check(strpos($r['html'], 'Node (administrators only)') !== false && strpos($r['html'], 'relinked (free:') !== false, 'the administrator sees the node box, with each node\'s free room', substr(strip_tags($r['html']), 0, 300));
 $rid = (int) $rn['nd_id_pk'];
 $dv = array('app' => 'gitea', 'label' => '', 'cpu' => 50, 'mem' => 512, 'disk' => 1024, 'vhost' => 20, 'name' => 'picked', 'dns' => false);
 check(!dh::Deploy(1, 2, $dv + array('node' => $rid)) && strpos(dh::$why, 'Only an administrator') !== false, 'not for a client, also not called directly');
@@ -1235,7 +1243,10 @@ check($bn && dh::Online($bn), 'a second node, bravo, is online', $o);
 $bid = (int) $bn['nd_id_pk'];
 check(!dh_backup::Move($pid, $bid, 3) && strpos(dh::$why, 'Only an administrator') !== false, 'a client can not move apps between nodes');
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $rn['nd_id_pk']));
-check(strpos($r['html'], 'Apps on this node') !== false && strpos($r['html'], 'action=MoveApp') !== false && strpos($r['html'], 'bravo - free:') !== false, 'the node\'s Manage lists its apps, with Move to the other node');
+dump('manage', $r['html']);
+dump('settings', req(1, '', array(), array('settings' => (string) $pid))['html']);
+dump('main', req(1)['html']);
+check(strpos($r['html'], 'Apps on this node') !== false && strpos($r['html'], 'action=MoveApp') !== false && strpos($r['html'], 'bravo (free:') !== false, 'the node\'s Manage lists its apps, with Move to the other node');
 file_put_contents($vol . '/data.txt', 'moving day');
 $r = req(1, 'MoveApp', array('inId' => (string) $pid, 'inTo' => (string) $bid));
 check(strpos($r['text'], 'ok: Moving it') !== false && dh::Container($pid)['dc_state_vc'] === 'moving', 'Move: queued, shown as being moved', $r['text']);
