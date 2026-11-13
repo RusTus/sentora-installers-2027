@@ -85,7 +85,7 @@ FP=$(grep -oE 'SHA256:[A-Za-z0-9+/]{43}' "$OUT/install-screen.txt" | head -1)
 NK=$(grep -oE 'SB1(-[A-HJ-NP-Z2-9]{4}){4}' "$OUT/install-screen.txt" | head -1)
 ssh-keyscan -t ed25519 "$IP" 2> /dev/null > "$W/known_hosts"
 [ -n "$FP" ] && ssh-keygen -lf "$W/known_hosts" | grep -qF "$FP" && ok "the fingerprint it shows is its real SSH key ($FP)" || bad "fingerprint shown ($FP) is not the server's"
-cut -d' ' -f2- "$W/known_hosts" | head -1 > "$W/scanned.pub"
+grep -v "^#" "$W/known_hosts" | cut -d" " -f2- | head -1 > "$W/scanned.pub"
 [ -n "$NK" ] && [ "$NK" = "$(node_key SB1 "$W/scanned.pub")" ] && ok "the node key it shows is made from its real SSH key ($NK)" || bad "node key shown ($NK) is not the server's"
 if [ -n "${CORE:-}" ] && [ -f "$CORE/dryden/sys/nodes.class.php" ] && command -v php > /dev/null; then
     p=$(php -r 'require $argv[1]; $l = trim(file_get_contents($argv[2])); echo sys_nodes::NodeKey("SB1", sys_nodes::SshKeyCode($l));' "$CORE/dryden/sys/nodes.class.php" "$W/known_hosts")
