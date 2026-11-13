@@ -20,4 +20,4 @@ if (!empty($in['action'])) {
     call_user_func(array('module_controller', 'do' . $in['action']));
 }
 $html = module_controller::getPage();
-echo json_encode(array('msg' => module_controller::$msg, 'go' => module_controller::$go, 'html' => $html));
+echo json_encode(array('msg' => module_controller::$msg, 'go' => module_controller::$go, 'html' => $html, 'title' => module_controller::getTitle(), 'intro' => module_controller::getIntro()));

@@ -1184,6 +1184,30 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * The page's title: the module's name for sellers (administrators, resellers); "Billing" for a
+     * client, who sees only its own invoices and payments here.
+     *
+     * @return string
+     */
+    static function getTitle()
+    {
+        $me = self::Me();
+        return is_array($me) && pp::CanSell($me) ? self::h(self::getModuleName()) : self::t('Billing');
+    }
+
+    /**
+     * The line under the title: what the module does, for sellers; for a client, what it finds here.
+     *
+     * @return string
+     */
+    static function getIntro()
+    {
+        $me = self::Me();
+        return is_array($me) && pp::CanSell($me) ? self::getModuleDesc()
+            : self::t('Your hosting invoices: what is due and when, paying online, and every invoice you paid.');
+    }
+
+    /**
      * Nothing to set up before the page.
      *
      * @return void

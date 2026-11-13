@@ -234,6 +234,8 @@ class fs_filehandler
 
 class ctrl_module
 {
+    public static function getModuleName() { return 'Payment Plans'; }
+    public static function getModuleDesc() { return 'Bill your clients through the panel'; }
 }
 
 // the fake PayPal and Stripe (env PP_FAKE: http://127.0.0.1:port)

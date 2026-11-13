@@ -680,6 +680,12 @@ check((int) pp::Plan(15)['pl_active_in'] === 0 && (int) row("SELECT COUNT(*) n F
 $out = daemon();
 check(strpos($out, 'account 15') === false, 'and is not mentioned again', $out);
 
+section('The heading: the module for sellers, "Billing" for a client');
+$r = req(1);
+check($r['title'] === 'Payment Plans' && strpos($r['intro'], 'Bill your clients') === 0, 'an administrator reads the module\'s name and what it does', $r['title'] . ' / ' . $r['intro']);
+$r = req(11);
+check($r['title'] === 'Billing' && strpos($r['intro'], 'Your hosting invoices') === 0, 'a client reads "Billing" and what it finds there', $r['title'] . ' / ' . $r['intro']);
+
 section('The menu (code/menu.php): sellers always, clients only while billed');
 $menu = function ($user) use ($T) { global $zdbh; return (function ($user) use ($T) { global $zdbh; return include $T . '/root/modules/payment_plans/code/menu.php'; })($user); };
 check($menu(array('userid' => 1, 'usergroupid' => 1)) === true, 'an administrator sees it');

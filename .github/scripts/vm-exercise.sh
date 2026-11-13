@@ -665,7 +665,9 @@ ex "The client's cron task ran as the client" x_cron_ran
 ex "The daemon as cron runs it" x_cron_daemon
 ex "Restart every Sentora service" x_services_restart
 ex "Remove the client (and a daemon run)" x_remove_client
-ex "Keep the panel up to date (installs the published release)" x_autoupdate
+# (last of all, in the last round: it puts the published release in place of this checkout, so a round
+# after it would test the release, not the change; the VM test runs a second round on SELinux only)
+if [ "$ROUND" = two ] || ! { command -v selinuxenabled > /dev/null && selinuxenabled; }; then ex "Keep the panel up to date (installs the published release)" x_autoupdate; fi
 rm -rf "$TMP" "$MYCNF"
 echo "EXERCISE: $OKS OK, $FAILS FAIL, $SKIPS SKIP"
 [ $FAILS -eq 0 ]
