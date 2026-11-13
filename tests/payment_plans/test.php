@@ -680,6 +680,13 @@ check((int) pp::Plan(15)['pl_active_in'] === 0 && (int) row("SELECT COUNT(*) n F
 $out = daemon();
 check(strpos($out, 'account 15') === false, 'and is not mentioned again', $out);
 
+section('The menu (code/menu.php): sellers always, clients only while billed');
+$menu = function ($user) use ($T) { global $zdbh; return (function ($user) use ($T) { global $zdbh; return include $T . '/root/modules/payment_plans/code/menu.php'; })($user); };
+check($menu(array('userid' => 1, 'usergroupid' => 1)) === true, 'an administrator sees it');
+check($menu(array('userid' => 2, 'usergroupid' => 2)) === true, 'a reseller sees it');
+check($menu(array('userid' => 11, 'usergroupid' => 3)) === true, 'a client with invoices sees it');
+check($menu(array('userid' => 999, 'usergroupid' => 3)) === false, 'a client not billed through the panel does not');
+
 section('The daemon\'s hook can not be run from a browser');
 $before = (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'];
 list($code, $h, $b) = web(getenv('PP_WEB') . '/modules/payment_plans/hooks/OnDaemonRun.hook.php');
