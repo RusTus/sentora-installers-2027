@@ -1,0 +1,9 @@
+#!/bin/bash
+# Old name: the backup node's installer is now backup-node/sentora2027-backup-node (2026-11-13).
+# Backup Config on panels before 2027.86 still shows this address; this hands over.
+set -euo pipefail
+B=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup-node
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+echo "(sentora2027-backup-server is now sentora2027-backup-node: downloading it)"
+curl -fsSL --proto =https --proto-redir =https "$B/sentora2027-backup-node" -o "$T/sentora2027-backup-node"
+exec bash "$T/sentora2027-backup-node" "$@"

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Old name: the Docker node's installer is now docker-node/sentora2027-docker-node (2026-11-13).
+# Pages of panels before 2027.86 and Docker Hosting before 130 still show this address; this hands over.
+set -euo pipefail
+B=${SNODE_RAW_BASE:-https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/docker-node}
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+echo "(sentora2027-node is now sentora2027-docker-node: downloading it)"
+curl -fsSL --proto =https,file --proto-redir =https "$B/sentora2027-docker-node" -o "$T/sentora2027-docker-node"
+exec bash "$T/sentora2027-docker-node" "$@"
