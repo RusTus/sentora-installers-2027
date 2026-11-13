@@ -782,6 +782,30 @@ $a = implode(' ', $args);
 check(strpos($a, '--publish 127.0.0.1:' . $lc['dc_port_in'] . ':9090') !== false && strpos($a, '--volume sdh-' . $lc['dc_id_pk'] . '-0:/etc/linkding/data') !== false
     && strpos($a, 'no-new-privileges') !== false && end($args) === 'ghcr.io/sissbruecker/linkding:1', 'the node runs it with the same limits as every app', $a);
 check(in_array('LD_CSRF_TRUSTED_ORIGINS=https://links.admin.test', $args, true) && in_array('LD_NOTE=a=b', $args, true), '{domain} is the app\'s address; a value may hold =', $a);
+// (agent 113) leftovers, tidied once an hour
+$tidy = function () {
+    $f = getenv('SNODE_STATE') . '/state.json';
+    $st = json_decode((string) file_get_contents($f), true);
+    unset($st['scanned_at']);
+    file_put_contents($f, json_encode($st));
+    return agent('once');
+};
+$pd = getenv('FAKE_DIR') . '/podman/sdh1/c/';
+$ln = 'sdh-' . (int) $lc['dc_id_pk'];
+shell_exec('cp -r ' . escapeshellarg($pd . $ln) . ' ' . escapeshellarg($pd . $ln . '-old') . ' && echo exited > ' . escapeshellarg($pd . $ln . '-old/state'));
+file_put_contents($pd . $ln . '/state', 'running');
+$o = $tidy();
+check(!is_dir($pd . $ln . '-old') && is_dir($pd . $ln) && strpos($o, 'tidy: removed ' . $ln . '-old') !== false, '(113) an old copy left by an update that did not finish is removed while the app runs', $o);
+rename($pd . $ln, $pd . $ln . '-old');
+$o = $tidy();
+check(is_dir($pd . $ln) && !is_dir($pd . $ln . '-old') && strpos($o, 'tidy: put back ' . $ln) !== false, 'when the app itself is missing (an update stopped half way), the old copy is put back and started', $o);
+shell_exec('PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH useradd --create-home --home-dir ' . escapeshellarg(getenv('SNODE_HOME') . '/sdh77') . ' sdh77');
+putenv('SNODE_EMPTY_DAYS=0');
+$o = $tidy();
+check(strpos(calls(), 'userdel --remove sdh77') === false, 'a customer user with nothing is only noted the first time', $o);
+$o = $tidy();
+check(strpos(calls(), 'userdel --remove sdh77') !== false && strpos($o, 'tidy: removed the user sdh77') !== false && strpos(calls(), 'userdel --remove sdh1') === false, 'after 7 days (here: at once) it is removed; users with apps never', $o);
+putenv('SNODE_EMPTY_DAYS');
 $sec = dh::AppSecret((int) $lc['dc_id_pk'], 'LD_SECRET');
 check(in_array('LD_SECRET=' . $sec, $args, true) && preg_match('/^[0-9a-f]{40}$/', $sec) && $sec !== dh::AppSecret((int) $lc['dc_id_pk'] + 1, 'LD_SECRET') && $sec !== dh::AppSecret((int) $lc['dc_id_pk'], 'OTHER'), '{secret}: the container\'s own, different for every container and setting', $a);
 agent('once');

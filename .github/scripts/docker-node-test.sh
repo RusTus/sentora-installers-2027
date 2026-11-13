@@ -253,10 +253,10 @@ for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 
 say "A private image: downloaded with a registry login, which does not stay on the node"
 # (a registry with a password on the node itself, as root, on the node's own network (no port forwarding) and with root's own
-# simple storage (vfs: overlay is not possible inside the test's container); the customer's user downloads from it over 127.0.0.1)
+# simple storage in a folder of its own (vfs: overlay is not possible inside the test's container, and root's own storage is not touched); the customer's user downloads from it over 127.0.0.1)
 in_box 'mkdir -p /root/regauth /etc/containers/registries.conf.d && php -r "echo \"bot:\", password_hash(\"pw-reg-123\", PASSWORD_BCRYPT), \"\\n\";" > /root/regauth/htpasswd
   printf "[[registry]]\nlocation = \"127.0.0.1:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/90-sentora-test.conf
-  RP="podman --storage-driver vfs"
+  RP="podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs"
   $RP run -d --name testreg --network host -e REGISTRY_HTTP_ADDR=127.0.0.1:5000 -v /root/regauth:/auth:Z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=test -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd docker.io/library/registry:2 > /dev/null
   $RP create --name testweb docker.io/library/busybox:1 > /dev/null && $RP commit -q --change "CMD [\"busybox\", \"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/etc\"]" testweb 127.0.0.1:5000/private/web:1 > /dev/null
   for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:5000/v2/ && break; sleep 1; done
@@ -279,9 +279,9 @@ if in_box 'curl -s -u bot:pw-reg-123 http://127.0.0.1:5000/v2/_catalog' | grep -
     panel act "$PID" delete > /dev/null
     wait_for 180 bash -c "php '$T/node_real.php' state $PID | grep -x deleted" > /dev/null || bad "private app not deleted"
 else
-    bad "the test registry did not start: $(in_box 'podman --storage-driver vfs logs testreg 2>&1 | tail -5')"
+    bad "the test registry did not start: $(in_box 'podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs logs testreg 2>&1 | tail -5')"
 fi
-in_box 'podman --storage-driver vfs rm -f testreg testweb > /dev/null 2>&1; rm -f /etc/containers/registries.conf.d/90-sentora-test.conf' || true
+in_box 'podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs rm -f testreg testweb > /dev/null 2>&1; rm -rf /var/lib/sentora-test-registry; rm -f /etc/containers/registries.conf.d/90-sentora-test.conf' || true
 
 say "Restarting the node"
 docker restart "$NAME" > /dev/null
@@ -342,6 +342,7 @@ panel act "$CID" delete > /dev/null
 wait_for 180 bash -c "php '$T/node_real.php' state $CID | grep -x deleted" > /dev/null && ok "deleted in the panel" || bad "not deleted: $(panel state "$CID")"
 N=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps -a -q | wc -l; runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman volume ls -q | wc -l" | tr '\n' ' ')
 [ "$N" = "0 0 " ] && ok "container and its data gone from the node" || bad "left on the node (containers, volumes): $N"
+[ "$(podu sdh3 "images -q" | grep -c .)" = 0 ] && ok "(agent 113) and the images it used" || bad "images left after the delete: $(podu sdh3 images)"
 in_box 'grep -c kuma.example.test /etc/caddy/sentora/sites.caddy || true' | grep -qx 0 && ok "its site gone from Caddy" || bad "its site is still in Caddy"
 say "Removing the node from the panel"
 panel remove | grep -qx online && ok "the online node is asked to remove itself" || bad "remove: not asked"

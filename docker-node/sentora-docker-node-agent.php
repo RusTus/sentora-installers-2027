@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '112';
+    const VERSION = '113';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -927,6 +927,8 @@ class snode
                             self::Podman($d['user'], array('volume', 'rm', '--force', $v));
                         }
                     }
+                    // (113) the images no container of this user uses any more
+                    self::Podman($d['user'], array('image', 'prune', '--all', '--force'), 300);
                 }
                 unset($s['containers'][$key]);
                 $px = self::Proxy($s);
@@ -1134,6 +1136,83 @@ class snode
             }
         }
         return array_values(array_unique($out));
+    }
+
+    /**
+     * Leftovers, once an hour (agent 113): an app's "-old" copy from an update the node did not finish
+     * (removed when the app itself runs; put back when the app itself is missing), and a customer's
+     * user with no containers and no volumes at all for 7 days (removed: no data is ever deleted here).
+     * Returns lines for the log.
+     */
+    static function Tidy(array &$s)
+    {
+        $out = array();
+        $known = array();
+        foreach ($s['containers'] as $c) {
+            $known[(string) $c['user']] = true;
+        }
+        if (!isset($s['empty']) || !is_array($s['empty'])) {
+            $s['empty'] = array();
+        }
+        foreach (self::Users() as $user) {
+            $uid = self::Uid($user);
+            if ($uid < 0) {
+                continue;
+            }
+            $r = self::Podman($user, array('ps', '--all', '--format', 'json'), 60);
+            if ($r[0] !== 0) {
+                continue;
+            }
+            $states = array();
+            foreach ((array) json_decode($r[1], true) as $p) {
+                foreach (isset($p['Names']) && is_array($p['Names']) ? $p['Names'] : array() as $nm) {
+                    $states[(string) $nm] = isset($p['State']) ? strtolower((string) $p['State']) : '';
+                }
+            }
+            foreach ($states as $nm => $st) {
+                if (!preg_match('/^(sdh-(\d+))-old$/', $nm, $m)) {
+                    continue;
+                }
+                if (isset($states[$m[1]])) {
+                    if ($states[$m[1]] === 'running') {
+                        self::Podman($user, array('rm', '--force', '--ignore', $nm), 120);
+                        $out[] = 'tidy: removed ' . $nm . ' of ' . $user . ' (left by an update that did not finish; ' . $m[1] . ' runs)';
+                    }
+                } elseif (isset($s['containers'][$m[2]])) {
+                    // the update stopped half way: the old version comes back
+                    if (self::Podman($user, array('rename', $nm, $m[1]))[0] === 0) {
+                        self::Podman($user, array('start', $m[1]), 120);
+                        $out[] = 'tidy: put back ' . $m[1] . ' of ' . $user . ' (an update stopped half way)';
+                    }
+                }
+            }
+            $vols = self::Podman($user, array('volume', 'ls', '--quiet'), 60);
+            $empty = !$states && !isset($known[$user]) && $vols[0] === 0 && trim($vols[1]) === '';
+            if (!$empty) {
+                unset($s['empty'][$user]);
+                continue;
+            }
+            if (!isset($s['empty'][$user])) {
+                $s['empty'][$user] = time();
+                continue;
+            }
+            if (time() - (int) $s['empty'][$user] < (int) (getenv('SNODE_EMPTY_DAYS') !== false ? getenv('SNODE_EMPTY_DAYS') : 7) * 86400) {
+                continue;
+            }
+            self::Run(array('loginctl', 'disable-linger', $user), null, 30);
+            self::Run(array('systemctl', 'stop', 'user@' . $uid . '.service'), null, 60);
+            $d = self::Run(array('userdel', '--remove', $user), null, 60);
+            if ($d[0] === 0) {
+                unset($s['empty'][$user]);
+                $out[] = 'tidy: removed the user ' . $user . ' (no apps and no data for 7 days)';
+            } else {
+                $out[] = 'tidy: ' . $user . ' could not be removed: ' . self::Tail($d[1]);
+            }
+        }
+        if ($out) {
+            self::Fence(true);
+        }
+        return $out;
     }
 
     /**
@@ -2088,6 +2167,9 @@ class snode
         if (!isset($s['scanned_at']) || time() - (int) $s['scanned_at'] > 3600) {
             if (self::Scan($s) > 0) {
                 self::Proxy($s);
+            }
+            foreach (self::Tidy($s) as $line) {
+                self::Out($line);
             }
             self::SaveState($s);
         }

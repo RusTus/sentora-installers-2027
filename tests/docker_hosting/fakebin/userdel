@@ -1,0 +1,7 @@
+#!/bin/bash
+echo "userdel $*" >> "$FAKE_DIR/calls.log"
+user=${!#}
+[ -f "$FAKE_DIR/users/$user" ] || { echo "userdel: user '$user' does not exist" >&2; exit 6; }
+rm -f "$FAKE_DIR/users/$user"; rm -rf "$FAKE_DIR/podman/$user"
+grep -v "^$user:" "$FAKE_DIR/passwd" > "$FAKE_DIR/passwd.new"; mv "$FAKE_DIR/passwd.new" "$FAKE_DIR/passwd"
+exit 0
