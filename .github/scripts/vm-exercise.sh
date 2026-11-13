@@ -501,6 +501,47 @@ x_restore() {
     "$PANEL/bin/sentora-restore" "$U" "$BACKUPZIP" --yes > "$TMP/restore.log" 2>&1 || { WHY="$(tail -1 "$TMP/restore.log")"; return 1; }
     site "http://$DOM/vmtest.php" | grep -q VMJSON || { WHY="the restored page does not run"; return 1; }
 }
+x_offsite() {
+    # Backup Config's "Back up now" to another SSH server (a local user here): the copy runs from
+    # root's service (zsudo's queue), as on a real panel; rsync there must be able to start ssh
+    need ADMIN "administrator login" || return $?
+    need SITE "domains" || return $?
+    local bu="sbx$RND" st=/var/lib/sentora/offsite-backup.json r=0 pub fp k
+    pub=$(q "SELECT so_value_tx FROM x_settings WHERE so_name_vc='offsite_pubkey'")
+    [ -n "$pub" ] || { daemon_now; pub=$(q "SELECT so_value_tx FROM x_settings WHERE so_name_vc='offsite_pubkey'"); }
+    [ -n "$pub" ] || { WHY="the panel made no off-server SSH key (offsite_pubkey)"; return 1; }
+    useradd -m "$bu" > /dev/null 2>&1 || { WHY="could not add the user $bu"; return 1; }
+    install -d -m 700 -o "$bu" -g "$(id -gn "$bu")" "/home/$bu/.ssh"
+    echo "$pub" > "/home/$bu/.ssh/authorized_keys"; chown "$bu:" "/home/$bu/.ssh/authorized_keys"; chmod 600 "/home/$bu/.ssh/authorized_keys"
+    command -v restorecon > /dev/null && restorecon -R "/home/$bu" 2> /dev/null
+    fp=$(ssh-keyscan -t ed25519 127.0.0.1 2> /dev/null | ssh-keygen -lf - 2> /dev/null | awk '{ print $2 }' | head -1)
+    [ -n "$fp" ] || { WHY="this server's SSH did not answer on 127.0.0.1"; r=1; }
+    if [ $r -eq 0 ]; then
+        for k in "offsite_server=127.0.0.1" "offsite_port=22" "offsite_user=$bu" "offsite_password=" "offsite_path=/home/$bu/copies" \
+                "offsite_hostkey=$fp" "offsite_target=ssh" "offsite_mail=false" "offsite_enabled=false"; do
+            q "UPDATE x_settings SET so_value_tx='${k#*=}' WHERE so_name_vc='${k%%=*}'"
+        done
+        rm -f "$st"
+        au -L -o "$TMP/a.html" -d "csfr_token=$(atok backup_admin)" "https://$FQDN/?module=backup_admin&action=OffsiteNow&dest=ssh"
+        page_ok "$TMP/a.html" || r=1
+    fi
+    if [ $r -eq 0 ] && ! wait_for 400 bash -c "grep -q '\"last_run\"' $st 2> /dev/null"; then
+        WHY="no copy within 400 s: $(head -c 200 "$st" 2> /dev/null)"; r=1
+    fi
+    if [ $r -eq 0 ]; then
+        local snap; snap=$(ls -d /home/"$bu"/copies/*/latest/ 2> /dev/null | head -1)
+        if [ -z "$snap" ]; then WHY="the copy failed: $(php -r '$d = json_decode((string) @file_get_contents($argv[1]), true); echo is_array($d) ? ($d["message"] ?? json_encode($d)) : "no state";' "$st")"; r=1
+        elif [ ! -f "$snap/var/sentora/hostdata/$U/public_html/${DOMDIR##*/}/vmtest.php" ] && ! find "$snap/var/sentora/hostdata/$U" -name vmtest.php 2> /dev/null | grep -q .; then WHY="the copy has no web files of $U"; r=1
+        elif [ ! -f "$snap/manifest.json" ]; then WHY="the copy has no manifest"; r=1
+        fi
+    fi
+    # as it was: no off-server backup, no user
+    for k in "offsite_server=" "offsite_user=sentora-backup" "offsite_path=/srv/sentora-backups" "offsite_hostkey=" "offsite_target=" "offsite_mail=true" "offsite_request="; do
+        q "UPDATE x_settings SET so_value_tx='${k#*=}' WHERE so_name_vc='${k%%=*}'"
+    done
+    userdel -r "$bu" > /dev/null 2>&1
+    return $r
+}
 x_fail2ban() {
     command -v fail2ban-client > /dev/null || { WHY="fail2ban is not installed"; return 2; }
     # a guesser on its own little network (fail2ban never bans the server's own addresses)
@@ -598,6 +639,7 @@ ex "DNS answers for the domains" x_dns
 ex "Protected directory (password, 401, 200)" x_protect
 ex "Backup Now (Backup Manager)" x_backup
 ex "Restore from that backup" x_restore
+ex "Off-server backup: Back up now to an SSH server" x_offsite
 ex "fail2ban bans password guessing" x_fail2ban
 ex "Hourly and daily jobs (forced daemon run)" x_hourly_daily
 ex "logrotate (its own service)" x_logrotate
