@@ -28,7 +28,7 @@
 # Log: /var/log/sentora2027-backup-node.log, the gate's: /var/log/sentora-backup-gate.log
 set -u
 LOG=/var/log/sentora2027-backup-node.log
-RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup
+RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup-node
 KEYARG='' AREA='' GATE='' UPDATE=0
 while [ $# -gt 0 ]; do
     case "$1" in
