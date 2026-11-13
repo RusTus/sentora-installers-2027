@@ -586,7 +586,12 @@ $d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') .
 check(strpos((string) $d, 'updates to agent') === false, 'once a night');
 $zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'");
 dh::Set('autoagent_1', '0');
+$ntx = function () { $nt = json_decode((string) @file_get_contents(getenv('DH_W') . '/notices.json'), true); return is_array($nt) && isset($nt['docker-hosting-node-1']) ? json_encode($nt['docker-hosting-node-1']) : ''; };
+daemon();
+check(strpos($ntx(), 'Runs agent') === false, '(131) with Nightly node updates on, the panel notice does not mention the newer agent (it installs itself)', $ntx());
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autoagent', 'inAutoagent' => '0'));
+daemon();
+check(strpos($ntx(), 'Runs agent') !== false, '(131) switched off, it does', $ntx());
 $d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'updates to agent') === false, 'switched off, it waits for "Update now"');
 check((int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 0, 'and nothing is queued');
