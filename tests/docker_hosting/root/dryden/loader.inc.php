@@ -192,6 +192,11 @@ class ctrl_notices
         return 1;
     }
 
+    static function ToUser($uid, $body, array $o = array())
+    {
+        return self::Send(array('scope' => 'user', 'targets' => array((int) $uid), 'body' => $body) + $o);
+    }
+
     static function Withdraw($key, $from = null)
     {
         $a = self::All();
