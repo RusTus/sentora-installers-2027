@@ -13,7 +13,7 @@ HANDOFF.md (see "Where things are").
 - The tooling handles this: the release workflow sorts versions with `sort -V`, and `sentora-update`
   knows a new release by its SHA-256, not by comparing numbers.
 
-## Releasing (only when the owner asks)
+## Releasing (as you see fit: say so first, then wait at least 10 seconds; owner, 2026-11-13)
 
 1. `php .github/scripts/stamp-rustus.php` (in sentora-core-2027).
 2. Write the next version into sentora-core-2027's `VERSION` (one more than the last: see the newest `- Release 2027.N`
@@ -84,8 +84,9 @@ installer's "Configuring Sentora" step. SELinux and AppArmor stay on, always.
 ## Working with the owner
 
 Plain words, short; with every command say which server it runs on (the panel, a Docker Hosting node, the owner's PC); when the owner is testing, give the steps that belong together in a row as one short block, then the next block when they are ready (not everything at once: it gets lost in the chat); start each step with what it is for ("so your PC can find the app: ..."), then how, so the owner can skip what they already have or do it their own way; test before saying something works; commit and
-publish as you see fit (the owner's rule since 2026-11-10: they say when to wait); a panel release only when
-the owner asks or has said "release as you see fit". The owner uses
+publish as you see fit (the owner's rule since 2026-11-10: they say when to wait); releases as you see fit (the owner's rule
+since 2026-11-13), but first say in the chat that you are releasing, then wait at least 10 seconds before
+starting it, so the owner can stop it. The owner uses
 speech to text: "Centaur", "Centora" = Sentora, "himsa" = hemsaw, "zPanel" sometimes means the panel.
 
 **Several sessions work on these repositories at the same time (the owner's rule):** before
