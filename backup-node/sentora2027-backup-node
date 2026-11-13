@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sentora Backup Server installer: makes this server the off-server backup machine of one or more
+# Sentora Backup Node installer: makes this server the off-server backup machine of one or more
 # Sentora-2027 panels (Admin > Backup Config > Off-server backup), on every system Sentora supports:
 # Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise Linux 10 and Fedora 45.
 # Run it as root on a server of its own (not a panel's), installed the same way as a Docker Hosting node:
@@ -67,7 +67,7 @@ ui_bar() { # background text
 }
 ui_banner() { # subtitle
     [ $UI_TTY -eq 1 ] && clear >&3
-    ui_bar "$BG_TITLE" "  Sentora-2027 Backup Server  -  ${UI_WHAT:-Installer}"
+    ui_bar "$BG_TITLE" "  Sentora-2027 Backup Node  -  ${UI_WHAT:-Installer}"
     [ -n "$1" ] && printf '%s  %s%s\n' "$C_DIM" "$1" "$C_RESET" >&3
     echo >&3
 }
@@ -220,7 +220,7 @@ touch "$LOG"; chmod 600 "$LOG"
 UI_LOGPOS=$(stat -c %s "$LOG" 2> /dev/null || echo 0)
 [ "$UPDATE" = 1 ] && UI_WHAT=Update
 ui_banner "$(hostname)  -  ${PRETTY_NAME}"
-echo "$(date '+%F %T') Sentora Backup Server $([ "$UPDATE" = 1 ] && echo update || echo installer), ${PRETTY_NAME}" >> "$LOG"
+echo "$(date '+%F %T') Sentora Backup Node $([ "$UPDATE" = 1 ] && echo update || echo installer), ${PRETTY_NAME}" >> "$LOG"
 UI_WORKING=1
 exec >> "$LOG" 2>&1
 

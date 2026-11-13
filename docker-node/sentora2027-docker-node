@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sentora Node installer: makes this server a Docker Hosting node of a Sentora-2027 panel, on every
+# Sentora Docker Node installer: makes this server a Docker Hosting node of a Sentora-2027 panel, on every
 # system Sentora supports: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise
 # Linux 10 and Fedora 45. Run it as root on a server of its own (not the panel's), with nothing else on it:
 #
@@ -88,7 +88,7 @@ ui_bar() { # background text
 }
 ui_banner() { # subtitle
     [ $UI_TTY -eq 1 ] && clear >&3
-    ui_bar "$BG_TITLE" "  Sentora-2027 Node  -  ${UI_WHAT:-Installer}"
+    ui_bar "$BG_TITLE" "  Sentora-2027 Docker Node  -  ${UI_WHAT:-Installer}"
     [ -n "$1" ] && printf '%s  %s%s\n' "$C_DIM" "$1" "$C_RESET" >&3
     echo >&3
 }
@@ -262,7 +262,7 @@ touch "$LOG"; chmod 600 "$LOG"
 UI_LOGPOS=$(stat -c %s "$LOG" 2> /dev/null || echo 0)
 [ "$UPDATE" = 1 ] && UI_WHAT=Update
 ui_banner "$(hostname)  -  ${PRETTY_NAME}  -  panel: ${PANEL}"
-echo "$(date '+%F %T') Sentora Node $([ "$UPDATE" = 1 ] && echo update || echo installer), ${PRETTY_NAME}" >> "$LOG"
+echo "$(date '+%F %T') Sentora Docker Node $([ "$UPDATE" = 1 ] && echo update || echo installer), ${PRETTY_NAME}" >> "$LOG"
 UI_WORKING=1
 # (from here on the details go to the log; the screen gets the steps)
 exec >> "$LOG" 2>&1
@@ -340,7 +340,7 @@ run systemctl enable --now "$CHRONY_SERVICE"
 ui_step "Limits for the customers' containers (cgroups)"
 mkdir -p /etc/systemd/system/user@.service.d
 cat > /etc/systemd/system/user@.service.d/sentora-delegate.conf <<'EOF'
-# Sentora Node: each customer's containers get CPU, memory, I/O and process limits (rootless Podman).
+# Sentora Docker Node: each customer's containers get CPU, memory, I/O and process limits (rootless Podman).
 [Service]
 Delegate=cpu cpuset io memory pids
 EOF
@@ -351,7 +351,7 @@ ui_step "Web server (Caddy, automatic HTTPS)"
 mkdir -p $CADDY_DIR/sentora
 [ -f $CADDY_DIR/Caddyfile ] && [ ! -f $CADDY_DIR/Caddyfile.before-sentora ] && cp -p $CADDY_DIR/Caddyfile $CADDY_DIR/Caddyfile.before-sentora
 {
-    echo "# Written by the Sentora Node installer. The containers' sites are in sentora/ (the agent writes them)."
+    echo "# Written by the Sentora Docker Node installer. The containers' sites are in sentora/ (the agent writes them)."
     echo "{"
     [ -n "$EMAIL" ] && echo "	email $EMAIL"
     # (install test only: certificates from Caddy's own local authority, as the test has no public name)
@@ -364,7 +364,7 @@ mkdir -p $CADDY_DIR/sentora
     echo ""
     echo "import $CADDY_DIR/sentora/*.caddy"
 } > $CADDY_DIR/Caddyfile
-[ -f $CADDY_DIR/sentora/sites.caddy ] || echo "# Written by Sentora Node (sentora-docker-node-agent): no containers yet." > $CADDY_DIR/sentora/sites.caddy
+[ -f $CADDY_DIR/sentora/sites.caddy ] || echo "# Written by Sentora Docker Node (sentora-docker-node-agent): no containers yet." > $CADDY_DIR/sentora/sites.caddy
 run "$CADDY_BIN" validate --config $CADDY_DIR/Caddyfile --adapter caddyfile || die "Caddy does not accept its settings (see $LOG)."
 ui_step "Firewall (only SSH, HTTP and HTTPS open)"
 SSH_PORTS=$(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -u | tr '\n' ' ')
@@ -433,7 +433,7 @@ EOF
 chmod 755 /usr/local/sbin/sentora-docker-node-agent
 cat > /usr/local/sbin/sentora-docker-node-relink <<'RELINK_EOF'
 #!/bin/sh
-# Sentora Node: link this node again, keeping every app and its data.
+# Sentora Docker Node: link this node again, keeping every app and its data.
 #   sentora-docker-node-relink --panel https://panel.example            the same panel at a new address (only the address
 #                                                                 changes), or another panel (new node key to add there)
 #   sentora-docker-node-relink --panel https://panel.example --new-key  the same panel, which no longer knows this node
@@ -467,7 +467,7 @@ chmod 600 "$CONF"
 ui_step "The node's tools and its service"
 cat > /etc/systemd/system/sentora-docker-node.service <<EOF
 [Unit]
-Description=Sentora Node agent (Docker Hosting)
+Description=Sentora Docker Node agent (Docker Hosting)
 After=network-online.target $CADDY_SERVICE.service
 Wants=network-online.target
 
@@ -483,7 +483,7 @@ WantedBy=multi-user.target
 EOF
 cat > /usr/local/sbin/sentora-docker-node-uninstall <<'EOF'
 #!/bin/sh
-# Sentora Node: stop and remove the agent and its keys (the panel then sees the node offline; remove it there).
+# Sentora Docker Node: stop and remove the agent and its keys (the panel then sees the node offline; remove it there).
 # --purge also deletes every customer's containers, data and Linux user (sdh*), and the containers' sites.
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 CADDY_DIR=$(sed -n 's/^CADDY_DIR=//p' /etc/sentora-docker-node/platform.conf 2> /dev/null); CADDY_DIR=${CADDY_DIR:-/etc/caddy}
@@ -501,12 +501,12 @@ if [ "${1:-}" = --purge ]; then
 fi
 systemctl daemon-reload
 rm -f /usr/local/sbin/sentora-docker-node-uninstall
-echo "Sentora Node agent removed."
+echo "Sentora Docker Node agent removed."
 EOF
 chmod 755 /usr/local/sbin/sentora-docker-node-uninstall
 cat > /usr/local/sbin/sentora-docker-node-sysupdate <<'SYSUPDATE_EOF'
 #!/bin/bash
-# Sentora Node: this server's own updates, for the panel (Docker Hosting > Nodes and apps), which asks
+# Sentora Docker Node: this server's own updates, for the panel (Docker Hosting > Nodes and apps), which asks
 # for them through the agent. The result goes to /var/lib/sentora-docker-node/sysupdate.json.
 #   --check     count the waiting updates (all, security) and whether a restart is needed
 #   --security  install the security updates      --all   install all updates
@@ -555,7 +555,7 @@ SYSUPDATE_EOF
 chmod 700 /usr/local/sbin/sentora-docker-node-sysupdate
 cat > /usr/local/sbin/sentora-docker-node-update <<'UPDATE_EOF'
 #!/bin/bash
-# Sentora Node: bring this node up to date, like sentora-update on the panel. Downloads the newest node
+# Sentora Docker Node: bring this node up to date, like sentora-update on the panel. Downloads the newest node
 # installer and agent (master2027 of sentora-installers-2027), shows what changes, and runs the
 # installer with --update: every step again and the new agent (the old one comes back when the new
 # one does not start). Only Sentora's own software: Podman, Caddy, PHP and the rest of the system are

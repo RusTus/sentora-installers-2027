@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Sentora Node agent: runs on a Docker Hosting node (a separate server, never the panel's) as the
+ * Sentora Docker Node agent: runs on a Docker Hosting node (a separate server, never the panel's) as the
  * root service sentora-docker-node. It calls the panel every few seconds (nothing on the node is opened for
  * the panel), takes the jobs waiting for it, does them, and reports back.
  *
@@ -770,7 +770,7 @@ class snode
     static function Settings($email, $local)
     {
         $file = self::$caddy . '/Caddyfile';
-        $t = "# Written by the Sentora Node installer. The containers' sites are in sentora/ (the agent writes them).\n{\n"
+        $t = "# Written by the Sentora Docker Node installer. The containers' sites are in sentora/ (the agent writes them).\n{\n"
             . ($email !== '' ? "\temail " . $email . "\n" : '') . ($local ? "\tlocal_certs\n" : '')
             . "\tskip_install_trust\n\tadmin localhost:2019\n}\n\nimport /etc/caddy/sentora/*.caddy\n";
         $old = is_file($file) ? (string) file_get_contents($file) : '';
@@ -947,7 +947,7 @@ class snode
     static function Proxy(array $s)
     {
         $file = self::$caddy . '/sentora/sites.caddy';
-        $t = "# Written by Sentora Node (sentora-docker-node-agent) from the panel's containers: do not change by hand.\n";
+        $t = "# Written by Sentora Docker Node (sentora-docker-node-agent) from the panel's containers: do not change by hand.\n";
         ksort($s['containers']);
         foreach ($s['containers'] as $cid => $c) {
             $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
@@ -2162,17 +2162,17 @@ class snode
         if ($cmd === 'status') {
             $s = self::State();
             if ((int) self::$cfg['node'] === 0) {
-                self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ': not added there yet (its node key is in ' . (getenv('SNODE_KEYFILE') ?: '/root/sentora-docker-node-key.txt') . ').');
+                self::Out('Sentora Docker Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ': not added there yet (its node key is in ' . (getenv('SNODE_KEYFILE') ?: '/root/sentora-docker-node-key.txt') . ').');
                 return 0;
             }
-            self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
+            self::Out('Sentora Docker Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
             foreach (self::States($s) as $cid => $st) {
                 self::Out(sprintf('  %s  %-8s %-10s %s (%d MB)', self::Name($cid), $st['user'], $st['state'], $s['containers'][$cid]['domain'], $st['used_mb']));
             }
             return 0;
         }
         if ($cmd === 'run') {
-            self::Out('Sentora Node agent ' . self::VERSION . ': calling ' . self::$cfg['panel'] . ((int) self::$cfg['node'] === 0 ? ', waiting to be added there with its node key' : ' as node ' . self::$cfg['node']));
+            self::Out('Sentora Docker Node agent ' . self::VERSION . ': calling ' . self::$cfg['panel'] . ((int) self::$cfg['node'] === 0 ? ', waiting to be added there with its node key' : ' as node ' . self::$cfg['node']));
             while (true) {
                 sleep((int) self::$cfg['node'] === 0 ? self::Hello() : self::Once());
             }
