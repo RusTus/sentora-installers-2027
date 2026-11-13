@@ -1,21 +1,21 @@
 # Docker Hosting node test: a real AlmaLinux 10, Rocky Linux 10, Fedora 45, Debian 13 and Ubuntu 26.04 in a container
-# with systemd is made a node with node/sentora2027-node and linked to a stand-in panel running the add-on
+# with systemd is made a node with docker-node/sentora2027-docker-node and linked to a stand-in panel running the add-on
 # (sentora-repo/docker_hosting.zpp); it must then really run an app (rootless Podman as the customer's
 # user, limits held, Caddy with the setup password, public, restart, delete). Also runs the add-on's
 # own tests (tests/docker_hosting/run.sh). Results kept 14 days.
-# The script that does the work: .github/scripts/node-test.sh.
-name: Node test
+# The script that does the work: .github/scripts/docker-node-test.sh.
+name: Docker node test
 
 on:
   workflow_dispatch:
   push:
     branches: [master2027, docker-hosting]
     paths:
-      - node/**
+      - docker-node/**
       - sentora-repo/docker_hosting.zpp
       - tests/docker_hosting/**
-      - .github/scripts/node-test.sh
-      - .github/workflows/node-test.yml
+      - .github/scripts/docker-node-test.sh
+      - .github/workflows/docker-node-test.yml
 
 permissions:
   contents: read
@@ -53,10 +53,10 @@ jobs:
       - name: Real node
         run: |
           mkdir -p /tmp/mod && unzip -q sentora-repo/docker_hosting.zpp -d /tmp/mod
-          .github/scripts/node-test.sh /tmp/mod results ${{ matrix.system }}
+          .github/scripts/docker-node-test.sh /tmp/mod results ${{ matrix.system }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: node-test-${{ matrix.system }}
+          name: docker-node-test-${{ matrix.system }}
           path: results
           retention-days: 14

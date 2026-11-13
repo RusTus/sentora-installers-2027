@@ -1,10 +1,10 @@
 #!/bin/bash
 # Docker Hosting node test: a real AlmaLinux 10 (or Rocky Linux 10) in a container with systemd is made
-# a node with node/sentora2027-node, linked to a stand-in panel (tests/docker_hosting) running
+# a node with docker-node/sentora2027-docker-node, linked to a stand-in panel (tests/docker_hosting) running
 # the add-on, and must then really run an app: rootless Podman as the customer's own user, its limits
 # held by the kernel, Caddy in front (HTTPS, setup password first, then public), restarted with the
 # "server", deleted with its data.
-#   .github/scripts/node-test.sh <module folder> <results folder> [alma10|rocky10|fedora45|debian13|ubuntu26.04]
+#   .github/scripts/docker-node-test.sh <module folder> <results folder> [alma10|rocky10|fedora45|debian13|ubuntu26.04]
 # Needs docker that can run privileged containers with cgroup v2, php (pdo_sqlite, curl, sodium).
 # The container has no SELinux (the runner's kernel has none): the installer's SELinux step is not tested here.
 set -uo pipefail
@@ -20,7 +20,7 @@ case "$SYS" in
     ubuntu26.04) IMAGE=docker.io/library/ubuntu:26.04; PKGS=apt ;;
     *) echo "unknown system $SYS"; exit 2 ;;
 esac
-NAME=sentora-node-test
+NAME=sentora-docker-node-test
 FAILS=0
 say() { printf '\n=== %s  (%s)\n' "$1" "$(date '+%H:%M:%S')"; }
 ok() { echo "  ok   $1"; }
@@ -32,14 +32,14 @@ wait_for() { # wait_for <seconds> <command...>: until the command prints somethi
     while [ "$(date +%s)" -lt "$end" ]; do out=$("$@" 2>/dev/null); case "$out" in ''|0) sleep 3 ;; *) echo "$out"; return 0 ;; esac; done
     return 1
 }
-diag() { panel log | tail -8; in_box 'journalctl -u sentora-node --no-pager | tail -15; journalctl -u caddy --no-pager | tail -6'; }
+diag() { panel log | tail -8; in_box 'journalctl -u sentora-docker-node --no-pager | tail -15; journalctl -u caddy --no-pager | tail -6'; }
 state_is() { local s; s=$(panel state "$1"); case "$s" in "$2"*) echo "$s" ;; esac; }
 
 say "Stand-in panel with the add-on"
 W=$(mktemp -d)
 rm -rf "$T/root/modules"; mkdir -p "$T/root/modules"; cp -r "$MOD" "$T/root/modules/docker_hosting"
 export DH_DB="$W/panel.sqlite"
-# (app backups need a Sentora backup server for the off-server backup: the stand-in says it has one)
+# (app backups need a Sentora backup node for the off-server backup: the stand-in says it has one)
 export DH_BACKUP_DIR="$W/dhbackups" DH_OFFSITE_STATE="$W/offsite.json"; echo '{"gate":1}' > "$W/offsite.json"
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 php -d display_errors=stderr -d error_reporting=-1 -S "$GW:18092" -t "$T/root" > "$OUT/panel-web.log" 2>&1 &
@@ -47,9 +47,9 @@ WEB=$!
 cleanup() {
     kill $WEB 2> /dev/null
     panel log > "$OUT/panel-log.txt" 2>&1
-    docker exec "$NAME" journalctl -u sentora-node --no-pager > "$OUT/agent.log" 2>&1
+    docker exec "$NAME" journalctl -u sentora-docker-node --no-pager > "$OUT/agent.log" 2>&1
     docker exec "$NAME" journalctl -u caddy --no-pager > "$OUT/caddy.log" 2>&1
-    docker exec "$NAME" cat /var/log/sentora2027-node.log > "$OUT/node-install.log" 2>&1
+    docker exec "$NAME" cat /var/log/sentora2027-docker-node.log > "$OUT/node-install.log" 2>&1
     docker exec "$NAME" cat /etc/caddy/sentora/sites.caddy > "$OUT/sites.caddy" 2>&1
     [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }
 }
@@ -67,34 +67,34 @@ else
     RUNLINE='dnf -y install systemd procps-ng hostname iproute tzdata && dnf clean all'
 fi
 printf 'FROM %s\nRUN %s && (systemctl unmask systemd-logind.service || true)\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" "$RUNLINE" > "$W/Dockerfile"
-docker build -q -t sentora-node-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
+docker build -q -t sentora-docker-node-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
 mkdir -p "$W/home"
 # (/home on the runner's disk: rootless Podman's storage can not be overlay on the container's overlay)
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$W/home":/home \
-    --tmpfs /run --tmpfs /run/lock -h node1.example.test sentora-node-test > /dev/null
+    --tmpfs /run --tmpfs /run/lock -h node1.example.test sentora-docker-node-test > /dev/null
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 
 say "Installing the node"
-docker cp "$REPO/node/sentora2027-node" "$NAME:/root/sentora2027-node"
-docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/sentora-node-agent.php"
+docker cp "$REPO/docker-node/sentora2027-docker-node" "$NAME:/root/sentora2027-docker-node"
+docker cp "$REPO/docker-node/sentora-docker-node-agent.php" "$NAME:/root/sentora-docker-node-agent.php"
 START=$(date +%s)
 # (the node makes its own key; the panel's code is given as the person installing would confirm it)
-in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-node --panel http://$GW:18092 --panel-code $FP --agent /root/sentora-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
+in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-docker-node --panel http://$GW:18092 --panel-code $FP --agent /root/sentora-docker-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
 echo "installed in $(( $(date +%s) - START )) seconds"
-grep -q "^Done: this server is ready to be a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; in_box 'tail -40 /var/log/sentora2027-node.log'; exit 1; }
+grep -q "^Done: this server is ready to be a node" "$OUT/node-install-screen.txt" && ok "node installer finished" || { bad "node installer did not finish"; in_box 'tail -40 /var/log/sentora2027-docker-node.log'; exit 1; }
 NODEKEY=$(grep -oE 'SN1(-[A-Z2-9]{4}){6}' "$OUT/node-install-screen.txt" | head -1)
 [ -n "$NODEKEY" ] && ok "the installer showed the node's key" || bad "no node key shown"
-in_box 'stat -c %a /root/sentora-node-key.txt' | grep -qx 600 && ok "the key is also kept for root only" || bad "no key file (0600)"
+in_box 'stat -c %a /root/sentora-docker-node-key.txt' | grep -qx 600 && ok "the key is also kept for root only" || bad "no key file (0600)"
 sleep 12
 panel online | grep -qx 0 && ok "not linked before it is added in the panel" || bad "linked before it was added"
 panel addkey node1 "$NODEKEY" | grep -qx ok && ok "added in the panel with its key" || bad "the panel refused the key"
 wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "node not online"
-in_box '[ ! -e /root/sentora-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
-in_box 'stat -c %a /etc/sentora-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
+in_box '[ ! -e /root/sentora-docker-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
+in_box 'stat -c %a /etc/sentora-docker-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
 in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
 in_box 'systemctl is-active --quiet firewalld && echo firewalld; ufw status 2> /dev/null | grep -q "^Status: active" && echo ufw' > "$OUT/firewall.txt"
 [ -s "$OUT/firewall.txt" ] && ok "the firewall is on ($(head -1 "$OUT/firewall.txt"))" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -8; ufw status verbose'; }
-PF=$(in_box 'cat /etc/sentora-node/platform.conf' 2>&1)
+PF=$(in_box 'cat /etc/sentora-docker-node/platform.conf' 2>&1)
 echo "$PF" | grep -qE '^FAMILY=(el|fedora|deb)$' && echo "$PF" | grep -q '^PHP_BIN=/' && echo "$PF" | grep -q '^CADDY_SERVICE=caddy$' \
     && ok "this system's names kept for the agent: $(echo "$PF" | grep -E '^(FAMILY|PKG|MAC)=' | tr '\n' ' ')" || bad "platform.conf: $PF"
 in_box 'cat /etc/systemd/system/user@.service.d/sentora-delegate.conf' | grep -q 'Delegate=cpu cpuset io memory pids' && ok "cgroup controllers handed to the customers' users" || bad "no Delegate drop-in"
@@ -108,7 +108,7 @@ S=$(wait_for 900 running_or_error "$CID")
 if [[ "$S" == running* ]]; then ok "running (panel): $S"; else
     bad "not running: $(panel state "$CID")"
     panel log | tail -5
-    in_box 'getcap /usr/bin/newuidmap /usr/bin/newgidmap; grep sdh /etc/subuid /etc/subgid; loginctl list-users; ls -la /run/user; journalctl -u sentora-node --no-pager | tail -20'
+    in_box 'getcap /usr/bin/newuidmap /usr/bin/newgidmap; grep sdh /etc/subuid /etc/subgid; loginctl list-users; ls -la /run/user; journalctl -u sentora-docker-node --no-pager | tail -20'
     exit 1
 fi
 in_box 'id sdh3' && ok "customer user sdh3" || bad "no user sdh3"
@@ -129,7 +129,7 @@ PIDS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) p
 say "Caddy in front"
 code() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.test:443:127.0.0.1 $1 https://kuma.example.test/"; }
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
-[ "$C" = 401 ] && ok "HTTPS asks for the setup password (401)" || { bad "without the setup password: HTTP $C (want 401)"; in_box "caddy version; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -5; sed -n 1,20p /etc/caddy/sentora/sites.caddy; journalctl -u caddy --no-pager | tail -8; journalctl -u sentora-node --no-pager | grep -iE \"caddy|proxy|sites\" | tail -5"; }
+[ "$C" = 401 ] && ok "HTTPS asks for the setup password (401)" || { bad "without the setup password: HTTP $C (want 401)"; in_box "caddy version; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -5; sed -n 1,20p /etc/caddy/sentora/sites.caddy; journalctl -u caddy --no-pager | tail -8; journalctl -u sentora-docker-node --no-pager | grep -iE \"caddy|proxy|sites\" | tail -5"; }
 PW=$(panel setup "$CID")
 for _ in $(seq 1 40); do C=$(code "-u setup:$PW"); case "$C" in 200|302) break ;; esac; sleep 3; done   # (502 while the app still starts)
 case "$C" in 200|302) ok "with the setup password: the app answers ($C)" ;; *) bad "with the setup password: HTTP $C" ;; esac
@@ -147,7 +147,7 @@ if echo "$PROBE" | grep -q '^probed'; then
     echo "$PROBE" | grep -q '^reached' && bad "a container reached the node's 127.0.0.1 ($(echo "$PROBE" | grep '^reached' | tr '\n' ' '))" || ok "a container can not reach the node's 127.0.0.1 (apps, Caddy's admin)"
 else bad "the probe container did not run"; fi
 # the cloud's metadata address (it can hand out the server's own keys) is refused to the apps
-UIDS=$(in_box "nft list set inet sentora_node apps" 2>&1); SDH3=$(in_box "id -u sdh3")
+UIDS=$(in_box "nft list set inet sentora_docker_node apps" 2>&1); SDH3=$(in_box "id -u sdh3")
 echo "$UIDS" | grep -qw "$SDH3" && ok "the customer's user is in the node's fence (nftables set)" || { bad "sdh3 ($SDH3) is not in the fence"; echo "$UIDS"; }
 META=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman run --rm docker.io/library/busybox:1 sh -c 'wget -q -T 5 -O /dev/null http://169.254.169.254/ 2>&1; echo exit=\$?'" 2>&1)
 echo "$META" | tail -2
@@ -200,10 +200,10 @@ say "An app the panel lost: found again, given back, moved to another customer a
 podu() { in_box "runuser -u $1 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u $1) podman $2"; }
 podu sdh3 "exec sdh-$CID sh -c 'echo kept-$CID > /app/data/sentora-test.txt'"
 # the node's own list loses it too (state.json): it must find it by its label
-in_box "php -r '\$f = \"/var/lib/sentora-node/state.json\"; \$s = json_decode(file_get_contents(\$f), true); unset(\$s[\"containers\"][\"$CID\"], \$s[\"scanned_at\"]); file_put_contents(\$f, json_encode(\$s));'"
+in_box "php -r '\$f = \"/var/lib/sentora-docker-node/state.json\"; \$s = json_decode(file_get_contents(\$f), true); unset(\$s[\"containers\"][\"$CID\"], \$s[\"scanned_at\"]); file_put_contents(\$f, json_encode(\$s));'"
 panel forget "$CID" > /dev/null
 F=$(wait_for 120 bash -c "v=\$(php '$T/node_real.php' found $CID fd_domain_vc); [ \"\$v\" != none ] && echo \$v")
-[ "$F" = kuma.example.test ] && ok "the node found it again by its label, with its address: $F" || { bad "not found: '$F'"; in_box 'journalctl -u sentora-node --no-pager | tail -20'; }
+[ "$F" = kuma.example.test ] && ok "the node found it again by its label, with its address: $F" || { bad "not found: '$F'"; in_box 'journalctl -u sentora-docker-node --no-pager | tail -20'; }
 [ "$(panel found "$CID" fd_hostport_in)" = 20000 ] && [ "$(panel found "$CID" fd_volumes_in)" = 1 ] && ok "and its port and data folder" || bad "found: port $(panel found "$CID" fd_hostport_in), folders $(panel found "$CID" fd_volumes_in)"
 podu sdh3 "ps --format '{{.Names}}'" | grep -qx "sdh-$CID" && ok "it kept running meanwhile (nothing deleted)" || bad "it was stopped or deleted"
 panel adopt "$CID" 3 | grep -qx ok || bad "adopt: $(panel adopt "$CID" 3)"
@@ -247,7 +247,7 @@ R=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob restore | grep -E '^(do
 wait_for 120 state_is "$CID" running > /dev/null
 [ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-backup.txt" | tr -d '\r')" = before-backup ] && [[ "$R" == done* ]] && ok "put back: the app runs with the backup's data" || { bad "restore: $R / $(panel state "$CID")"; diag; }
 podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | grep -qx "kept-$CID" && ok "(and the data it had then)" || bad "the restore lost data"
-in_box 'ls /home/sdh3/.sentora-move /var/lib/sentora-node/transfer 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left on the node" || bad "copies left: $(in_box 'ls -laR /home/sdh3/.sentora-move /var/lib/sentora-node/transfer 2>&1')"
+in_box 'ls /home/sdh3/.sentora-move /var/lib/sentora-docker-node/transfer 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left on the node" || bad "copies left: $(in_box 'ls -laR /home/sdh3/.sentora-move /var/lib/sentora-docker-node/transfer 2>&1')"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it after the restore" || bad "after the restore: HTTP $C"
 
@@ -261,32 +261,28 @@ wait_for 180 bash -c "docker exec $NAME runuser -u sdh3 -- env XDG_RUNTIME_DIR=/
 for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it again" || bad "after the restart: HTTP $C"
 
-say "Updating the node (sentora-node-update)"
+say "Updating the node (sentora-docker-node-update)"
 in_box 'rm -rf /root/src && mkdir /root/src'
-docker cp "$REPO/node/sentora2027-node" "$NAME:/root/src/sentora2027-node"
-docker cp "$REPO/node/sentora2027-node-alma10" "$NAME:/root/src/sentora2027-node-alma10"
-docker cp "$REPO/node/sentora-node-agent.php" "$NAME:/root/src/sentora-node-agent.php"
+docker cp "$REPO/docker-node/sentora2027-docker-node" "$NAME:/root/src/sentora2027-docker-node"
+docker cp "$REPO/docker-node/sentora-docker-node-agent.php" "$NAME:/root/src/sentora-docker-node-agent.php"
 # (a "newer" agent: the copy says version 999)
-in_box "sed -i \"s/^    const VERSION = '[^']*';/    const VERSION = '999';/\" /root/src/sentora-node-agent.php"
-C1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1); echo "$C1"
+in_box "sed -i \"s/^    const VERSION = '[^']*';/    const VERSION = '999';/\" /root/src/sentora-docker-node-agent.php"
+C1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-docker-node-update --check' 2>&1); echo "$C1"
 echo "$C1" | grep -q -- '-> 999 (new)' && ok "--check shows the new agent" || bad "--check: $C1"
-U1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1); echo "$U1" | tail -4
+U1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-docker-node-update --yes' 2>&1); echo "$U1" | tail -4
 echo "$U1" | grep -q "^Done: this node is up to date (agent 999)" && ok "updated without asking" || bad "the update did not finish"
-in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "the new agent runs" || bad "the new agent does not run"
+in_box 'sentora-docker-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "the new agent runs" || bad "the new agent does not run"
 wait_for 60 panel online > /dev/null && ok "node online after the update" || bad "node not online after the update"
 grep -q '"agent":"999"' <(php -r 'require "'"$T"'/root/dryden/loader.inc.php"; echo $zdbh->query("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1")->fetchColumn();' 2>/dev/null) \
     && ok "the panel sees the new agent's version" || bad "the panel does not show agent 999"
 in_box "grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile" && ok "the node's settings were kept" || bad "Caddyfile lost its settings"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && [[ "$(panel state "$CID")" == running* ]] && ok "the customer's app kept running behind its setup password" || bad "after the update: HTTP $C, $(panel state "$CID")"
-# (older nodes' sentora-node-update still fetch the old installer name: it must hand over to the new one)
-U3=$(in_box 'SNODE_RAW_BASE=file:///root/src bash /root/src/sentora2027-node-alma10 --update --agent /root/src/sentora-node-agent.php' 2>&1)
-echo "$U3" | grep -q "^Done: this node is up to date (agent 999)" && ok "the old installer name hands over to the new one" || bad "old installer name: $(echo "$U3" | tail -5)"
-C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --check' 2>&1)
+C2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-docker-node-update --check' 2>&1)
 echo "$C2" | grep -q "Agent: up to date (version 999)" && echo "$C2" | grep -q "Node setup: up to date" && ok "--check: up to date" || bad "--check after: $C2"
-in_box 'echo "<?php syntax error" > /root/src/sentora-node-agent.php'
-U2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-node-update --yes' 2>&1)
-echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "a damaged download changes nothing" || bad "damaged download: $U2"
+in_box 'echo "<?php syntax error" > /root/src/sentora-docker-node-agent.php'
+U2=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-docker-node-update --yes' 2>&1)
+echo "$U2" | grep -q "damaged: nothing changed" && in_box 'sentora-docker-node-agent status' 2>&1 | grep -c "agent 999" > /dev/null && ok "a damaged download changes nothing" || bad "damaged download: $U2"
 
 say "Updates and settings from the panel"
 panel nodeact check-updates | grep -qx ok || bad "check-updates refused"
@@ -301,13 +297,13 @@ echo "  $U"
 wait_for 60 state_is "$CID" running > /dev/null && ok "still running" || bad "not running after the update: $(panel state "$CID")"
 panel settings certs@example.com 1 | grep -qx ok || bad "settings refused"
 wait_for 60 bash -c "docker exec $NAME grep -q 'email certs@example.com' /etc/caddy/Caddyfile && echo y" > /dev/null && ok "the node took its settings from the panel (Caddy's email)" || bad "Caddyfile: $(in_box 'cat /etc/caddy/Caddyfile')"
-in_box 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-node/install.conf' && ok "and kept them for its own updates" || bad "settings not kept"
+in_box 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-docker-node/install.conf' && ok "and kept them for its own updates" || bad "settings not kept"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "the app is still served (setup password)" || bad "after the settings: HTTP $C"
 panel nodeact sys-security | grep -qx ok || bad "sys-security refused"
 wait_for 900 bash -c "v=\$(php '$T/node_real.php' info sys_last_at); [ \"\${v:-0}\" -gt 0 ] && echo \$v" > /dev/null \
     && ok "the node installed its security updates (it went $([ "$(panel info sys_last_ok)" = 1 ] && echo well || echo badly))" || bad "security updates did not run"
-[ "$(panel info sys_last_ok)" = 1 ] || bad "the security update run failed: $(in_box 'tail -5 /var/log/sentora-node-sysupdate.log')"
+[ "$(panel info sys_last_ok)" = 1 ] || bad "the security update run failed: $(in_box 'tail -5 /var/log/sentora-docker-node-sysupdate.log')"
 
 say "Deleting"
 panel act "$CID" delete > /dev/null
@@ -318,8 +314,8 @@ in_box 'grep -c kuma.example.test /etc/caddy/sentora/sites.caddy || true' | grep
 say "Removing the node from the panel"
 panel remove | grep -qx online && ok "the online node is asked to remove itself" || bad "remove: not asked"
 wait_for 180 bash -c "php '$T/node_real.php' info agent | grep -x gone" > /dev/null && ok "the panel forgot it once it said so" || bad "the node is still in the panel"
-for _ in $(seq 1 30); do in_box 'systemctl is-active sentora-node' 2> /dev/null | grep -qx active || break; sleep 3; done
-in_box '! systemctl is-active --quiet sentora-node && [ ! -e /etc/sentora-node ] && [ ! -e /usr/local/sbin/sentora-node-agent ]' && ok "the node removed its agent and keys" || bad "the agent is still on the node"
+for _ in $(seq 1 30); do in_box 'systemctl is-active sentora-docker-node' 2> /dev/null | grep -qx active || break; sleep 3; done
+in_box '! systemctl is-active --quiet sentora-docker-node && [ ! -e /etc/sentora-docker-node ] && [ ! -e /usr/local/sbin/sentora-docker-node-agent ]' && ok "the node removed its agent and keys" || bad "the agent is still on the node"
 grep -q "PHP \(Warning\|Notice\|Deprecated\|Fatal\)" "$OUT/panel-web.log" && bad "the panel logged PHP problems" || ok "no PHP problems in the panel"
 in_box 'journalctl --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecated\)"' && bad "the agent logged PHP problems" || ok "no PHP problems in the agent"
 

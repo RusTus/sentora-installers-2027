@@ -125,7 +125,7 @@ $r = req(1, 'AddNode', array('inName' => 'bad name;rm'));
 check(strpos($r['text'], 'Give the node a name') !== false, 'a bad node name is refused');
 $r = req(1, 'AddNode', array('inName' => 'node1'));
 check(preg_match('/--key (v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+) --code (\d+\.[0-9a-f]{32})/', $r['command'], $m) === 1, 'install command with the panel\'s keys and a code', $r['command']);
-check(strpos($r['html'], 'node/sentora2027-node ') !== false && strpos($r['html'], '--panel &#039;https://panel.example&#039;') !== false, 'the command is shown with the installer and the panel\'s address');
+check(strpos($r['html'], 'docker-node/sentora2027-docker-node ') !== false && strpos($r['html'], '--panel &#039;https://panel.example&#039;') !== false, 'the command is shown with the installer and the panel\'s address');
 $key = $m[1];
 $code = $m[2];
 check(val("SELECT nd_code_vc FROM x_dh_nodes") === hash('sha256', explode('.', $code)[1]), 'only the code\'s hash is kept');
@@ -516,8 +516,8 @@ $r = req(3, 'NodeAct', array('inId' => '1', 'inWhat' => 'reboot'));
 check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'reboot'") === 1, 'a client can not');
 $o = agent('once');
 $cl = calls();
-check(strpos($cl, 'systemd-run --unit sentora-node-sentoranodeupdate-') !== false && strpos($cl, '--on-active=5 /usr/local/sbin/sentora-node-update --yes') !== false, 'the node runs sentora-node-update --yes (on its own, it restarts the agent)', $cl);
-check(strpos($cl, '/usr/local/sbin/sentora-node-sysupdate --security') !== false, 'the node installs its security updates (sentora-node-sysupdate)');
+check(strpos($cl, 'systemd-run --unit sentora-docker-node-update-') !== false && strpos($cl, '--on-active=5 /usr/local/sbin/sentora-docker-node-update --yes') !== false, 'the node runs sentora-docker-node-update --yes (on its own, it restarts the agent)', $cl);
+check(strpos($cl, '/usr/local/sbin/sentora-docker-node-sysupdate --security') !== false, 'the node installs its security updates (sentora-docker-node-sysupdate)');
 check(strpos($cl, 'shutdown -r +1') !== false, 'the node restarts in a minute');
 agent('once');
 check((int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = 0 AND jb_state_vc = 'done'") >= 4, 'the panel has their results');
@@ -648,7 +648,7 @@ check($c === 200 && $body === dh::PanelKey(), 'the panel\'s public keys are offe
 $r = req(1, 'Node', array('inId' => (string) $kn['nd_id_pk'], 'inRemove' => '1'));
 check(strpos($r['text'], 'asked to remove its agent') !== false, 'removing an online node: it is asked to remove itself');
 $o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
-check(strpos(calls(), '--on-active=30 /usr/local/sbin/sentora-node-uninstall --purge') !== false, 'the node uninstalls itself (30 seconds later, so its answer gets through)', $o);
+check(strpos(calls(), '--on-active=30 /usr/local/sbin/sentora-docker-node-uninstall --purge') !== false, 'the node uninstalls itself (30 seconds later, so its answer gets through)', $o);
 shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
 check(dh::Node((int) $kn['nd_id_pk']) === null, 'and the panel forgets it when it says so');
 
@@ -991,7 +991,7 @@ $c5 = (int) $zdbh->lastInsertId();
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $old));
 check(strpos($r['html'], 'Start its apps on other nodes') !== false, 'Manage of a node away: Start its apps on other nodes');
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => '1'));
-check(strpos($r['html'], 'Start its apps on other nodes') === false && strpos($r['html'], 'sentora-node-relink') !== false, '(not for an online node; how to link a node again is there)');
+check(strpos($r['html'], 'Start its apps on other nodes') === false && strpos($r['html'], 'sentora-docker-node-relink') !== false, '(not for an online node; how to link a node again is there)');
 $r = req(1, 'Rehome', array('inId' => '1'));
 check(strpos($r['text'], 'is online') !== false, 'refused for a node that is online');
 $r = req(1, 'Rehome', array('inId' => (string) $old));
@@ -1125,7 +1125,7 @@ $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshel
 check((string) dh::Get('sign_sk') === $before, 'a client can not');
 
 
-section('linking a node again (sentora-node-relink): its apps stay');
+section('linking a node again (sentora-docker-node-relink): its apps stay');
 // node1 was removed above (the panel forgot it): its apps and data are still on the server
 seed('sdh4', 990, 20090, 'kuma9.other.com', false, array('KEEP' => 'me'));
 $o = agent("relink --panel $web");
@@ -1172,10 +1172,10 @@ $r = req(1, '', array(), array('settings' => (string) $pid));
 check(strpos($r['html'], 'Nightly backup') === false && strpos($r['html'], 'Backed up') === false, 'no backup server: backups are not offered');
 check(!dh_backup::Start($pid, 1) && strpos(dh::$why, 'off-server backup') !== false, 'and can not be started', dh::$why);
 $zdbh->exec("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('offsite_enabled', 'true'), ('offsite_time', '02:30')");
-check(!dh_backup::Start($pid, 1) && strpos(dh::$why, 'Sentora backup server') !== false, 'an off-server backup to a plain SSH server is not enough', dh::$why);
+check(!dh_backup::Start($pid, 1) && strpos(dh::$why, 'Sentora backup node') !== false, 'an off-server backup to a plain SSH server is not enough', dh::$why);
 file_put_contents(getenv('DH_OFFSITE_STATE'), json_encode(array('gate' => 1)));
 $r = req(1, '', array(), array('settings' => (string) $pid));
-check(strpos($r['html'], 'Nightly backup') !== false && strpos($r['html'], 'Not backed up yet') !== false && strpos($r['html'], 'Put this backup back') === false, 'with a Sentora backup server: offered, nothing backed up yet');
+check(strpos($r['html'], 'Nightly backup') !== false && strpos($r['html'], 'Not backed up yet') !== false && strpos($r['html'], 'Put this backup back') === false, 'with a Sentora backup node: offered, nothing backed up yet');
 $zdbh->exec("UPDATE x_dh_containers SET dc_acc_fk = 3 WHERE dc_id_pk = " . (int) $pid);
 check(!dh_backup::Start($pid, 4) && !dh_backup::Restore($pid, 4), 'another client can not back up or restore someone\'s app');
 $zdbh->exec("UPDATE x_dh_containers SET dc_acc_fk = 1 WHERE dc_id_pk = " . (int) $pid);
@@ -1289,7 +1289,7 @@ check(!is_dir(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $pid), 'and nothing i
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
-check((string) dh::Get('sign_sk') !== $before && strpos((string) $out, 'sentora-node-relink') !== false && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')") === 0,
+check((string) dh::Get('sign_sk') !== $before && strpos((string) $out, 'sentora-docker-node-relink') !== false && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')") === 0,
     'the administrator starts over: new keys, told to relink the nodes, unreadable jobs dropped', substr(strip_tags((string) $out), 0, 600));
 
 echo "\n$pass passed, $fail failed\n";

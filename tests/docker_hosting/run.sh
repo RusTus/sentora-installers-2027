@@ -1,7 +1,7 @@
 #!/bin/bash
 # Docker Hosting tests: the add-on (sentora-repo/docker_hosting.zpp, or the unzipped folder given as $1)
 # in a stand-in panel (SQLite, small stand-ins for the core classes) served by PHP's own web server,
-# and the node agent (node/sentora-node-agent.php) against it, with fake podman, caddy, useradd...
+# and the node agent (docker-node/sentora-docker-node-agent.php) against it, with fake podman, caddy, useradd...
 # (fakebin/). Needs php (pdo_sqlite, curl, sodium), unzip.
 #   tests/docker_hosting/run.sh [module-folder]
 # Against a real MySQL or MariaDB instead of SQLite (its database is emptied first):
@@ -16,10 +16,10 @@ else unzip -q "$REPO/sentora-repo/docker_hosting.zpp" -d "$T/root/modules/docker
 mkdir -p "$W/fake" "$W/node/etc" "$W/node/state" "$W/node/caddy/sentora" "$W/node/run" "$W/node/home" "$W/node/sub"
 touch "$W/node/sub/subuid" "$W/node/sub/subgid"
 echo "import sentora/*.caddy" > "$W/node/caddy/Caddyfile"
-export DH_DB="$W/test.sqlite" DH_WEB=http://127.0.0.1:18092 DH_AGENT="$REPO/node/sentora-node-agent.php" DH_W="$W"
+export DH_DB="$W/test.sqlite" DH_WEB=http://127.0.0.1:18092 DH_AGENT="$REPO/docker-node/sentora-docker-node-agent.php" DH_W="$W"
 export FAKE_DIR="$W/fake" SNODE_ETC="$W/node/etc" SNODE_STATE="$W/node/state" SNODE_CADDY="$W/node/caddy" SNODE_RUN="$W/node/run"
 export SNODE_HOME="$W/node/home" SNODE_SUBID="$W/node/sub" SNODE_USERPATH="$T/fakebin:/usr/bin:/bin"
-export SNODE_UPDATE_WAIT=0 SNODE_KEYFILE="$W/node/sentora-node-key.txt" DH_MAIL="$W/mail.txt"
+export SNODE_UPDATE_WAIT=0 SNODE_KEYFILE="$W/node/sentora-docker-node-key.txt" DH_MAIL="$W/mail.txt"
 export DH_BACKUP_DIR="$W/dhbackups" DH_OFFSITE_STATE="$W/offsite.json" SNODE_RETRY_WAIT=0
 export SNODE_PASSWD="$W/fake/passwd" SNODE_RESOLV="$W/fake/resolv.conf" SNODE_RUNMARK="$W/node/runmark"
 printf "nameserver 192.168.1.1\nnameserver 8.8.8.8\n" > "$W/fake/resolv.conf"; touch "$W/fake/passwd"

@@ -2,7 +2,7 @@
 
 /**
  * Sentora Node agent: runs on a Docker Hosting node (a separate server, never the panel's) as the
- * root service sentora-node. It calls the panel every few seconds (nothing on the node is opened for
+ * root service sentora-docker-node. It calls the panel every few seconds (nothing on the node is opened for
  * the panel), takes the jobs waiting for it, does them, and reports back.
  *
  * Every message is signed and sealed (the same as the add-on's code/proto.php): the agent knows the
@@ -15,21 +15,21 @@
  * rootless Podman (its own user namespace, cgroup limits for CPU, memory and processes). Containers
  * listen on 127.0.0.1 only; Caddy (the node's web server) gives each its address with HTTPS.
  *
- *   sentora-node-agent enroll --panel https://panel.example [--panel-code XXXX-XXXX] [--no-tls-check]
+ *   sentora-docker-node-agent enroll --panel https://panel.example [--panel-code XXXX-XXXX] [--no-tls-check]
  *                                (the installer's usual way: the node makes its own key, the panel
  *                                 administrator pastes it in "Add a node"; the panel's code is checked
  *                                 by the person installing, so the node never trusts a fake panel)
- *   sentora-node-agent pair --panel https://panel.example --key v1.<sign>.<box> --code <id>.<secret> [--no-tls-check]
+ *   sentora-docker-node-agent pair --panel https://panel.example --key v1.<sign>.<box> --code <id>.<secret> [--no-tls-check]
  *                                (the older way: the command the panel shows)
- *   sentora-node-agent run       (the service)
- *   sentora-node-agent once      (one call to the panel)
- *   sentora-node-agent status
+ *   sentora-docker-node-agent run       (the service)
+ *   sentora-docker-node-agent once      (one call to the panel)
+ *   sentora-docker-node-agent status
  *
- * Paths for tests: SNODE_ETC (/etc/sentora-node), SNODE_STATE (/var/lib/sentora-node),
+ * Paths for tests: SNODE_ETC (/etc/sentora-docker-node), SNODE_STATE (/var/lib/sentora-docker-node),
  * SNODE_CADDY (/etc/caddy), SNODE_RUN (/run/user), SNODE_HOME (/home), SNODE_SUBID (/etc: subuid,
- * subgid), SNODE_USERPATH (PATH of the customers' commands), SNODE_KEYFILE (/root/sentora-node-key.txt).
+ * subgid), SNODE_USERPATH (PATH of the customers' commands), SNODE_KEYFILE (/root/sentora-docker-node-key.txt).
  * What differs between systems (Caddy's folder, service and group, the no-login shell) comes from
- * /etc/sentora-node/platform.conf, written by the installer for its system (P()).
+ * /etc/sentora-docker-node/platform.conf, written by the installer for its system (P()).
  *
  * @package Sentora
  * @license GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '111';
+    const VERSION = '112';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -77,7 +77,7 @@ class snode
 
     static function Init()
     {
-        self::$etc = getenv('SNODE_ETC') ?: '/etc/sentora-node';
+        self::$etc = getenv('SNODE_ETC') ?: '/etc/sentora-docker-node';
         // (a service has no HOME; Caddy before 2.8 will not even check its settings without one)
         if ((string) getenv('HOME') === '') {
             putenv('HOME=/root');
@@ -87,7 +87,7 @@ class snode
                 self::$platform[$m[1]] = $m[2];
             }
         }
-        self::$state = getenv('SNODE_STATE') ?: '/var/lib/sentora-node';
+        self::$state = getenv('SNODE_STATE') ?: '/var/lib/sentora-docker-node';
         self::$caddy = getenv('SNODE_CADDY') ?: self::P('CADDY_DIR', '/etc/caddy');
         self::$run = getenv('SNODE_RUN') ?: '/run/user';
         self::$home = getenv('SNODE_HOME') ?: '/home';
@@ -190,7 +190,7 @@ class snode
         foreach ($verify ? array(true, false) : array(false) as $v) {
             $c = curl_init(rtrim($panel, '/') . '/modules/docker_hosting/code/node.php?key=1');
             curl_setopt_array($c, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 30, CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_HTTPHEADER => array('User-Agent: sentora-node/' . self::VERSION)));
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP, CURLOPT_HTTPHEADER => array('User-Agent: sentora-docker-node/' . self::VERSION)));
             if (!$v) {
                 curl_setopt($c, CURLOPT_SSL_VERIFYPEER, false);
                 curl_setopt($c, CURLOPT_SSL_VERIFYHOST, 0);
@@ -226,7 +226,7 @@ class snode
         foreach (self::$bare ? array(true) : array(false, true) as $bare) {
             $c = curl_init(rtrim($cfg['panel'], '/') . '/modules/docker_hosting/code/node.php');
             curl_setopt_array($c, array(CURLOPT_POST => true, CURLOPT_POSTFIELDS => $bare ? $wire : 'm=' . rawurlencode($wire), CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER => array('Content-Type: ' . ($bare ? 'text/plain' : 'application/x-www-form-urlencoded'), 'User-Agent: sentora-node/' . self::VERSION),
+                CURLOPT_HTTPHEADER => array('Content-Type: ' . ($bare ? 'text/plain' : 'application/x-www-form-urlencoded'), 'User-Agent: sentora-docker-node/' . self::VERSION),
                 CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_TIMEOUT => 60, CURLOPT_FOLLOWLOCATION => false, CURLOPT_PROTOCOLS => CURLPROTO_HTTPS | CURLPROTO_HTTP));
             if (empty($cfg['tls_verify'])) {
                 // (safe: every reply is signed with the panel's key, which the node already knows)
@@ -680,23 +680,23 @@ class snode
     static function NodeJob($action, array $d, array &$s)
     {
         $bg = function (array $argv, $delay = 0) {
-            $unit = 'sentora-node-' . preg_replace('/[^a-z]/', '', $argv[0] === '/usr/local/sbin/sentora-node-sysupdate' ? 'sysupdate' : basename($argv[0])) . '-' . time();
+            $unit = 'sentora-docker-node-' . preg_replace('/[^a-z]/', '', preg_replace('/^sentora-docker-node-/', '', basename($argv[0]))) . '-' . time();
             $cmd = array_merge(array('systemd-run', '--unit', $unit, '--collect', '--quiet'), $delay > 0 ? array('--on-active=' . $delay) : array(), $argv);
             return self::Run($cmd, null, 60);
         };
         switch ($action) {
             case 'node-update':
-                $r = $bg(array('/usr/local/sbin/sentora-node-update', '--yes'), 5);
+                $r = $bg(array('/usr/local/sbin/sentora-docker-node-update', '--yes'), 5);
                 return array($r[0] === 0, $r[0] === 0 ? 'updating the node (agent ' . self::VERSION . ' now); it comes back in a few minutes' : 'node-update: ' . self::Tail($r[1]));
             case 'sys-update':
-                $r = $bg(array('/usr/local/sbin/sentora-node-sysupdate', !empty($d['security']) ? '--security' : '--all'));
+                $r = $bg(array('/usr/local/sbin/sentora-docker-node-sysupdate', !empty($d['security']) ? '--security' : '--all'));
                 return array($r[0] === 0, $r[0] === 0 ? 'installing ' . (!empty($d['security']) ? 'security' : 'all') . ' updates' : 'sys-update: ' . self::Tail($r[1]));
             case 'reboot':
                 $r = self::Run(array('shutdown', '-r', '+1', 'The Sentora panel asked for a restart of this node'), null, 30);
                 return array($r[0] === 0, $r[0] === 0 ? 'restarting in a minute' : 'reboot: ' . self::Tail($r[1]));
             case 'check-updates':
                 self::CheckUpdates($s, true);
-                $bg(array('/usr/local/sbin/sentora-node-sysupdate', '--check'));
+                $bg(array('/usr/local/sbin/sentora-docker-node-sysupdate', '--check'));
                 return array(true, 'checked');
             case 'settings':
                 $email = isset($d['email']) && is_string($d['email']) ? $d['email'] : '';
@@ -724,7 +724,7 @@ class snode
                 return array($fe === '', $fe === '' ? ($users ? 'the local network is open to the apps of ' . implode(', ', $users) . ' only' : 'no app may reach the local network') : $fe);
             case 'uninstall':
                 // a little later, so this answer reaches the panel first
-                $r = $bg(array('/usr/local/sbin/sentora-node-uninstall', '--purge'), 30);
+                $r = $bg(array('/usr/local/sbin/sentora-docker-node-uninstall', '--purge'), 30);
                 return array($r[0] === 0, $r[0] === 0 ? 'uninstalling in 30 seconds' : 'uninstall: ' . self::Tail($r[1]));
         }
         return null;
@@ -751,7 +751,7 @@ class snode
                 return array(false, 'settings: ' . self::Tail($r[1]));
             }
         }
-        self::WriteFile(self::$etc . '/install.conf', "# Settings this node was installed with (read by sentora-node-update; set from the panel)\n"
+        self::WriteFile(self::$etc . '/install.conf', "# Settings this node was installed with (read by sentora-docker-node-update; set from the panel)\n"
             . ($email !== '' ? 'EMAIL=' . $email . "\n" : '') . ($local ? "LOCAL_CERTS=1\n" : ''));
         return array(true, 'settings: ' . ($local ? 'Caddy\'s own certificates' : 'Let\'s Encrypt') . ($email !== '' ? ', ' . $email : ''));
     }
@@ -914,7 +914,7 @@ class snode
     static function Proxy(array $s)
     {
         $file = self::$caddy . '/sentora/sites.caddy';
-        $t = "# Written by Sentora Node (sentora-node-agent) from the panel's containers: do not change by hand.\n";
+        $t = "# Written by Sentora Node (sentora-docker-node-agent) from the panel's containers: do not change by hand.\n";
         ksort($s['containers']);
         foreach ($s['containers'] as $cid => $c) {
             $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
@@ -976,7 +976,7 @@ class snode
     }
 
     /**
-     * The system's waiting updates and the last update run (sentora-node-sysupdate writes them; it
+     * The system's waiting updates and the last update run (sentora-docker-node-sysupdate writes them; it
      * looks again every 6 hours).
      */
     static function SysInfo()
@@ -987,7 +987,7 @@ class snode
         $checked = isset($j['checked_at']) ? (int) $j['checked_at'] : 0;
         if (time() - $checked > 6 * 3600 && time() - self::$sysCheckAt > 3600) {
             self::$sysCheckAt = time();
-            self::Run(array('systemd-run', '--unit', 'sentora-node-syscheck-' . time(), '--collect', '--quiet', '/usr/local/sbin/sentora-node-sysupdate', '--check'), null, 30);
+            self::Run(array('systemd-run', '--unit', 'sentora-docker-node-syscheck-' . time(), '--collect', '--quiet', '/usr/local/sbin/sentora-docker-node-sysupdate', '--check'), null, 30);
         }
         $out = array();
         // the node's own settings (so the panel shows what the node really uses)
@@ -1067,7 +1067,7 @@ class snode
     static function BootStart(array &$s)
     {
         // (a mark in /run, which every start of the server, or of its container, begins empty)
-        $mark = (getenv('SNODE_RUNMARK') ?: '/run/sentora-node') . '/started';
+        $mark = (getenv('SNODE_RUNMARK') ?: '/run/sentora-docker-node') . '/started';
         if (is_file($mark)) {
             return;
         }
@@ -1854,7 +1854,7 @@ class snode
         }
         self::WriteFile(self::$etc . '/node.json', json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         $key = 'SN1-' . implode('-', str_split(self::Base32($secret), 4));
-        $file = getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt';
+        $file = getenv('SNODE_KEYFILE') ?: '/root/sentora-docker-node-key.txt';
         self::WriteFile($file, "Sentora Node key for the panel at " . $panel . " (made " . date('Y-m-d H:i') . "):\n\n    " . $key . "\n\n"
             . "In the panel: Docker Hosting > Nodes and apps > Add a node: give the node a name and paste this key.\n"
             . "It links this node once; after that it is not needed any more (this file is then removed).\n");
@@ -1871,7 +1871,7 @@ class snode
      *    restored, its keys changed) or another panel: new keys and a new node key to add in the panel
      *    (--new-key forces this for the same panel). The apps are then listed there under "Found on
      *    this node" and the administrator gives each back to its owner.
-     * (Run through sentora-node-relink, which stops the agent first and starts it again after.)
+     * (Run through sentora-docker-node-relink, which stops the agent first and starts it again after.)
      */
     static function Relink(array $opt)
     {
@@ -1891,7 +1891,7 @@ class snode
                 if ($panel === $old['panel']) {
                     self::Out('This node is linked to ' . $panel . ' as node ' . $old['node'] . ' already, and that panel has the same keys.');
                     self::Out('If the panel no longer knows this node (it was removed there, or the panel was set up again), link it anew, apps kept:');
-                    self::Out('  sentora-node-relink --panel ' . $panel . ' --new-key');
+                    self::Out('  sentora-docker-node-relink --panel ' . $panel . ' --new-key');
                     return 1;
                 }
                 // the same panel (the same keys) at another address
@@ -1945,7 +1945,7 @@ class snode
             unset($cfg['claim']);
             self::WriteFile(self::$etc . '/node.json', json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             self::$cfg = $cfg;
-            @unlink(getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt');
+            @unlink(getenv('SNODE_KEYFILE') ?: '/root/sentora-docker-node-key.txt');
             self::Out('Linked to ' . $cfg['panel'] . ' as node ' . $cfg['node'] . ' ("' . (isset($r['data']['name']) ? $r['data']['name'] : '') . '").');
             return 1;
         }
@@ -2008,7 +2008,7 @@ class snode
         if (!$force && self::$fence === $key && time() - self::$fenceAt < 3600) {
             return '';
         }
-        $t = "table inet sentora_node {}\ndelete table inet sentora_node\ntable inet sentora_node {\n"
+        $t = "table inet sentora_docker_node {}\ndelete table inet sentora_docker_node\ntable inet sentora_docker_node {\n"
             . "\tset apps { type uid;" . ($uids ? ' elements = { ' . implode(', ', $uids) . ' };' : '') . " }\n"
             . "\tset lan { type uid;" . ($lanUids ? ' elements = { ' . implode(', ', $lanUids) . ' };' : '') . " }\n"
             . "\tchain out {\n\t\ttype filter hook output priority filter; policy accept;\n";
@@ -2115,7 +2115,7 @@ class snode
             return self::Relink($opt);
         }
         if (!self::LoadCfg()) {
-            self::Out('This node is not linked to a panel yet (sentora-node-agent pair ...).');
+            self::Out('This node is not linked to a panel yet (sentora-docker-node-agent pair ...).');
             return 1;
         }
         if ($cmd === 'once') {
@@ -2129,7 +2129,7 @@ class snode
         if ($cmd === 'status') {
             $s = self::State();
             if ((int) self::$cfg['node'] === 0) {
-                self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ': not added there yet (its node key is in ' . (getenv('SNODE_KEYFILE') ?: '/root/sentora-node-key.txt') . ').');
+                self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ': not added there yet (its node key is in ' . (getenv('SNODE_KEYFILE') ?: '/root/sentora-docker-node-key.txt') . ').');
                 return 0;
             }
             self::Out('Sentora Node agent ' . self::VERSION . '. Panel: ' . self::$cfg['panel'] . ', node ' . self::$cfg['node'] . ', ' . count($s['containers']) . ' containers');
@@ -2144,7 +2144,7 @@ class snode
                 sleep((int) self::$cfg['node'] === 0 ? self::Hello() : self::Once());
             }
         }
-        self::Out("sentora-node-agent enroll|relink|pair|run|once|status");
+        self::Out("sentora-docker-node-agent enroll|relink|pair|run|once|status");
         return 2;
     }
 }

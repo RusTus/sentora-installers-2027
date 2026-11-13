@@ -1,9 +1,9 @@
 #!/bin/bash
-# Backup server test: a fresh system in a container with systemd is made a Sentora backup server with
-# backup/sentora2027-backup-server, then used from outside over real SSH and rsync as a panel would:
+# Backup node test: a fresh system in a container with systemd is made a Sentora backup node with
+# backup-node/sentora2027-backup-node, then used from outside over real SSH and rsync as a panel would:
 # its own folder only, nights linked to the one before, nothing else allowed (no shell, no password,
 # no way out of its folder), a second panel kept apart, a removed panel locked out.
-#   .github/scripts/backup-server-test.sh <results folder> [alma10|rocky10|fedora45|debian13|ubuntu26.04]
+#   .github/scripts/backup-node-test.sh <results folder> [alma10|rocky10|fedora45|debian13|ubuntu26.04]
 set -uo pipefail
 OUT=${1:?results folder}; SYS=${2:-debian13}
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
@@ -24,7 +24,7 @@ bad() { echo "  FAIL $1"; FAILS=$((FAILS + 1)); echo "::error::$1"; }
 in_box() { docker exec "$NAME" bash -c "$1"; }
 W=$(mktemp -d)
 cleanup() {
-    docker exec "$NAME" cat /var/log/sentora2027-backup-server.log > "$OUT/install.log" 2>&1
+    docker exec "$NAME" cat /var/log/sentora2027-backup-node.log > "$OUT/install.log" 2>&1
     docker exec "$NAME" cat /var/log/sentora-backup-gate.log > "$OUT/gate.log" 2>&1
     docker exec "$NAME" journalctl -u ssh -u sshd --no-pager > "$OUT/sshd.log" 2>&1
     [ -n "${TEST_KEEP:-}" ] || { docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W"; }
@@ -43,15 +43,15 @@ docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
 
-say "Installing the backup server"
+say "Installing the backup node"
 ssh-keygen -q -t ed25519 -N "" -C "sentora-offsite@panel1.example.test" -f "$W/k1"
 ssh-keygen -q -t ed25519 -N "" -C "sentora-offsite@panel2.example.test" -f "$W/k2"
-docker cp "$REPO/backup/sentora2027-backup-server" "$NAME:/root/sentora2027-backup-server"
-docker cp "$REPO/backup/sentora-backup-gate" "$NAME:/root/sentora-backup-gate"
+docker cp "$REPO/backup-node/sentora2027-backup-node" "$NAME:/root/sentora2027-backup-node"
+docker cp "$REPO/backup-node/sentora-backup-gate" "$NAME:/root/sentora-backup-gate"
 START=$(date +%s)
-in_box "cd /root && bash sentora2027-backup-server --key '$(cat "$W/k1.pub")' --gate /root/sentora-backup-gate" 2>&1 | tee "$OUT/install-screen.txt"
+in_box "cd /root && bash sentora2027-backup-node --key '$(cat "$W/k1.pub")' --gate /root/sentora-backup-gate" 2>&1 | tee "$OUT/install-screen.txt"
 echo "installed in $(( $(date +%s) - START )) seconds"
-grep -q '^Done: this server is ready to keep the backups of "panel1.example.test"' "$OUT/install-screen.txt" && ok "installer finished (the panel's name from its key)" || { bad "installer did not finish"; in_box "tail -30 /var/log/sentora2027-backup-server.log"; exit 1; }
+grep -q '^Done: this server is ready to keep the backups of "panel1.example.test"' "$OUT/install-screen.txt" && ok "installer finished (the panel's name from its key)" || { bad "installer did not finish"; in_box "tail -30 /var/log/sentora2027-backup-node.log"; exit 1; }
 FP=$(grep -oE 'SHA256:[A-Za-z0-9+/]{43}' "$OUT/install-screen.txt" | head -1)
 ssh-keyscan -t ed25519 "$IP" 2> /dev/null > "$W/known_hosts"
 [ -n "$FP" ] && ssh-keygen -lf "$W/known_hosts" | grep -qF "$FP" && ok "the fingerprint it shows is its real SSH key ($FP)" || bad "fingerprint shown ($FP) is not the server's"
@@ -60,7 +60,7 @@ SSH2=(ssh -i "$W/k2" -o BatchMode=yes -o IdentitiesOnly=yes -o UserKnownHostsFil
 B=sentora-backup@$IP
 
 say "What a panel's key may do"
-[ "$("${SSH1[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel1.example.test" ] && ok "it says it is a Sentora backup server, for this panel's folder" || bad "hello: $("${SSH1[@]}" "$B" sentora-backup hello 2>&1)"
+[ "$("${SSH1[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel1.example.test" ] && ok "it says it is a Sentora backup node, for this panel's folder" || bad "hello: $("${SSH1[@]}" "$B" sentora-backup hello 2>&1)"
 [ "$("${SSH1[@]}" "$B" sentora-backup ready /panel1.example.test 2>&1)" = ready ] && ok "ready: its folder made and writable" || bad "ready: $("${SSH1[@]}" "$B" sentora-backup ready /panel1.example.test 2>&1)"
 mkdir -p "$W/src/var/sentora/hostdata/acc1/public_html" "$W/src/databases"
 echo "night one" > "$W/src/var/sentora/hostdata/acc1/public_html/index.html"; echo '{"format":2}' > "$W/src/manifest.json"; head -c 200000 /dev/urandom > "$W/src/databases/big.sql.gz"
@@ -68,7 +68,7 @@ H=/panel1.example.test
 for night in 2026-11-10 2026-11-11; do
     "${SSH1[@]}" "$B" sentora-backup begin $H $night
     LINK=(); [ "$("${SSH1[@]}" "$B" sentora-backup latest $H 2> /dev/null)" = yes ] && LINK=(--link-dest=$H/latest/)
-    rsync -aHR --delete --numeric-ids --partial "${LINK[@]}" -e "${SSH1[*]}" "$W/src/./" "$B:$H/$night.partial/" > "$W/rsync.out" 2>&1 || { bad "rsync to the backup server ($night): $(tail -2 "$W/rsync.out")"; in_box 'tail -4 /var/log/sentora-backup-gate.log'; }
+    rsync -aHR --delete --numeric-ids --partial "${LINK[@]}" -e "${SSH1[*]}" "$W/src/./" "$B:$H/$night.partial/" > "$W/rsync.out" 2>&1 || { bad "rsync to the backup node ($night): $(tail -2 "$W/rsync.out")"; in_box 'tail -4 /var/log/sentora-backup-gate.log'; }
     "${SSH1[@]}" "$B" sentora-backup finish $H $night 14 || bad "finish $night"
 done
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 2 ] && ok "two nights kept" || bad "count: $("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)"
@@ -110,7 +110,7 @@ if [ -n "${CORE:-}" ] && [ -f "$CORE/bin/sentora-backup-common" ]; then
     echo "$o" | sed 's/^/    /'
     for w in gate ready begun copied finished latest "count 1"; do echo "$o" | grep -qx "$w" || bad "the panel's side: no '$w'"; done
     echo "$o" | grep -qx "count 1" && ok "the panel's own steps work through the gate (its key checked)"
-    grep -q "$IP" "$W/panel_known" && ok "the backup server's key is kept once it matched" || bad "no key kept"
+    grep -q "$IP" "$W/panel_known" && ok "the backup node's key is kept once it matched" || bad "no key kept"
     printf 'OB_SERVER=%s\nOB_PORT=22\nOB_USER=sentora-backup\nOB_PATH=/\nOB_HOSTKEY=SHA256:%s\n' "$IP" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" > "$W/settings2"
     o=$(CORE="$CORE" SENTORA_OFFSITE_SETTINGS="$W/settings2" SENTORA_OFFSITE_KEY="$W/k1" SENTORA_OFFSITE_KNOWN="$W/panel_known2" bash -c '. "$CORE/bin/sentora-backup-common"; pin_hostkey; echo "rc=$?"' 2>&1)
     echo "$o" | grep -q "rc=1" && echo "$o" | grep -q "not the one set in the panel" && ok "another key than the panel's fingerprint: refused" || bad "wrong fingerprint: $o"
@@ -118,19 +118,19 @@ fi
 
 say "A second panel"
 "${SSH2[@]}" "$B" sentora-backup hello > /dev/null 2>&1 && bad "an unknown key got in" || ok "a key not added: refused"
-in_box "sentora-backup-server add --key '$(cat "$W/k2.pub")'" > "$W/add.txt" 2>&1
-grep -q 'ready to keep the backups of "panel2.example.test"' "$W/add.txt" && ok "added (sentora-backup-server add)" || bad "add: $(tail -3 "$W/add.txt")"
+in_box "sentora-backup-node add --key '$(cat "$W/k2.pub")'" > "$W/add.txt" 2>&1
+grep -q 'ready to keep the backups of "panel2.example.test"' "$W/add.txt" && ok "added (sentora-backup-node add)" || bad "add: $(tail -3 "$W/add.txt")"
 [ "$("${SSH2[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel2.example.test" ] && ok "it has its own folder" || bad "panel2 hello"
 [ "$("${SSH2[@]}" "$B" sentora-backup count $H 2>&1)" = 0 ] && ok "it does not see the first panel's nights" || bad "panel2 sees panel1's nights"
 o=$(rsync -a -e "${SSH2[*]}" "$B:/../panel1.example.test/" "$W/p3" 2>&1); [ ! -d "$W/p3/panel1.example.test" ] && [ ! -f "$W/p3/2026-11-05" ] && ok "nor can it reach them" || bad "panel2 reached panel1's folder"
-L=$(in_box 'sentora-backup-server list'); echo "$L" | grep -q '^panel1.example.test' && echo "$L" | grep -q '^panel2.example.test' && ok "sentora-backup-server list shows the panels" || { bad "sentora-backup-server list"; in_box 'sentora-backup-server list; cut -c1-90 /etc/ssh/sentora-backup/authorized_keys'; }
-in_box 'sentora-backup-server remove panel2.example.test' > /dev/null
+L=$(in_box 'sentora-backup-node list'); echo "$L" | grep -q '^panel1.example.test' && echo "$L" | grep -q '^panel2.example.test' && ok "sentora-backup-node list shows the panels" || { bad "sentora-backup-node list"; in_box 'sentora-backup-node list; cut -c1-90 /etc/ssh/sentora-backup/authorized_keys'; }
+in_box 'sentora-backup-node remove panel2.example.test' > /dev/null
 "${SSH2[@]}" "$B" sentora-backup hello > /dev/null 2>&1 && bad "a removed panel still gets in" || ok "a removed panel is locked out"
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "the other panel is not touched" || bad "panel1 after removing panel2"
 
 say "Updating"
 in_box 'bash /usr/local/lib/sentora-backup/installer --update --gate /root/sentora-backup-gate' > "$W/upd.txt" 2>&1
-grep -q '^Done: this backup server is up to date' "$W/upd.txt" && ok "--update" || bad "update: $(tail -3 "$W/upd.txt")"
+grep -q '^Done: this backup node is up to date' "$W/upd.txt" && ok "--update" || bad "update: $(tail -3 "$W/upd.txt")"
 [ "$("${SSH1[@]}" "$B" sentora-backup count $H 2>&1)" = 3 ] && ok "keys and copies kept" || bad "after the update"
 in_box 'systemctl is-active firewalld || ufw status' | grep -qE '^active|Status: active' && ok "the firewall is on" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -15; ufw status verbose'; }
 in_box 'ufw status 2> /dev/null; firewall-cmd --list-all 2> /dev/null' > "$W/fw.txt"

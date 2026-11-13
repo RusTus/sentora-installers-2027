@@ -4,8 +4,8 @@
 # Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise Linux 10 and Fedora 45.
 # Run it as root on a server of its own (not a panel's), installed the same way as a Docker Hosting node:
 #
-#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup/sentora2027-backup-server -o sentora2027-backup-server
-#   sudo bash sentora2027-backup-server --key '<the panel's backup key>'
+#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup-node/sentora2027-backup-node -o sentora2027-backup-node
+#   sudo bash sentora2027-backup-node --key '<the panel's backup key>'
 #
 # The panel shows that command, with its key, in Admin > Backup Config > Off-server backup. The installer
 # ends with what to enter there (this server's address, user, folder and its SSH key's fingerprint, so the
@@ -15,19 +15,19 @@
 #           --name NAME     the panel's folder here (default: the name in its key, e.g. panel.example.com);
 #                           the same name for a second key = the same folder (a panel moved to a new server)
 #           --gate FILE     use this gate instead of downloading it (tests)
-#           --update        bring an installed backup server up to date (keys and copies are kept)
+#           --update        bring an installed backup node up to date (keys and copies are kept)
 #
 # Each panel's key may only run the gate (/usr/local/sbin/sentora-backup-gate): rsync into and out of its
 # own folder, /srv/sentora-backups/<name>, and a few fixed steps (make a night's folder, finish it, remove the
 # oldest, list the copies). No shell, no forwarding, no password logins for the backup user; the keys are in a
-# file only root can change. Several panels can share one backup server: each sees only its own folder.
+# file only root can change. Several panels can share one backup node: each sees only its own folder.
 #
-# Afterwards:  sentora-backup-server list            panels (keys), their folders, sizes, last copy
-#              sentora-backup-server add --key KEY [--name NAME]    one more panel
-#              sentora-backup-server remove NAME     a panel's key goes (its copies stay)
-# Log: /var/log/sentora2027-backup-server.log, the gate's: /var/log/sentora-backup-gate.log
+# Afterwards:  sentora-backup-node list            panels (keys), their folders, sizes, last copy
+#              sentora-backup-node add --key KEY [--name NAME]    one more panel
+#              sentora-backup-node remove NAME     a panel's key goes (its copies stay)
+# Log: /var/log/sentora2027-backup-node.log, the gate's: /var/log/sentora-backup-gate.log
 set -u
-LOG=/var/log/sentora2027-backup-server.log
+LOG=/var/log/sentora2027-backup-node.log
 RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup
 KEYARG='' AREA='' GATE='' UPDATE=0
 while [ $# -gt 0 ]; do
@@ -174,7 +174,7 @@ case "${ID:-}:${VERSION_ID:-}" in
     fedora:45) FAMILY=fedora ;;
     debian:13*) FAMILY=deb ;;
     ubuntu:26.04) FAMILY=deb ;;
-    *) die "A backup server runs on $SUPPORTED (this is ${PRETTY_NAME:-unknown})." ;;
+    *) die "A backup node runs on $SUPPORTED (this is ${PRETTY_NAME:-unknown})." ;;
 esac
 # ---- What differs between systems: set here once (as the panel keeps its in x_settings). A new system: a new case.
 case "$FAMILY" in
@@ -206,7 +206,7 @@ key_ok() { [[ "$1" =~ ^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ssh-
 if [ "$UPDATE" != 1 ] && [ -z "$KEYARG" ]; then
     ui_banner "Makes this server the off-server backup machine of your Sentora panel"
     ui_heading "Your panel's backup key"
-    printf '  In the panel: Admin > Backup Config > Off-server backup, "A Sentora backup server", shows the\n  command with its key. Paste the key here (one line, starting with ssh-ed25519).\n' >&3
+    printf '  In the panel: Admin > Backup Config > Off-server backup, "A Sentora backup node", shows the\n  command with its key. Paste the key here (one line, starting with ssh-ed25519).\n' >&3
     ui_ask "The panel's backup key" "" KEYARG
 fi
 if [ "$UPDATE" != 1 ]; then
@@ -267,9 +267,9 @@ mkdir -p "$KEYDIR"; chmod 755 "$KEYDIR"
 touch "$KEYDIR/authorized_keys"; chown root:root "$KEYDIR/authorized_keys"; chmod 644 "$KEYDIR/authorized_keys"
 # (Sentora's block at the end of sshd_config, so no other setting comes after its Match)
 cp -p "$SSHD_CONFIG" "$SSHD_CONFIG.before-sentora-backup" 2> /dev/null
-sed -i '/^# BEGIN Sentora backup server/,/^# END Sentora backup server/d' "$SSHD_CONFIG"
+sed -i '/^# BEGIN Sentora backup node/,/^# END Sentora backup node/d' "$SSHD_CONFIG"
 cat >> "$SSHD_CONFIG" <<EOF
-# BEGIN Sentora backup server (sentora2027-backup-server): the panels' keys only, each only through the gate
+# BEGIN Sentora backup node (sentora2027-backup-node): the panels' keys only, each only through the gate
 Match User $BACKUP_USER
     AuthorizedKeysFile $KEYDIR/authorized_keys
     PasswordAuthentication no
@@ -282,7 +282,7 @@ Match User $BACKUP_USER
     PermitTTY no
     PermitTunnel no
     PermitUserRC no
-# END Sentora backup server
+# END Sentora backup node
 EOF
 # (a fresh server may not have its SSH keys yet: they are made the first time SSH starts)
 run ssh-keygen -A
@@ -341,13 +341,13 @@ if [ "$UPDATE" != 1 ]; then
     chmod 644 "$KEYDIR/authorized_keys.new"; mv "$KEYDIR/authorized_keys.new" "$KEYDIR/authorized_keys"
     note "Panel \"$AREA\": its copies go to $ROOT/$AREA."
 fi
-cat > /usr/local/sbin/sentora-backup-server <<'TOOL_EOF'
+cat > /usr/local/sbin/sentora-backup-node <<'TOOL_EOF'
 #!/bin/bash
-# Sentora backup server: its panels.
-#   sentora-backup-server list                           panels (keys), their folders, sizes, last copy
-#   sentora-backup-server add --key KEY [--name NAME]    one more panel (or a panel's new key)
-#   sentora-backup-server remove NAME                    a panel's keys go (its copies stay in /srv/sentora-backups/NAME)
-#   sentora-backup-server fingerprint                    this server's SSH key, for the panel
+# Sentora backup node: its panels.
+#   sentora-backup-node list                           panels (keys), their folders, sizes, last copy
+#   sentora-backup-node add --key KEY [--name NAME]    one more panel (or a panel's new key)
+#   sentora-backup-node remove NAME                    a panel's keys go (its copies stay in /srv/sentora-backups/NAME)
+#   sentora-backup-node fingerprint                    this server's SSH key, for the panel
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 K=/etc/ssh/sentora-backup/authorized_keys
@@ -360,23 +360,23 @@ case "${1:-list}" in
         done ;;
     add) shift; exec bash /usr/local/lib/sentora-backup/installer --gate /usr/local/sbin/sentora-backup-gate "$@" ;;
     remove)
-        n=${2:-}; [[ "$n" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || { echo "sentora-backup-server remove NAME"; exit 2; }
+        n=${2:-}; [[ "$n" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || { echo "sentora-backup-node remove NAME"; exit 2; }
         grep -v "sentora-backup-gate $n\" " "$K" > "$K.new"; chmod 644 "$K.new"; mv "$K.new" "$K"
         echo "Panel \"$n\" can no longer reach this server. Its copies stay in /srv/sentora-backups/$n (remove them by hand when no longer wanted)." ;;
     fingerprint) ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}' ;;
     *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
-chmod 700 /usr/local/sbin/sentora-backup-server
+chmod 700 /usr/local/sbin/sentora-backup-node
 
 ui_done
 UI_WORKING=''
 FP=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 2> /dev/null | awk '{print $2}')
 ADDR=$(hostname -I 2> /dev/null | awk '{print $1}')
 PORT=$(echo "$SSH_PORTS" | awk '{print $1}')
-if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This backup server is up to date" || echo "This server is ready")"; echo >&3; fi
+if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This backup node is up to date" || echo "This server is ready")"; echo >&3; fi
 if [ "$UPDATE" = 1 ]; then
-    say "Done: this backup server is up to date."
+    say "Done: this backup node is up to date."
 else
     say "Done: this server is ready to keep the backups of \"$AREA\"."
     say ""
@@ -385,7 +385,7 @@ else
     say "    Port:               ${C_BOLD}${PORT:-22}${C_RESET}"
     say "    Username:           ${C_BOLD}$BACKUP_USER${C_RESET}   (no password: the panel's key)"
     say "    Folder:             ${C_BOLD}/${C_RESET}"
-    say "    Backup server key:  ${C_BOLD}${C_GREEN}$FP${C_RESET}"
+    say "    Backup node key:  ${C_BOLD}${C_GREEN}$FP${C_RESET}"
     say "Then press Test connection."
 fi
-say "Panels: sentora-backup-server list    Log: $LOG"
+say "Panels: sentora-backup-node list    Log: $LOG"

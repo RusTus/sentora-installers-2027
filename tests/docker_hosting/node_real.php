@@ -1,5 +1,5 @@
 <?php
-// Driver for .github/scripts/node-test.sh: the stand-in panel's side of a real node test.
+// Driver for .github/scripts/docker-node-test.sh: the stand-in panel's side of a real node test.
 //   node_real.php init                  install the add-on, accounts, a domain, shares: prints the panel's code
 //   node_real.php addkey <name> <key>   add the node with the key its installer showed
 //   node_real.php nodeact <what>        node-update, sys-security, sys-all, check-updates, ...

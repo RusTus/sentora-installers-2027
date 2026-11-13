@@ -3,8 +3,8 @@
 # system Sentora supports: Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, Red Hat Enterprise
 # Linux 10 and Fedora 45. Run it as root on a server of its own (not the panel's), with nothing else on it:
 #
-#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node/sentora2027-node -o sentora2027-node
-#   sudo bash sentora2027-node
+#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/docker-node/sentora2027-docker-node -o sentora2027-docker-node
+#   sudo bash sentora2027-docker-node
 #
 # It asks for the panel's address, shows the panel's code to check against the panel (Docker Hosting >
 # Nodes and apps), and ends with this node's key: paste it in the panel's "Add a node". (Or the older
@@ -16,7 +16,7 @@
 #                            safe: every message from the panel is signed with its key)
 #           --email ADDRESS  for Let's Encrypt's notices about the containers' certificates
 #           --agent FILE     use this agent instead of downloading it (tests)
-#           --update         bring an installed node up to date (what sentora-node-update runs):
+#           --update         bring an installed node up to date (what sentora-docker-node-update runs):
 #                            every step again, the node stays linked, its settings are kept
 #
 # What it does:
@@ -30,23 +30,23 @@
 #   3. SELinux (AlmaLinux, Rocky, RHEL, Fedora) stays enforcing: Caddy may only forward to the
 #      containers' ports (20000-29999, on 127.0.0.1) and to web ports; nothing else is widened.
 #      AppArmor (Debian, Ubuntu) stays on with the system's own profiles.
-#   4. The agent (/usr/local/lib/sentora-node/sentora-node-agent.php) is linked to the panel with the
+#   4. The agent (/usr/local/lib/sentora-docker-node/sentora-docker-node-agent.php) is linked to the panel with the
 #      one-time code (new keys, made here; the secret ones never leave this server) and runs as the
-#      service sentora-node. It calls the panel; nothing is opened on this server for the panel.
+#      service sentora-docker-node. It calls the panel; nothing is opened on this server for the panel.
 #
-# Update: sentora-node-update --yes (Sentora's own software only: the newest agent and installer from
+# Update: sentora-docker-node-update --yes (Sentora's own software only: the newest agent and installer from
 #         master2027; Podman, Caddy, PHP and the rest come with the system's updates; the customers'
 #         containers keep running). A package the new version needs and the node lacks is still added.
-# Relink:    sentora-node-relink --panel URL [--new-key] (the panel moved, was set up again, or another panel:
+# Relink:    sentora-docker-node-relink --panel URL [--new-key] (the panel moved, was set up again, or another panel:
 #            the apps and their data stay; the panel lists them under "Found on this node" to give back).
-# Uninstall: sentora-node-uninstall (keeps the customers' containers unless --purge).
-# Log: /var/log/sentora2027-node.log
+# Uninstall: sentora-docker-node-uninstall (keeps the customers' containers unless --purge).
+# Log: /var/log/sentora2027-docker-node.log
 set -u
-LOG=/var/log/sentora2027-node.log
-RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node
-LIB=/usr/local/lib/sentora-node
+LOG=/var/log/sentora2027-docker-node.log
+RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/docker-node
+LIB=/usr/local/lib/sentora-docker-node
 PANEL='' KEY='' CODE='' EMAIL='' AGENT='' TLS='' UPDATE=0 PANELCODE='' MODE=enroll
-CONF=/etc/sentora-node/install.conf
+CONF=/etc/sentora-docker-node/install.conf
 while [ $# -gt 0 ]; do
     case "$1" in
         --panel) PANEL=${2:-}; shift ;;
@@ -100,7 +100,7 @@ ui_ask() { # question default VAR
 UI_STEP=0
 UI_TOTAL=$(grep -c '^ *ui_step "' "$0" 2> /dev/null); [ "${UI_TOTAL:-0}" -gt 0 ] 2> /dev/null || UI_TOTAL=12
 UI_TITLE='' UI_STEP_START=0 UI_START=$(date +%s) UI_TICKER='' UI_LOGPOS=0 UI_NOTES='' UI_WORKING=''
-UI_TICKFILE=$(mktemp /tmp/sentora-node-step.XXXXXX)
+UI_TICKFILE=$(mktemp /tmp/sentora-docker-node-step.XXXXXX)
 UI_MAINPID=$$
 ui_repeat() { local i out=''; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
 ui_draw() { # spinner-frame
@@ -188,8 +188,8 @@ run() { "$@" >> "$LOG" 2>&1; }
 
 [ "$(id -u)" -eq 0 ] || die "Run this as root."
 if [ "$UPDATE" = 1 ]; then
-    [ -f /etc/sentora-node/node.json ] || die "This server is not a node yet: install it with the command from the panel."
-    PANEL=$(php -r '$c = json_decode((string) file_get_contents("/etc/sentora-node/node.json"), true); echo is_array($c) && isset($c["panel"]) ? $c["panel"] : "";')
+    [ -f /etc/sentora-docker-node/node.json ] || die "This server is not a node yet: install it with the command from the panel."
+    PANEL=$(php -r '$c = json_decode((string) file_get_contents("/etc/sentora-docker-node/node.json"), true); echo is_array($c) && isset($c["panel"]) ? $c["panel"] : "";')
     # the settings it was installed with (only known names are read)
     if [ -f "$CONF" ]; then
         v=$(sed -n 's/^EMAIL=//p' "$CONF" | head -1); [ -z "$EMAIL" ] && EMAIL=$v
@@ -202,7 +202,7 @@ elif [ -n "$KEY" ] || [ -n "$CODE" ]; then
     [[ "$KEY" =~ ^v1\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$ ]] || die "--key is not right: copy the command from the panel again."
     [[ "$CODE" =~ ^[0-9]{1,9}\.[0-9a-f]{32}$ ]] || die "--code is not right: copy the command from the panel again."
 else
-    if [ -z "$PANEL" ] && [ ! -f /etc/sentora-node/node.json ]; then
+    if [ -z "$PANEL" ] && [ ! -f /etc/sentora-docker-node/node.json ]; then
         ui_banner "Makes this server a Docker Hosting node of your Sentora panel"
         ui_heading "Your panel"
         printf '  Where is your Sentora panel? Its IP address or its name, as this server can reach it\n  (for example 172.16.1.250 or panel.example.com).\n' >&3
@@ -210,7 +210,7 @@ else
     fi
     case "$PANEL" in ''|https://*|http://*) ;; *) PANEL="https://$PANEL" ;; esac
     PANEL=${PANEL%/}
-    [ -f /etc/sentora-node/node.json ] || [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
+    [ -f /etc/sentora-docker-node/node.json ] || [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
 fi
 if [ -n "$EMAIL" ] && ! [[ "$EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then die "--email is not an email address."; fi
 [ -r /etc/os-release ] || die "This system does not say what it is (/etc/os-release)."
@@ -224,7 +224,7 @@ case "${ID:-}:${VERSION_ID:-}" in
     ubuntu:26.04) FAMILY=deb ;;
     *) die "A node runs on $SUPPORTED (this is ${PRETTY_NAME:-unknown})." ;;
 esac
-# ---- What differs between systems: set here once, used below, and kept in /etc/sentora-node/platform.conf
+# ---- What differs between systems: set here once, used below, and kept in /etc/sentora-docker-node/platform.conf
 # for the agent and the node's own tools (as the panel keeps its in x_settings). A new system: a new case.
 case "$FAMILY" in
     deb)
@@ -309,8 +309,8 @@ command -v caddy >/dev/null 2>&1 || die "Caddy is not there after installing it.
 PHP_BIN=$(command -v php)
 CADDY_BIN=$(command -v caddy)
 NOLOGIN=$(command -v nologin || echo /usr/sbin/nologin)
-mkdir -p /etc/sentora-node; chmod 700 /etc/sentora-node
-cat > /etc/sentora-node/platform.conf <<EOF
+mkdir -p /etc/sentora-docker-node; chmod 700 /etc/sentora-docker-node
+cat > /etc/sentora-docker-node/platform.conf <<EOF
 # What differs between systems, for the agent and the node's tools (written by the installer for ${PRETTY_NAME}).
 FAMILY=$FAMILY
 PKG=$PKG
@@ -322,7 +322,7 @@ CADDY_BIN=$CADDY_BIN
 PHP_BIN=$PHP_BIN
 NOLOGIN=$NOLOGIN
 EOF
-chmod 600 /etc/sentora-node/platform.conf
+chmod 600 /etc/sentora-docker-node/platform.conf
 ui_step "Rights for the customers' own containers"
 # rootless Podman maps each customer's IDs with newuidmap/newgidmap, which need their file capabilities
 # (or set-uid, as Debian/Ubuntu ship them; some server images lose them): put them back when missing
@@ -364,7 +364,7 @@ mkdir -p $CADDY_DIR/sentora
     echo ""
     echo "import $CADDY_DIR/sentora/*.caddy"
 } > $CADDY_DIR/Caddyfile
-[ -f $CADDY_DIR/sentora/sites.caddy ] || echo "# Written by Sentora Node (sentora-node-agent): no containers yet." > $CADDY_DIR/sentora/sites.caddy
+[ -f $CADDY_DIR/sentora/sites.caddy ] || echo "# Written by Sentora Node (sentora-docker-node-agent): no containers yet." > $CADDY_DIR/sentora/sites.caddy
 run "$CADDY_BIN" validate --config $CADDY_DIR/Caddyfile --adapter caddyfile || die "Caddy does not accept its settings (see $LOG)."
 ui_step "Firewall (only SSH, HTTP and HTTPS open)"
 SSH_PORTS=$(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -u | tr '\n' ' ')
@@ -413,66 +413,66 @@ run systemctl restart "$CADDY_SERVICE" || die "Caddy did not start (see $LOG and
 
 ui_step "The agent (Sentora's own software on the node)"
 mkdir -p "$LIB"; chmod 755 "$LIB"
-rm -f "$LIB/sentora-node-agent.php.new"
+rm -f "$LIB/sentora-docker-node-agent.php.new"
 if [ -n "$AGENT" ]; then
-    cp "$AGENT" "$LIB/sentora-node-agent.php.new" || die "No agent at $AGENT."
+    cp "$AGENT" "$LIB/sentora-docker-node-agent.php.new" || die "No agent at $AGENT."
 else
-    curl -fsSL --proto =https,file --proto-redir =https "${SNODE_RAW_BASE:-$RAW_BASE}/sentora-node-agent.php" -o "$LIB/sentora-node-agent.php.new" || die "Could not download the agent."
+    curl -fsSL --proto =https,file --proto-redir =https "${SNODE_RAW_BASE:-$RAW_BASE}/sentora-docker-node-agent.php" -o "$LIB/sentora-docker-node-agent.php.new" || die "Could not download the agent."
 fi
-php -l "$LIB/sentora-node-agent.php.new" >> "$LOG" 2>&1 || { rm -f "$LIB/sentora-node-agent.php.new"; die "The agent is damaged (see $LOG): nothing changed."; }
+php -l "$LIB/sentora-docker-node-agent.php.new" >> "$LOG" 2>&1 || { rm -f "$LIB/sentora-docker-node-agent.php.new"; die "The agent is damaged (see $LOG): nothing changed."; }
 # the one that ran before is kept, to go back to when the new one does not start
-[ -f "$LIB/sentora-node-agent.php" ] && cp -p "$LIB/sentora-node-agent.php" "$LIB/sentora-node-agent.php.previous"
-chmod 755 "$LIB/sentora-node-agent.php.new"
-mv "$LIB/sentora-node-agent.php.new" "$LIB/sentora-node-agent.php"
-# (this installer is kept too: sentora-node-update compares it with the newest)
+[ -f "$LIB/sentora-docker-node-agent.php" ] && cp -p "$LIB/sentora-docker-node-agent.php" "$LIB/sentora-docker-node-agent.php.previous"
+chmod 755 "$LIB/sentora-docker-node-agent.php.new"
+mv "$LIB/sentora-docker-node-agent.php.new" "$LIB/sentora-docker-node-agent.php"
+# (this installer is kept too: sentora-docker-node-update compares it with the newest)
 if [ -f "$0" ] && [ "$0" != "$LIB/installer" ]; then cp "$0" "$LIB/installer"; chmod 700 "$LIB/installer"; fi
-cat > /usr/local/sbin/sentora-node-agent <<EOF
+cat > /usr/local/sbin/sentora-docker-node-agent <<EOF
 #!/bin/sh
-exec $PHP_BIN $LIB/sentora-node-agent.php "\$@"
+exec $PHP_BIN $LIB/sentora-docker-node-agent.php "\$@"
 EOF
-chmod 755 /usr/local/sbin/sentora-node-agent
-cat > /usr/local/sbin/sentora-node-relink <<'RELINK_EOF'
+chmod 755 /usr/local/sbin/sentora-docker-node-agent
+cat > /usr/local/sbin/sentora-docker-node-relink <<'RELINK_EOF'
 #!/bin/sh
 # Sentora Node: link this node again, keeping every app and its data.
-#   sentora-node-relink --panel https://panel.example            the same panel at a new address (only the address
+#   sentora-docker-node-relink --panel https://panel.example            the same panel at a new address (only the address
 #                                                                 changes), or another panel (new node key to add there)
-#   sentora-node-relink --panel https://panel.example --new-key  the same panel, which no longer knows this node
+#   sentora-docker-node-relink --panel https://panel.example --new-key  the same panel, which no longer knows this node
 #                                                                 (removed there, set up again or restored)
 # Then add the node in the panel with the key shown; its apps appear under "Found on this node", where the
 # administrator gives each back to its owner.
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 [ $# -gt 0 ] || { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-systemctl stop sentora-node 2>/dev/null
-/usr/local/sbin/sentora-node-agent relink "$@"; r=$?
-systemctl start sentora-node
+systemctl stop sentora-docker-node 2>/dev/null
+/usr/local/sbin/sentora-docker-node-agent relink "$@"; r=$?
+systemctl start sentora-docker-node
 exit $r
 RELINK_EOF
-chmod 755 /usr/local/sbin/sentora-node-relink
-if [ -f /etc/sentora-node/node.json ]; then
-    note "Already linked to a panel (/etc/sentora-node/node.json): kept. To link it to a panel again (apps kept): sentora-node-relink --panel <address>."
+chmod 755 /usr/local/sbin/sentora-docker-node-relink
+if [ -f /etc/sentora-docker-node/node.json ]; then
+    note "Already linked to a panel (/etc/sentora-docker-node/node.json): kept. To link it to a panel again (apps kept): sentora-docker-node-relink --panel <address>."
 elif [ "$MODE" = pair ]; then
     ui_end_step
-    /usr/local/sbin/sentora-node-agent pair --panel "$PANEL" --key "$KEY" --code "$CODE" $TLS 2>&1 | tee -a "$LOG" >&3
+    /usr/local/sbin/sentora-docker-node-agent pair --panel "$PANEL" --key "$KEY" --code "$CODE" $TLS 2>&1 | tee -a "$LOG" >&3
     [ "${PIPESTATUS[0]}" -eq 0 ] || die "Not linked to the panel (see above)."
 else
     # the node makes its own keys; the person installing checks the panel's code (no fake panel): on the screen
     ui_end_step
     ui_heading "Checking that it is your panel"
-    /usr/local/sbin/sentora-node-agent enroll --panel "$PANEL" $TLS ${PANELCODE:+--panel-code "$PANELCODE"} >&3 2>&4 || die "No node key was made (see above)."
+    /usr/local/sbin/sentora-docker-node-agent enroll --panel "$PANEL" $TLS ${PANELCODE:+--panel-code "$PANELCODE"} >&3 2>&4 || die "No node key was made (see above)."
     echo >&3
 fi
-{ echo "# Settings this node was installed with (read by sentora-node-update)"; [ -n "$EMAIL" ] && echo "EMAIL=$EMAIL"; [ "${SNODE_TEST_LOCAL_CERTS:-}" = 1 ] && echo "LOCAL_CERTS=1"; } > "$CONF"
+{ echo "# Settings this node was installed with (read by sentora-docker-node-update)"; [ -n "$EMAIL" ] && echo "EMAIL=$EMAIL"; [ "${SNODE_TEST_LOCAL_CERTS:-}" = 1 ] && echo "LOCAL_CERTS=1"; } > "$CONF"
 chmod 600 "$CONF"
 
 ui_step "The node's tools and its service"
-cat > /etc/systemd/system/sentora-node.service <<EOF
+cat > /etc/systemd/system/sentora-docker-node.service <<EOF
 [Unit]
 Description=Sentora Node agent (Docker Hosting)
 After=network-online.target $CADDY_SERVICE.service
 Wants=network-online.target
 
 [Service]
-ExecStart=$PHP_BIN $LIB/sentora-node-agent.php run
+ExecStart=$PHP_BIN $LIB/sentora-docker-node-agent.php run
 Restart=always
 RestartSec=10
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -481,44 +481,44 @@ Environment=HOME=/root
 [Install]
 WantedBy=multi-user.target
 EOF
-cat > /usr/local/sbin/sentora-node-uninstall <<'EOF'
+cat > /usr/local/sbin/sentora-docker-node-uninstall <<'EOF'
 #!/bin/sh
 # Sentora Node: stop and remove the agent and its keys (the panel then sees the node offline; remove it there).
 # --purge also deletes every customer's containers, data and Linux user (sdh*), and the containers' sites.
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
-CADDY_DIR=$(sed -n 's/^CADDY_DIR=//p' /etc/sentora-node/platform.conf 2> /dev/null); CADDY_DIR=${CADDY_DIR:-/etc/caddy}
-CADDY_SERVICE=$(sed -n 's/^CADDY_SERVICE=//p' /etc/sentora-node/platform.conf 2> /dev/null); CADDY_SERVICE=${CADDY_SERVICE:-caddy}
-systemctl disable --now sentora-node 2>/dev/null
-rm -f /etc/systemd/system/sentora-node.service /usr/local/sbin/sentora-node-agent /usr/local/sbin/sentora-node-relink /usr/local/sbin/sentora-node-update /usr/local/sbin/sentora-node-sysupdate /root/sentora-node-key.txt
-rm -rf /etc/sentora-node /usr/local/lib/sentora-node
+CADDY_DIR=$(sed -n 's/^CADDY_DIR=//p' /etc/sentora-docker-node/platform.conf 2> /dev/null); CADDY_DIR=${CADDY_DIR:-/etc/caddy}
+CADDY_SERVICE=$(sed -n 's/^CADDY_SERVICE=//p' /etc/sentora-docker-node/platform.conf 2> /dev/null); CADDY_SERVICE=${CADDY_SERVICE:-caddy}
+systemctl disable --now sentora-docker-node 2>/dev/null
+rm -f /etc/systemd/system/sentora-docker-node.service /usr/local/sbin/sentora-docker-node-agent /usr/local/sbin/sentora-docker-node-relink /usr/local/sbin/sentora-docker-node-update /usr/local/sbin/sentora-docker-node-sysupdate /root/sentora-docker-node-key.txt
+rm -rf /etc/sentora-docker-node /usr/local/lib/sentora-docker-node
 if [ "${1:-}" = --purge ]; then
     for u in $(awk -F: '$1 ~ /^sdh[0-9]+$/ {print $1}' /etc/passwd); do
         loginctl disable-linger "$u" 2>/dev/null; loginctl terminate-user "$u" 2>/dev/null; sleep 1
         userdel -r "$u" 2>/dev/null && echo "removed $u"
     done
-    rm -rf /var/lib/sentora-node
+    rm -rf /var/lib/sentora-docker-node
     echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl reload "$CADDY_SERVICE" 2>/dev/null
 fi
 systemctl daemon-reload
-rm -f /usr/local/sbin/sentora-node-uninstall
+rm -f /usr/local/sbin/sentora-docker-node-uninstall
 echo "Sentora Node agent removed."
 EOF
-chmod 755 /usr/local/sbin/sentora-node-uninstall
-cat > /usr/local/sbin/sentora-node-sysupdate <<'SYSUPDATE_EOF'
+chmod 755 /usr/local/sbin/sentora-docker-node-uninstall
+cat > /usr/local/sbin/sentora-docker-node-sysupdate <<'SYSUPDATE_EOF'
 #!/bin/bash
 # Sentora Node: this server's own updates, for the panel (Docker Hosting > Nodes and apps), which asks
-# for them through the agent. The result goes to /var/lib/sentora-node/sysupdate.json.
+# for them through the agent. The result goes to /var/lib/sentora-docker-node/sysupdate.json.
 #   --check     count the waiting updates (all, security) and whether a restart is needed
 #   --security  install the security updates      --all   install all updates
 set -u
-S=/var/lib/sentora-node/sysupdate.json
-mkdir -p /var/lib/sentora-node && chmod 700 /var/lib/sentora-node
-exec 9> /run/sentora-node-sysupdate.lock
+S=/var/lib/sentora-docker-node/sysupdate.json
+mkdir -p /var/lib/sentora-docker-node && chmod 700 /var/lib/sentora-docker-node
+exec 9> /run/sentora-docker-node-sysupdate.lock
 flock -n 9 || exit 0
 put() { php -r '$f = $argv[1]; $o = json_decode((string) @file_get_contents($f), true); $o = is_array($o) ? $o : array();
     file_put_contents($f . ".new", json_encode(array_merge($o, json_decode($argv[2], true)))); rename($f . ".new", $f);' "$S" "$1"; }
 # the system's package manager (from the installer: platform.conf)
-PKG=$(sed -n 's/^PKG=//p' /etc/sentora-node/platform.conf 2> /dev/null); PKG=${PKG:-dnf}
+PKG=$(sed -n 's/^PKG=//p' /etc/sentora-docker-node/platform.conf 2> /dev/null); PKG=${PKG:-dnf}
 export DEBIAN_FRONTEND=noninteractive
 check() {
     local all sec reboot=0
@@ -541,7 +541,7 @@ case "${1:---check}" in
     --security|--all)
         kind=${1#--}
         put "{\"running\": \"$kind\"}"
-        L=/var/log/sentora-node-sysupdate.log
+        L=/var/log/sentora-docker-node-sysupdate.log
         if [ "$PKG" = apt ]; then
             apt-get -q update >> $L 2>&1
             if [ "$kind" = security ]; then unattended-upgrade -v >> $L 2>&1; else apt-get -y -o Dpkg::Options::=--force-confold upgrade >> $L 2>&1; fi
@@ -549,65 +549,65 @@ case "${1:---check}" in
         ok=$?
         put "{\"running\": \"\", \"last_at\": $(date +%s), \"last_ok\": $([ $ok -eq 0 ] && echo 1 || echo 0), \"last_kind\": \"$kind\"}"
         check ;;
-    *) echo "sentora-node-sysupdate --check|--security|--all"; exit 2 ;;
+    *) echo "sentora-docker-node-sysupdate --check|--security|--all"; exit 2 ;;
 esac
 SYSUPDATE_EOF
-chmod 700 /usr/local/sbin/sentora-node-sysupdate
-cat > /usr/local/sbin/sentora-node-update <<'UPDATE_EOF'
+chmod 700 /usr/local/sbin/sentora-docker-node-sysupdate
+cat > /usr/local/sbin/sentora-docker-node-update <<'UPDATE_EOF'
 #!/bin/bash
 # Sentora Node: bring this node up to date, like sentora-update on the panel. Downloads the newest node
 # installer and agent (master2027 of sentora-installers-2027), shows what changes, and runs the
 # installer with --update: every step again and the new agent (the old one comes back when the new
 # one does not start). Only Sentora's own software: Podman, Caddy, PHP and the rest of the system are
-# updated by the system's updates (sentora-node-sysupdate). The node stays linked; the customers'
+# updated by the system's updates (sentora-docker-node-sysupdate). The node stays linked; the customers'
 # containers keep running.
-#   sentora-node-update           ask before updating
-#   sentora-node-update --yes     update without asking
-#   sentora-node-update --check   only show whether there is something new
+#   sentora-docker-node-update           ask before updating
+#   sentora-docker-node-update --yes     update without asking
+#   sentora-docker-node-update --check   only show whether there is something new
 set -u
-LIB=/usr/local/lib/sentora-node
-RAW_BASE=${SNODE_RAW_BASE:-https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/node}
+LIB=/usr/local/lib/sentora-docker-node
+RAW_BASE=${SNODE_RAW_BASE:-https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/docker-node}
 YES=0 CHECK=0
 for a in "$@"; do case "$a" in --yes|-y) YES=1 ;; --check) CHECK=1 ;; -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) echo "Unknown option: $a"; exit 1 ;; esac; done
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
-T=$(mktemp -d /tmp/sentora-node-update.XXXXXX); trap 'rm -rf "$T"' EXIT
-curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora2027-node" -o "$T/installer" && curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora-node-agent.php" -o "$T/agent.php" \
+T=$(mktemp -d /tmp/sentora-docker-node-update.XXXXXX); trap 'rm -rf "$T"' EXIT
+curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora2027-docker-node" -o "$T/installer" && curl -fsSL --proto =https,file --proto-redir =https "$RAW_BASE/sentora-docker-node-agent.php" -o "$T/agent.php" \
     || { echo "Could not download the newest node files ($RAW_BASE)."; exit 1; }
 bash -n "$T/installer" && php -l "$T/agent.php" > /dev/null 2>&1 || { echo "The downloaded files are damaged: nothing changed."; exit 1; }
 ver() { sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$1" 2> /dev/null | head -1; }
 same() { [ -f "$2" ] && [ "$(sha256sum < "$1")" = "$(sha256sum < "$2")" ]; }
-OLD=$(ver "$LIB/sentora-node-agent.php"); NEW=$(ver "$T/agent.php")
-if same "$T/agent.php" "$LIB/sentora-node-agent.php"; then echo "Agent: up to date (version ${OLD:-?})."; else echo "Agent: ${OLD:-?} -> ${NEW:-?} (new)"; fi
+OLD=$(ver "$LIB/sentora-docker-node-agent.php"); NEW=$(ver "$T/agent.php")
+if same "$T/agent.php" "$LIB/sentora-docker-node-agent.php"; then echo "Agent: up to date (version ${OLD:-?})."; else echo "Agent: ${OLD:-?} -> ${NEW:-?} (new)"; fi
 if same "$T/installer" "$LIB/installer"; then echo "Node setup: up to date."; else echo "Node setup: new (its steps run again)."; fi
 echo "(Only Sentora's own software; Podman, Caddy, PHP and the rest come with the system's updates.)"
 [ "$CHECK" = 1 ] && exit 0
 if [ "$YES" != 1 ]; then read -r -p "Update this node now? [y/N] " r; case "$r" in y|Y|yes) ;; *) echo "Nothing changed."; exit 0 ;; esac; fi
 bash "$T/installer" --update --agent "$T/agent.php"
 UPDATE_EOF
-chmod 755 /usr/local/sbin/sentora-node-update
+chmod 755 /usr/local/sbin/sentora-docker-node-update
 run systemctl daemon-reload
 if [ "$UPDATE" = 1 ]; then
-    run systemctl enable sentora-node
-    run systemctl restart sentora-node
+    run systemctl enable sentora-docker-node
+    run systemctl restart sentora-docker-node
 else
-    run systemctl enable --now sentora-node || die "The service did not start (journalctl -u sentora-node)."
+    run systemctl enable --now sentora-docker-node || die "The service did not start (journalctl -u sentora-docker-node)."
 fi
 sleep 3
-if ! systemctl is-active --quiet sentora-node; then
-    if [ "$UPDATE" = 1 ] && [ -f "$LIB/sentora-node-agent.php.previous" ]; then
-        cp -p "$LIB/sentora-node-agent.php.previous" "$LIB/sentora-node-agent.php"
-        run systemctl restart sentora-node
-        die "The new agent did not stay up: the one before is back (journalctl -u sentora-node)."
+if ! systemctl is-active --quiet sentora-docker-node; then
+    if [ "$UPDATE" = 1 ] && [ -f "$LIB/sentora-docker-node-agent.php.previous" ]; then
+        cp -p "$LIB/sentora-docker-node-agent.php.previous" "$LIB/sentora-docker-node-agent.php"
+        run systemctl restart sentora-docker-node
+        die "The new agent did not stay up: the one before is back (journalctl -u sentora-docker-node)."
     fi
-    die "The service did not stay up (journalctl -u sentora-node)."
+    die "The service did not stay up (journalctl -u sentora-docker-node)."
 fi
 ui_done
 UI_WORKING=''
 if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This node is up to date" || echo "This server is ready")"; echo >&3; fi
 if [ "$UPDATE" = 1 ]; then
-    say "Done: this node is up to date (agent $(sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$LIB/sentora-node-agent.php" | head -1)), still a node of $PANEL."
-elif [ "$MODE" = enroll ] && [ -f /root/sentora-node-key.txt ]; then
-    NODEKEY=$(grep -oE 'SN1(-[A-Z0-9]{4}){6}' /root/sentora-node-key.txt | head -1)
+    say "Done: this node is up to date (agent $(sed -n "s/^    const VERSION = '\([^']*\)';/\1/p" "$LIB/sentora-docker-node-agent.php" | head -1)), still a node of $PANEL."
+elif [ "$MODE" = enroll ] && [ -f /root/sentora-docker-node-key.txt ]; then
+    NODEKEY=$(grep -oE 'SN1(-[A-Z0-9]{4}){6}' /root/sentora-docker-node-key.txt | head -1)
     say "Done: this server is ready to be a node of $PANEL."
     say ""
     say "Last step, in the panel: Docker Hosting > Nodes and apps > Add a node."
@@ -615,8 +615,8 @@ elif [ "$MODE" = enroll ] && [ -f /root/sentora-node-key.txt ]; then
     say ""
     say "    ${C_BOLD}${C_GREEN}$NODEKEY${C_RESET}"
     say ""
-    say "(The key is also in /root/sentora-node-key.txt. The node shows online a few seconds after you add it.)"
+    say "(The key is also in /root/sentora-docker-node-key.txt. The node shows online a few seconds after you add it.)"
 else
     say "Done: this server is a node of $PANEL. The panel shows it online in a few seconds."
 fi
-say "Status: sentora-node-agent status    Update: sentora-node-update --yes    Log: journalctl -u sentora-node"
+say "Status: sentora-docker-node-agent status    Update: sentora-docker-node-update --yes    Log: journalctl -u sentora-docker-node"

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Sentora backup server: the only thing a panel's SSH key may run here (authorized_keys:
+# Sentora backup node: the only thing a panel's SSH key may run here (authorized_keys:
 # restrict,command="/usr/local/sbin/sentora-backup-gate <area>"). Each panel writes and reads only its
 # own area, /srv/sentora-backups/<area>; paths it sends are taken inside that area ("/" is the area).
 # Allowed, nothing else (no shell, no forwarding, no terminal):
 #   rsync --server ...                   copying to or from the area (rsync's own server side)
-#   sentora-backup hello                 says it is a Sentora backup server (and which version)
+#   sentora-backup hello                 says it is a Sentora backup node (and which version)
 #   sentora-backup ready  <dir>          makes <dir>, says "ready" when it can be written
 #   sentora-backup begin  <dir> <date>   makes <dir>/<date>.partial
 #   sentora-backup latest <dir>          "yes" when <dir>/latest is there (the last copy, to link to)

@@ -1,7 +1,7 @@
-# Sentora backup server test: each supported system in a container with systemd is made a backup server
-# (backup/sentora2027-backup-server) and used over real SSH and rsync as a panel would, including what it
-# must refuse. The script: .github/scripts/backup-server-test.sh. Results kept 14 days.
-name: Backup server test
+# Sentora backup node test: each supported system in a container with systemd is made a backup node
+# (backup-node/sentora2027-backup-node) and used over real SSH and rsync as a panel would, including what it
+# must refuse. The script: .github/scripts/backup-node-test.sh. Results kept 14 days.
+name: Backup node test
 
 on:
   workflow_dispatch:
@@ -12,9 +12,9 @@ on:
   push:
     branches: [master2027, docker-hosting]
     paths:
-      - backup/**
-      - .github/scripts/backup-server-test.sh
-      - .github/workflows/backup-server-test.yml
+      - backup-node/**
+      - .github/scripts/backup-node-test.sh
+      - .github/workflows/backup-node-test.yml
 
 permissions:
   contents: read
@@ -37,11 +37,11 @@ jobs:
           path: core
       - name: rsync on the runner
         run: command -v rsync || sudo apt-get install -y rsync
-      - name: Backup server
-        run: CORE=$PWD/core .github/scripts/backup-server-test.sh results ${{ matrix.system }}
+      - name: Backup node
+        run: CORE=$PWD/core .github/scripts/backup-node-test.sh results ${{ matrix.system }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backup-server-test-${{ matrix.system }}
+          name: backup-node-test-${{ matrix.system }}
           path: results
           retention-days: 14
