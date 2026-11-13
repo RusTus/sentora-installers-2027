@@ -1459,7 +1459,8 @@ sed -i "s|#first_valid_uid = ?|first_valid_uid = $VMAIL_UID\nlast_valid_uid = $V
 
 mkdir -p $PANEL_DATA/sieve
 chown -R vmail:mail $PANEL_DATA/sieve
-ln -sf $PANEL_CONF/dovecot2/globalfilter.sieve $PANEL_DATA/sieve/globalfilter.sieve
+# a copy, not a link: Dovecot's filter refuses a link out of its folder (the panel's daemon keeps it the same)
+cp -f $PANEL_CONF/dovecot2/globalfilter.sieve $PANEL_DATA/sieve/globalfilter.sieve && chown vmail:mail $PANEL_DATA/sieve/globalfilter.sieve && chmod 644 $PANEL_DATA/sieve/globalfilter.sieve
 
 rm -f /etc/dovecot/dovecot.conf
 ln -s $PANEL_CONF/dovecot2/dovecot.conf /etc/dovecot/dovecot.conf
