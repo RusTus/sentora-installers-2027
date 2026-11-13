@@ -5,13 +5,18 @@
 # Run it as root on a server of its own (not a panel's), installed the same way as a Docker Hosting node:
 #
 #   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup-node/sentora2027-backup-node -o sentora2027-backup-node
-#   sudo bash sentora2027-backup-node --key '<the panel's backup key>'
+#   sudo bash sentora2027-backup-node
 #
-# The panel shows that command, with its key, in Admin > Backup Config > Off-server backup. The installer
-# ends with what to enter there (this server's address, user, folder and its SSH key's fingerprint, so the
-# panel can check it is talking to this server and no other).
+# Installed like every Sentora node: it asks for the panel's address, fetches the panel's backup key and
+# shows the panel's code: answer y only when it is the code on the panel's page (Module Admin > Backup
+# Config > Off-server backup). It ends with this node's key (SB1-XXXX-XXXX-XXXX-XXXX): paste it, with this
+# server's address, in the panel's "Add the backup node". The panel then checks that the server at that
+# address really has that key before it sends anything there.
 #
-# Options:  --key KEY       the panel's backup key (its SSH public key; asked for when not given)
+# Options:  --panel URL     the panel's address (asked for when not given)
+#           --panel-code C  the panel's code (asked to check when not given; for scripts)
+#           --key KEY       the panel's backup key itself, instead of --panel (older panels, 2027.85, show
+#                           the command with it; there the panel asks for this server's fingerprint)
 #           --name NAME     the panel's folder here (default: the name in its key, e.g. panel.example.com);
 #                           the same name for a second key = the same folder (a panel moved to a new server)
 #           --gate FILE     use this gate instead of downloading it (tests)
@@ -23,20 +28,23 @@
 # file only root can change. Several panels can share one backup node: each sees only its own folder.
 #
 # Afterwards:  sentora-backup-node list            panels (keys), their folders, sizes, last copy
-#              sentora-backup-node add --key KEY [--name NAME]    one more panel
+#              sentora-backup-node add --panel URL (or --key KEY) [--name NAME]   one more panel
 #              sentora-backup-node remove NAME     a panel's key goes (its copies stay)
+#              sentora-backup-node key             this node's key again, for the panel
 # Log: /var/log/sentora2027-backup-node.log, the gate's: /var/log/sentora-backup-gate.log
 set -u
 LOG=/var/log/sentora2027-backup-node.log
 RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/backup-node
-KEYARG='' AREA='' GATE='' UPDATE=0
+KEYARG='' AREA='' GATE='' UPDATE=0 PANEL='' PANELCODE=''
 while [ $# -gt 0 ]; do
     case "$1" in
         --key) KEYARG=${2:-}; shift ;;
+        --panel) PANEL=${2:-}; shift ;;
+        --panel-code) PANELCODE=${2:-}; shift ;;
         --name) AREA=${2:-}; shift ;;
         --gate) GATE=${2:-}; shift ;;
         --update) UPDATE=1 ;;
-        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
     esac
     shift
@@ -203,11 +211,64 @@ if [ -e /etc/sentora/.installing ] || [ -d /etc/sentora/panel ] || [ -d /etc/zpa
 if [ "${ID}" = rhel ] && ! subscription-manager identity >/dev/null 2>&1; then die "Register this RHEL server first (subscription-manager register)."; fi
 # the panel's key: one line, an SSH public key (its name is the panel's server, from its comment)
 key_ok() { [[ "$1" =~ ^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ssh-rsa)\ [A-Za-z0-9+/]{40,800}={0,3}(\ [A-Za-z0-9@._-]{1,100})?$ ]]; }
+# ---- The node framework's codes (the same as the panel's sys_nodes class and every Sentora node's
+# installer; NODES.md in this repository): base32 without I, O, 0 and 1.
+# BEGIN node codes
+b32hex() { # hex-digits letters: the first letters of base32 of the hex
+    local hex=$1 n=$2 a=ABCDEFGHJKLMNPQRSTUVWXYZ23456789 out='' half v i
+    for half in 0 10; do
+        [ ${#out} -ge "$n" ] && break
+        v=$((16#${hex:$half:10}))
+        for i in 7 6 5 4 3 2 1 0; do out=$out${a:$(( (v >> (i * 5)) & 31 )):1}; done
+    done
+    echo "${out:0:$n}"
+}
+panel_code() { # node-type public-key: the panel's code, XXXX-XXXX
+    local c; c=$(b32hex "$(printf '%s|%s' "$1" "$2" | sha256sum | cut -c1-20)" 8); echo "${c:0:4}-${c:4:4}"
+}
+ssh_key_code() { # public-key-file: the 16 letters of a node's key
+    b32hex "$(awk '{print $2}' "$1" | base64 -d | sha256sum | cut -c1-20)" 16
+}
+node_key() { # prefix public-key-file: PREFIX-XXXX-XXXX-XXXX-XXXX
+    local c; c=$(ssh_key_code "$2"); echo "$1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}"
+}
+fetch_panel() { # url: the panel's answer (a self-signed panel is fine: the person checks the code)
+    local out
+    if command -v curl > /dev/null 2>&1; then
+        out=$(curl -fsS --max-time 20 --proto =https,http "$1" 2> /dev/null) || out=$(curl -fsSk --max-time 20 --proto =https,http "$1" 2> /dev/null) || return 1
+    elif command -v wget > /dev/null 2>&1; then
+        out=$(wget -qO- -T 20 "$1" 2> /dev/null) || out=$(wget -qO- -T 20 --no-check-certificate "$1" 2> /dev/null) || return 1
+    else
+        return 1
+    fi
+    printf '%s' "$out"
+}
+# END node codes
 if [ "$UPDATE" != 1 ] && [ -z "$KEYARG" ]; then
-    ui_banner "Makes this server the off-server backup machine of your Sentora panel"
-    ui_heading "Your panel's backup key"
-    printf '  In the panel: Admin > Backup Config > Off-server backup, "A Sentora backup node", shows the\n  command with its key. Paste the key here (one line, starting with ssh-ed25519).\n' >&3
-    ui_ask "The panel's backup key" "" KEYARG
+    if [ -z "$PANEL" ]; then
+        ui_banner "Makes this server the off-server backup machine of your Sentora panel"
+        ui_heading "Your panel"
+        printf '  Where is your Sentora panel? Its IP address or its name, as this server can reach it\n  (for example 172.16.1.250 or panel.example.com).\n' >&3
+        ui_ask "The panel's address" "" PANEL
+    fi
+    PANEL=$(printf '%s' "$PANEL" | tr -d '\r' | sed 's/^ *//; s/ *$//')
+    case "$PANEL" in https://*|http://*) ;; *) PANEL="https://$PANEL" ;; esac
+    PANEL=${PANEL%/}
+    [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
+    KEYARG=$(fetch_panel "$PANEL/modules/backup_admin/code/node.php?key=1" | head -1 | tr -d '\r')
+    [ -n "$KEYARG" ] || die "Could not get the backup key from $PANEL: is it the panel's address, reachable from here (HTTPS), and is the panel 2027.86 or newer? (An older panel shows a command with --key: use that.)"
+
+    key_ok "$KEYARG" || die "$PANEL did not answer with a backup key: is it a Sentora panel?"
+    CODE=$(panel_code sentora-backup "$KEYARG")
+    if [ -n "$PANELCODE" ]; then
+        [ "$(printf '%s' "$PANELCODE" | tr a-z A-Z | tr -d ' ')" = "$CODE" ] || die "The panel's code is $CODE, not $PANELCODE: this is not the panel you meant (or something in between answers for it). Nothing was changed."
+    else
+        ui_heading "Check the panel's code"
+        printf '  The panel at %s has the code:\n\n      %s%s%s\n\n  In the panel: Module Admin > Backup Config > Off-server backup shows its code.\n' "$PANEL" "$C_BOLD$C_GREEN" "$CODE" "$C_RESET" >&3
+        ans=''
+        ui_ask "Is it the same code? (y/n)" "" ans
+        case "$ans" in y|Y|yes|Yes|YES) ;; *) die "Not the same code: nothing was changed. Check the panel's address (and that nothing in between answers for it), then run this again." ;; esac
+    fi
 fi
 if [ "$UPDATE" != 1 ]; then
     KEYARG=$(printf '%s' "$KEYARG" | tr -d '\r' | sed 's/^ *//; s/ *$//')
@@ -345,9 +406,10 @@ cat > /usr/local/sbin/sentora-backup-node <<'TOOL_EOF'
 #!/bin/bash
 # Sentora backup node: its panels.
 #   sentora-backup-node list                           panels (keys), their folders, sizes, last copy
-#   sentora-backup-node add --key KEY [--name NAME]    one more panel (or a panel's new key)
+#   sentora-backup-node add --panel URL [--name NAME]  one more panel (or a panel's new key; or --key KEY)
 #   sentora-backup-node remove NAME                    a panel's keys go (its copies stay in /srv/sentora-backups/NAME)
-#   sentora-backup-node fingerprint                    this server's SSH key, for the panel
+#   sentora-backup-node key                            this node's key, for the panel's "Add the backup node"
+#   sentora-backup-node fingerprint                    this server's SSH key's fingerprint (2027.85 panels)
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
 K=/etc/ssh/sentora-backup/authorized_keys
@@ -364,7 +426,12 @@ case "${1:-list}" in
         grep -v "sentora-backup-gate $n\" " "$K" > "$K.new"; chmod 644 "$K.new"; mv "$K.new" "$K"
         echo "Panel \"$n\" can no longer reach this server. Its copies stay in /srv/sentora-backups/$n (remove them by hand when no longer wanted)." ;;
     fingerprint) ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}' ;;
-    *) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    key)
+        h=$(awk '{print $2}' /etc/ssh/ssh_host_ed25519_key.pub | base64 -d | sha256sum | cut -c1-20); a=ABCDEFGHJKLMNPQRSTUVWXYZ23456789; c=''
+        for half in 0 10; do v=$((16#${h:$half:10})); for i in 7 6 5 4 3 2 1 0; do c=$c${a:$(( (v >> (i * 5)) & 31 )):1}; done; done
+        echo "SB1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}"
+        echo "Address: $(hostname -I 2> /dev/null | awk '{print $1}')   (Module Admin > Backup Config > Off-server backup > Add the backup node)" ;;
+    *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-backup-node
@@ -372,6 +439,7 @@ chmod 700 /usr/local/sbin/sentora-backup-node
 ui_done
 UI_WORKING=''
 FP=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub 2> /dev/null | awk '{print $2}')
+NODEKEY=$(node_key SB1 /etc/ssh/ssh_host_ed25519_key.pub 2> /dev/null)
 ADDR=$(hostname -I 2> /dev/null | awk '{print $1}')
 PORT=$(echo "$SSH_PORTS" | awk '{print $1}')
 if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This backup node is up to date" || echo "This server is ready")"; echo >&3; fi
@@ -380,12 +448,9 @@ if [ "$UPDATE" = 1 ]; then
 else
     say "Done: this server is ready to keep the backups of \"$AREA\"."
     say ""
-    say "Last step, in the panel: Admin > Backup Config > Off-server backup:"
-    say "    Server:             ${C_BOLD}${ADDR:-(its address)}${C_RESET}"
-    say "    Port:               ${C_BOLD}${PORT:-22}${C_RESET}"
-    say "    Username:           ${C_BOLD}$BACKUP_USER${C_RESET}   (no password: the panel's key)"
-    say "    Folder:             ${C_BOLD}/${C_RESET}"
-    say "    Backup node key:  ${C_BOLD}${C_GREEN}$FP${C_RESET}"
-    say "Then press Test connection."
+    say "Last step, in the panel: Module Admin > Backup Config > Off-server backup > Add the backup node:"
+    say "    Address:            ${C_BOLD}${ADDR:-(its address)}${C_RESET}$([ "${PORT:-22}" != 22 ] && echo "   (SSH port ${PORT})")"
+    say "    Backup node key:    ${C_BOLD}${C_GREEN}$NODEKEY${C_RESET}"
+    say "(A 2027.85 panel asks for the fingerprint instead: $FP, with user $BACKUP_USER and folder /.)"
 fi
 say "Panels: sentora-backup-node list    Log: $LOG"
