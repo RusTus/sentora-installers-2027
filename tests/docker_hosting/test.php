@@ -665,7 +665,12 @@ list($c, $body) = (function () use ($web) { $c = curl_init($web . '/modules/dock
 check($c === 200 && $body === dh::PanelKey(), 'the panel\'s public keys are offered (they are not secret)');
 // removing an online node: it removes itself
 $r = req(1, 'Node', array('inId' => (string) $kn['nd_id_pk'], 'inRemove' => '1'));
-check(strpos($r['text'], 'asked to remove its agent') !== false, 'removing an online node: it is asked to remove itself');
+$hasFound = (int) val("SELECT COUNT(*) FROM x_dh_found WHERE fd_node_fk = " . (int) $kn['nd_id_pk']) > 0;
+if ($hasFound) {
+    check(strpos($r['text'], 'found on it that the panel does not know') !== false, '(133) apps found on a node count too: its name must be typed', $r['text']);
+    $r = req(1, 'Node', array('inId' => (string) $kn['nd_id_pk'], 'inRemove' => '1', 'inConfirm' => 'keynode'));
+}
+check(strpos($r['text'], 'asked to remove its agent') !== false, 'removing an online node: it is asked to remove itself', $r['text']);
 $o = shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
 check(strpos(calls(), '--on-active=30 /usr/local/sbin/sentora-docker-node-uninstall --purge') !== false, 'the node uninstalls itself (30 seconds later, so its answer gets through)', $o);
 shell_exec($env2 . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' once 2>&1');
@@ -1185,6 +1190,13 @@ agent('once');
 agent('once');
 check(val("SELECT dc_state_vc FROM x_dh_containers WHERE dc_id_pk = $lid") === 'deleted', 'the app was deleted on the node first');
 check(dh::Node(1) === null, 'and is gone once it has');
+// (133) a removed node that calls again (here: its uninstall did not really run) is told to uninstall itself with everything, and nothing else
+$un = substr_count(calls(), 'sentora-docker-node-uninstall --purge');
+$gj = row("SELECT jb_state_vc, jb_result_tx FROM x_dh_jobs WHERE jb_node_fk = 1 AND jb_action_vc = 'uninstall' ORDER BY jb_id_pk DESC LIMIT 1");
+check($un >= 2 && $gj && $gj['jb_state_vc'] === 'done', 'calling again after it was removed, it was told to uninstall itself with --purge, and said so', json_encode(array($un, $gj)));
+check(val("SELECT nd_gonesign_vc FROM x_dh_nodes WHERE nd_id_pk = 1") === '', 'then the panel forgot its key for good');
+$o = agent('once');
+check(substr_count(calls(), 'sentora-docker-node-uninstall --purge') === $un && strpos($o, 'HTTP 400') !== false && dh::Node(1) === null, 'after that it gets nothing at all (and is not listed again)', $o);
 $o = agent('once');
 check(strpos($o, 'HTTP 400') !== false, 'its keys no longer work', $o);
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
