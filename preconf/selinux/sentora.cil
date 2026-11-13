@@ -13,6 +13,9 @@
 ; are expected and change nothing (the mail queue is counted, the alerts are sent).
 (dontaudit postfix_postqueue_t httpd_sys_content_t (file (read)))
 (dontaudit system_mail_t httpd_log_t (file (write append)))
+; (the same when the daemon is started by root's service, zsudo's "Run the daemon now": its alerts, e.g. the
+; server's new IP address, go through sendmail_t, which is handed the daemon's own script)
+(dontaudit sendmail_t httpd_sys_content_t (file (read)))
 
 ; The panel's log viewers (System Log Viewer, DNS Admin) ask whether they may read BIND's and the FTP
 ; server's logs, which SELinux keeps from the web server (they hold every client's names and files).
