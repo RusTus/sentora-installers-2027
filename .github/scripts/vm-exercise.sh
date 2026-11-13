@@ -46,7 +46,8 @@ FTPPW="Ftp-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 APW="Adm-$(head -c 9 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 TMP=$(mktemp -d); CJ="$TMP/client.jar"; AJ="$TMP/admin.jar"
 ACC_ID=""; WEBU=""; DOMDIR=""; SITE=""; FTPUSER=""; MAILADDR=""; MYUSER=""; MYPW=""; DBNAME=""; LOGGED=""; ADMIN=""
-# (each round its own guesser address: fail2ban remembers the first round's ban and unban)
+# (each round its own guesser address and user name: the panel locks a user name for 15 minutes after
+# 5 wrong passwords and then refuses it before logging, so a second round on the same name logs nothing)
 if [ "${ROUND:-}" = two ]; then BANIP=10.99.0.6; BANGW=10.99.0.5; else BANIP=10.99.0.2; BANGW=10.99.0.1; fi
 
 # the panel in a browser: the client's and the administrator's own sessions
@@ -512,7 +513,7 @@ x_fail2ban() {
     if [ $r -eq 0 ]; then
         for i in 1 2 3 4 5 6 7; do
             t=$(g "https://$FQDN/" | grep -o 'name="csfr_token" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"//')
-            g -o /dev/null -d "inUsername=nosuchuser&inPassword=wrong$i&csfr_token=$t" "https://$FQDN/"
+            g -o /dev/null -d "inUsername=nosuchuser$ROUND&inPassword=wrong$i&csfr_token=$t" "https://$FQDN/"
             sleep 1
         done
         if ! wait_for 60 bash -c "fail2ban-client status sentora-panel 2> /dev/null | grep -q '$BANIP'"; then
