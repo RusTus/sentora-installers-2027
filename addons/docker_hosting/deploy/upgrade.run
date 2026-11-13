@@ -1,0 +1,7 @@
+<?php
+/**
+ * Docker Hosting upgrade step (run as root from the panel's folder, by zppy): as the install step.
+ *
+ * Written by RusTus, 2026-11-11
+ */
+include dirname(__FILE__) . '/install.run';

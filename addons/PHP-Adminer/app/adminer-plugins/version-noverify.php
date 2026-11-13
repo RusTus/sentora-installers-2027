@@ -1,0 +1,25 @@
+<?php
+
+/** Disable version checker
+* @link https://www.adminer.org/plugins/#use
+* @author Jakub Vrana, https://www.vrana.cz/
+* @license https://www.apache.org/licenses/LICENSE-2.0 Apache License, Version 2.0
+* @license https://www.gnu.org/licenses/gpl-2.0.html GNU General Public License, version 2 (one or other)
+*/
+class AdminerVersionNoverify extends Adminer\Plugin {
+
+	function verifyVersion() {
+		return false;
+	}
+
+	protected $translations = array(
+		'cs' => array('' => 'Zakáže kontrolu nových verzí'),
+		'de' => array('' => 'Deaktivieren Sie die Versionsprüfung'),
+		'hr' => array('' => 'Onemogućuje provjeru novih verzija'),
+		'ja' => array('' => 'バージョンチェックを無効化'),
+		'pl' => array('' => 'Wyłącz sprawdzanie wersji'),
+		'ro' => array('' => 'Dezactivați verificatorul de versiuni'),
+		'sk' => array('' => 'Zakáže kontrolu nových verzií'), // Claude Opus 5
+		'zh' => array('' => '禁用版本检查'), // Claude Opus 5
+	);
+}

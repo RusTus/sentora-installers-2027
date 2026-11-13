@@ -1,0 +1,67 @@
+<?php
+/**
+ * Webalizer Stats install step (run as root from the panel's folder, by the Sentora daemon
+ * for a Module Admin upload or by zppy for a repository install): puts the
+ * webalizer program in place, makes sure the log analysers' own user exists, and
+ * gives every user group the module (each account sees its own domains only).
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$sentora_webalizer_install = function () {
+    global $zdbh;
+    $deploy = dirname(__FILE__);
+    $say = function ($m) { echo "Webalizer Stats: " . $m . "\n"; };
+
+    // 1. The program: Ubuntu's package where there is one, otherwise built from the
+    //    bundled source (Ubuntu 26.04 has no package for it)
+    if (!is_executable('/usr/local/bin/webalizer') || is_executable('/usr/bin/webalizer')) {
+        $policy = is_executable('/usr/bin/apt-cache') ? shell_exec('apt-cache policy webalizer 2>/dev/null') : '';
+        $apt = 'DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=600 install ';
+        if (true && preg_match('/Candidate:\s*(\S+)/', (string) $policy, $m) && $m[1] !== '(none)') {
+            exec($apt . 'webalizer > /dev/null 2>&1', $o, $rc);
+            $say($rc === 0 ? 'installed Ubuntu\'s webalizer package.' : 'could not install the webalizer package.');
+        } else {
+            // the build tools, with this system's package tool (apt-get, or dnf on AlmaLinux)
+            if (is_executable('/usr/bin/apt-get')) {
+                exec($apt . 'gcc make patch libgd-dev libpng-dev zlib1g-dev > /dev/null 2>&1');
+            } elseif (is_executable('/usr/bin/dnf')) {
+                exec('dnf -y -q install gcc make patch gd-devel libpng-devel zlib-devel > /dev/null 2>&1');
+            }
+            $out = array();
+            exec('bash ' . escapeshellarg($deploy . '/source/build-webalizer.sh') . ' ' . escapeshellarg($deploy . '/source') . ' 2>&1', $out, $rc);
+            $say($rc === 0 ? 'built from the bundled source: ' . trim((string) end($out)) : 'the build FAILED, reports will stay empty: ' . implode(' | ', array_slice($out, -5)));
+        }
+    } else {
+        $say('the webalizer program is already installed.');
+    }
+    // Ubuntu's package ships a global configuration that would override Sentora's settings
+    @unlink('/etc/webalizer/webalizer.conf');
+
+    // 2. The log analysers' own user, which can read nothing else (the hourly job hands
+    //    it the new log lines on standard input)
+    exec('id sentora-stats > /dev/null 2>&1', $o2, $rc2);
+    if ($rc2 !== 0) {
+        exec('useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sentora-stats');
+        $say('created the sentora-stats user.');
+    }
+
+    // 3. Every user group may use it
+    $folder = basename(dirname($deploy));
+    $sql = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $sql->execute(array(':f' => $folder));
+    $moduleId = (int) $sql->fetchColumn();
+    if ($moduleId > 0) {
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+        $add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+        foreach ($zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN) as $g) {
+            $has->execute(array(':g' => (int) $g, ':m' => $moduleId));
+            if ((int) $has->fetchColumn() === 0) {
+                $add->execute(array(':g' => (int) $g, ':m' => $moduleId));
+            }
+        }
+        $say('available to all user groups; reports appear after the next hourly daemon run.');
+    }
+};
+$sentora_webalizer_install();

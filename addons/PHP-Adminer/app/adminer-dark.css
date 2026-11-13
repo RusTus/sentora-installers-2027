@@ -1,0 +1,15 @@
+/* PHP-Adminer for Sentora: the panel's Dark, on top of adminer.css (loaded only when the panel is
+   in Dark). Updated by RusTus, 2026-11-08 */
+:root { --s-bg: #12171d; --s-card: #1b222b; --s-ink: #e6e9ee; --s-muted: #9aa5b1; --s-line: #2c3540; --s-line2: #232c36;
+        --s-field: #12171d; --s-field-line: #3a4552; --s-head: #1f2730; --s-hover: #232c36; --s-stripe: #1f2730;
+        --s-accent: #5b97cc; --s-accent-dark: #447fb3; --s-accent-soft: #1f3447; --s-red: #e5533f; --s-red-dark: #c94532;
+        --s-ok: #6fd3a3; --s-ok-soft: #173327; --s-bad: #ff8a7a; --s-bad-soft: #3a1f1c; --s-shadow: 0 1px 3px rgba(0,0,0,0.3); color-scheme: dark; }
+input[type=submit], input[type=button], button:not(.link):not(.icon):not(.jush-help) { background: var(--s-accent-dark); border-color: var(--s-accent-dark); }
+input[type=submit]:hover, input[type=button]:hover, button:not(.link):not(.icon):not(.jush-help):hover { background: var(--s-accent); border-color: var(--s-accent); }
+mark { color: #fff; background: #6b5300; }
+.char { color: #c77ec7; } .date { color: #59c159; } .enum { color: #e58585; } .binary { color: #9bc0e1; }
+.icon { filter: invert(1); background-color: #a6683e; }
+.icon:hover { background-color: #1aa6c0; }
+.jush { --border-color: var(--s-field-line); --text-color: #ccc; --bg-color: #111; --php-color: #cc9; --string-color: #e6e; --string-plain-color: #e6e;
+        --keyword-color: #acf; --identifier-color: #f88; --value-color: #e6e; --number-color: #0c0; --attribute-color: #3cc;
+        --js-bg-color: #036; --css-bg-color: #404000; --php-bg-color: #520; --php-sql-bg-color: #404000; --mark-bg-color: #fc03; }

@@ -1,0 +1,17 @@
+<?php
+/**
+ * Webalizer Stats removal step (run by zppy as root before the module's folder is
+ * deleted): the module's group permissions go too. The webalizer program and the
+ * reports already made are kept, so a later reinstall picks up where it left off.
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$sentora_webalizer_remove = function () {
+    global $zdbh;
+    $sql = $zdbh->prepare("DELETE p FROM x_permissions p JOIN x_modules m ON m.mo_id_pk = p.pe_module_fk WHERE m.mo_folder_vc = :f");
+    $sql->execute(array(':f' => basename(dirname(dirname(__FILE__)))));
+    echo "Webalizer Stats: removed; the webalizer program and existing reports (/var/sentora/stats/webalizer) are kept.\n";
+};
+$sentora_webalizer_remove();

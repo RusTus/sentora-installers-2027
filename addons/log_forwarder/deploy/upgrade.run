@@ -1,0 +1,13 @@
+<?php
+/**
+ * Log Forwarder upgrade step (run by zppy as root, in the panel's folder, after the new files are in
+ * place): repairs what it needs (folders, the AppArmor rule file, the table). rsyslog's settings
+ * follow at the next daemon run.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once dirname(__FILE__) . '/../code/logforwarder.php';
+log_forwarder::Ensure();
+foreach (log_forwarder::Setup() as $logForwarderLine) {
+    echo "Log Forwarder: " . $logForwarderLine . ".\n";
+}

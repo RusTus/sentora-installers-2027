@@ -26,14 +26,16 @@ Then refresh the list and install modules from it. Every download is checked aga
 
 ## Adding or updating a module
 
-1. Put `<name>.zpp` (a zip of the module folder) in this folder. The file name, without `.zpp`, becomes the module's folder name: letters, numbers, `_` and `-` only.
+Each Sentora-2027 add-on's files are in `addons/<name>/` in this repository (the zips here are built from them, never changed by hand).
+
+1. Change the files in `addons/<name>/` (a new module: a new folder there, with its `module.xml` and `module.zpm`, and `<name>.xml` here). The folder name becomes the module's folder name: letters, numbers, `_` and `-` only.
 2. Add `<name>` on its own line in `packages.txt` (new modules only).
-3. For an update, raise the version to the same number in two places: `<version>` in the module's own `module.xml` (inside the `.zpp`) and `<latestversion>` in `<name>.xml` here. Servers with the module installed see the higher number within an hour: the administrators get a notice, and Repo Browser lists it under **Updates**.
+3. For an update, raise `<version>` in `addons/<name>/module.xml`. Servers with the module installed see the higher number within an hour: the administrators get a notice, and Repo Browser lists it under **Updates**.
 4. A module sets up everything it needs itself, with no change to the panel: `deploy/install.run` runs as root when it is installed, and `deploy/upgrade.run` runs as root after each update, in the panel's folder. Put repairs of anything an earlier version set up wrongly (folders, permissions, settings) in `upgrade.run`, so an update fixes a server at once. Visitor Stats does this for its reports folder.
-5. Update the checksums, then commit to `master2027`:
+5. Build it, from the repository's top folder: this writes `<name>.zpp` here, sets `<latestversion>` in `<name>.xml` to the module's version and puts its line in `SHA256SUMS`. The same files always give the same zip. Then commit to `master2027`; the **Add-ons** workflow checks that every `.zpp` matches its folder (`addons/check.sh` does the same on your computer).
 
    ```bash
-   sha256sum *.zpp > SHA256SUMS
+   addons/build.sh <name>
    ```
 
 GitHub can take a few minutes to serve a new commit at the address above.

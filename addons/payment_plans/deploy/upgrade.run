@@ -1,0 +1,7 @@
+<?php
+/**
+ * Payment Plans upgrade step (run as root from the panel's folder, by zppy): as the install step.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+include dirname(__FILE__) . '/install.run';

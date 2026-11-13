@@ -1,0 +1,45 @@
+<?php
+/**
+ * QuickFig install step (run as root from the panel's folder, by zppy): every user group may use it
+ * (each account sees only its own websites); its folder for background tasks; WP-CLI (checksum
+ * checked). Its worker is the PHP the panel already has.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$quickfigInstall = function () {
+    global $zdbh;
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+        $add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+        foreach ($zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN) as $g) {
+            $has->execute(array(':g' => (int) $g, ':m' => $id));
+            if ((int) $has->fetchColumn() === 0) {
+                $add->execute(array(':g' => (int) $g, ':m' => $id));
+            }
+        }
+    }
+    echo "QuickFig: available to every user group.\n";
+    // root's own folder for its background tasks, and WP-CLI (links in a site's database to https)
+    require_once dirname(__FILE__) . '/../code/quickfig.php';
+    require_once dirname(__FILE__) . '/../code/jobs.php';
+    foreach (array(quickfig_jobs::DIR => 0755, quickfig_jobs::DIR . '/jobs' => 0700) as $d => $mode) {
+        if (!is_dir($d)) {
+            @mkdir($d, $mode, true);
+        }
+        if (is_dir($d) && !is_link($d)) {
+            @chown($d, 'root');
+            @chmod($d, $mode);
+        }
+    }
+    $w = quickfig_jobs::GetWpCli();
+    echo "QuickFig: " . ($w !== '' ? $w : 'WP-CLI is there.') . "\n";
+};
+$quickfigInstall();

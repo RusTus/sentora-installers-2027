@@ -1,0 +1,13 @@
+<?php
+/**
+ * Visitor Stats upgrade step (run by zppy as root, in the panel's folder, after the new files are
+ * in place): repairs what earlier versions set up wrongly, so an update fixes the server at once
+ * instead of at the next hourly run. Today: the reports' folder, which version 200 made root-only
+ * (the panel showed every report as "not made yet").
+ *
+ * Written by RusTus, 2026-11-08
+ */
+require_once dirname(__FILE__) . '/../code/visitorstats.php';
+foreach (visitor_stats_helper::SecureFolders() as $visitorsLine) {
+    echo "Visitor Stats: " . $visitorsLine . ".\n";
+}

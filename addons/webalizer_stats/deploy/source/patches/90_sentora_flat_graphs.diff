@@ -1,0 +1,449 @@
+Description: Sentora: flat graphs that sit on the panel (transparent background, faint grid,
+ slate text, no bevel, no shadows, thin gaps between bars). The colours keep their order,
+ because the pie chart picks its slice colours by position.
+Author: RusTus
+
+--- a/graphs.c	2026-11-08 23:27:01.584176607 +0000
++++ b/graphs.c	2026-11-08 23:27:01.585436411 +0000
+@@ -119,10 +119,10 @@
+    /* initalize the graph */
+    init_graph(title,512,256);              /* init as 512 x 256  */
+ 
+-   gdImageLine(im, 305,25,305,233,black);  /* draw section lines */
+-   gdImageLine(im, 304,25,304,233,white);
+-   gdImageLine(im, 305,130,490,130,black);
+-   gdImageLine(im, 305,129,490,129,white);
++   gdImageLine(im, 305,25,305,233,dkgrey);  /* draw section lines */
++   gdImageLine(im, 304,25,304,233,grey);
++   gdImageLine(im, 305,130,490,130,dkgrey);
++   gdImageLine(im, 305,129,490,129,grey);
+ 
+    /* index lines? */
+    if (graph_lines)
+@@ -145,7 +145,7 @@
+       if (dump_inout == 0)
+       {
+          gdImageString(im,gdFontSmall,491-i,237,
+-                    (unsigned char *)msg_h_xfer,dkgrey);
++                    (unsigned char *)msg_h_xfer,grey);
+          gdImageString(im,gdFontSmall,490-i,236,
+                     (unsigned char *)msg_h_xfer,KBYTECOLOR);
+       }
+@@ -154,19 +154,19 @@
+       j = (strlen(msg_h_ixfer)*6);
+       k = (strlen(msg_h_oxfer)*6);
+       gdImageString(im,gdFontSmall,491-i-j-k-24,237,
+-                    (unsigned char *)msg_h_xfer,dkgrey);
++                    (unsigned char *)msg_h_xfer,grey);
+       gdImageString(im,gdFontSmall,490-i-j-k-24,236,
+                     (unsigned char *)msg_h_xfer,KBYTECOLOR);
+-      gdImageString(im,gdFontSmall,491-k-j-21,237,"/",dkgrey);
++      gdImageString(im,gdFontSmall,491-k-j-21,237,"/",grey);
+       gdImageString(im,gdFontSmall,490-k-j-21,236,"/",black);
+       gdImageString(im,gdFontSmall,491-k-j-12,237,
+-                    (unsigned char *)msg_h_ixfer,dkgrey);
++                    (unsigned char *)msg_h_ixfer,grey);
+       gdImageString(im,gdFontSmall,490-k-j-12,236,
+                     (unsigned char *)msg_h_ixfer,IKBYTECOLOR);
+-      gdImageString(im,gdFontSmall,491-k-9,237,"/",dkgrey);
++      gdImageString(im,gdFontSmall,491-k-9,237,"/",grey);
+       gdImageString(im,gdFontSmall,490-k-9,236,"/",black);
+       gdImageString(im,gdFontSmall,491-k,237,
+-                    (unsigned char *)msg_h_oxfer,dkgrey);
++                    (unsigned char *)msg_h_oxfer,grey);
+       gdImageString(im,gdFontSmall,490-k,236,
+                     (unsigned char *)msg_h_oxfer,OKBYTECOLOR);
+       }
+@@ -174,13 +174,13 @@
+       i = (strlen(msg_h_visits)*6);
+       j = (strlen(msg_h_sites)*6);
+       gdImageString(im,gdFontSmall,491-i-j-12,11,
+-                    (unsigned char *)msg_h_visits,dkgrey);
++                    (unsigned char *)msg_h_visits,grey);
+       gdImageString(im,gdFontSmall,490-i-j-12,10,
+                     (unsigned char *)msg_h_visits,VISITCOLOR);
+-      gdImageString(im,gdFontSmall,491-j-9,11,(unsigned char *)"/",dkgrey);
++      gdImageString(im,gdFontSmall,491-j-9,11,(unsigned char *)"/",grey);
+       gdImageString(im,gdFontSmall,490-j-9,10,(unsigned char *)"/",black);
+       gdImageString(im,gdFontSmall,491-j,11,
+-                    (unsigned char *)msg_h_sites,dkgrey);
++                    (unsigned char *)msg_h_sites,grey);
+       gdImageString(im,gdFontSmall,490-j,10,
+                     (unsigned char *)msg_h_sites,SITECOLOR);
+ 
+@@ -188,19 +188,19 @@
+       i = (strlen(msg_h_pages)*6);
+       j = (strlen(msg_h_files)*6);
+       gdImageStringUp(im,gdFontSmall,6,231,
+-                      (unsigned char *)msg_h_pages,dkgrey);
++                      (unsigned char *)msg_h_pages,grey);
+       gdImageStringUp(im,gdFontSmall,5,230,
+                       (unsigned char *)msg_h_pages,PAGECOLOR);
+-      gdImageStringUp(im,gdFontSmall,6,231-i-3,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,6,231-i-3,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,5,230-i-3,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,6,231-i-12,
+-                      (unsigned char *)msg_h_files,dkgrey);
++                      (unsigned char *)msg_h_files,grey);
+       gdImageStringUp(im,gdFontSmall,5,230-i-12,
+                       (unsigned char *)msg_h_files,FILECOLOR);
+-      gdImageStringUp(im,gdFontSmall,6,231-i-j-15,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,6,231-i-j-15,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,5,230-i-j-15,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,6,231-i-j-24,
+-                      (unsigned char *)msg_h_hits,dkgrey);
++                      (unsigned char *)msg_h_hits,grey);
+       gdImageStringUp(im,gdFontSmall,5,230-i-j-24,
+                       (unsigned char *)msg_h_hits,HITCOLOR);
+    }
+@@ -262,7 +262,7 @@
+       x2 = x1 + cw;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, HITCOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    /* files */
+@@ -274,7 +274,7 @@
+       x2 = x1 + cw;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, FILECOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    /* pages */
+@@ -286,7 +286,7 @@
+       x2 = x1 + cw;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, PAGECOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    maxval=0;
+@@ -313,7 +313,7 @@
+       x2 = x1 + cw;
+       y1 = 127 - (percent * 98);
+       gdImageFilledRectangle(im, x1, y1, x2, 127, VISITCOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 127, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 127, grey);
+    }
+ 
+    /* sites */
+@@ -325,7 +325,7 @@
+       x2 = x1 + cw;
+       y1 = 127 - (percent * 98);
+       gdImageFilledRectangle(im, x1, y1, x2, 127, SITECOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 127, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 127, grey);
+    }
+ 
+    fmaxval=0.0;
+@@ -365,7 +365,7 @@
+       x2 = x1 + cw;
+       y1 = 232 - (percent * 98);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, KBYTECOLOR);
+-      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++      if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    if (dump_inout != 0)
+@@ -379,7 +379,7 @@
+ 	 x2 = x1 + cw;
+ 	 y1 = 232 - (percent * 98);
+ 	 gdImageFilledRectangle(im, x1, y1, x2, 232, IKBYTECOLOR);
+-	 if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++	 if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+       }
+ 
+       /* oxfer */
+@@ -391,7 +391,7 @@
+ 	 x2 = x1 + cw;
+ 	 y1 = 232 - (percent * 98);
+ 	 gdImageFilledRectangle(im, x1, y1, x2, 232, OKBYTECOLOR);
+-	 if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, black);
++	 if (cw>2) gdImageRectangle(im, x1, y1, x2, 232, grey);
+       }
+    }
+ 
+@@ -452,10 +452,10 @@
+    /* initalize the graph */
+    init_graph(title,512,400);
+ 
+-   gdImageLine(im, 21, 180, 490, 180, black); /* draw section lines */
+-   gdImageLine(im, 21, 179, 490, 179, white);
+-   gdImageLine(im, 21, 280, 490, 280, black);
+-   gdImageLine(im, 21, 279, 490, 279, white);
++   gdImageLine(im, 21, 180, 490, 180, dkgrey); /* draw section lines */
++   gdImageLine(im, 21, 179, 490, 179, grey);
++   gdImageLine(im, 21, 280, 490, 280, dkgrey);
++   gdImageLine(im, 21, 279, 490, 279, grey);
+ 
+    /* index lines? */
+    if (graph_lines)
+@@ -498,23 +498,23 @@
+    {
+       /* Kbytes Legend */
+       gdImageStringUp(im,gdFontSmall,494,376,
+-                      (unsigned char *)msg_h_xfer,dkgrey);
++                      (unsigned char *)msg_h_xfer,grey);
+       gdImageStringUp(im,gdFontSmall,493,375,
+                       (unsigned char *)msg_h_xfer,KBYTECOLOR);
+       if (dump_inout != 0)
+       {
+ 	 i=(strlen(msg_h_xfer)*6);
+ 	 j=(strlen(msg_h_ixfer)*6);
+-	 gdImageStringUp(im,gdFontSmall,494,376-i-3,"/",dkgrey);
++	 gdImageStringUp(im,gdFontSmall,494,376-i-3,"/",grey);
+ 	 gdImageStringUp(im,gdFontSmall,493,375-i-3,"/",black);
+ 	 gdImageStringUp(im,gdFontSmall,494,376-i-12,
+-			 (unsigned char *)msg_h_ixfer,dkgrey);
++			 (unsigned char *)msg_h_ixfer,grey);
+ 	 gdImageStringUp(im,gdFontSmall,493,375-i-12,
+ 			 (unsigned char *)msg_h_ixfer,IKBYTECOLOR);
+-	 gdImageStringUp(im,gdFontSmall,494,376-i-j-15,"/",dkgrey);
++	 gdImageStringUp(im,gdFontSmall,494,376-i-j-15,"/",grey);
+ 	 gdImageStringUp(im,gdFontSmall,493,375-i-j-15,"/",black);
+ 	 gdImageStringUp(im,gdFontSmall,494,376-i-j-24,
+-			 (unsigned char *)msg_h_oxfer,dkgrey);
++			 (unsigned char *)msg_h_oxfer,grey);
+ 	 gdImageStringUp(im,gdFontSmall,493,375-i-j-24,
+ 			 (unsigned char *)msg_h_oxfer,OKBYTECOLOR);
+       }
+@@ -522,13 +522,13 @@
+       /* Sites/Visits Legend */
+       i = (strlen(msg_h_sites)*6);
+       gdImageStringUp(im,gdFontSmall,494,256,
+-                      (unsigned char *)msg_h_sites,dkgrey);
++                      (unsigned char *)msg_h_sites,grey);
+       gdImageStringUp(im,gdFontSmall,493,255,
+                       (unsigned char *)msg_h_sites,SITECOLOR);
+-      gdImageStringUp(im,gdFontSmall,494,256-i-3,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,494,256-i-3,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,493,255-i-3,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,494,256-i-12,
+-                      (unsigned char *)msg_h_visits,dkgrey);
++                      (unsigned char *)msg_h_visits,grey);
+       gdImageStringUp(im,gdFontSmall,493,255-i-12,
+                       (unsigned char *)msg_h_visits,VISITCOLOR);
+ 
+@@ -537,19 +537,19 @@
+           ( j=(strlen(msg_h_files)*6) )+
+           ( strlen(msg_h_hits)*6 )+ 52;
+       gdImageStringUp(im,gdFontSmall,494,s,
+-                      (unsigned char *)msg_h_pages,dkgrey);
++                      (unsigned char *)msg_h_pages,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-1,
+                       (unsigned char *)msg_h_pages,PAGECOLOR);
+-      gdImageStringUp(im,gdFontSmall,494,s-i-3,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,494,s-i-3,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-4,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,494,s-i-12,
+-                      (unsigned char *)msg_h_files,dkgrey);
++                      (unsigned char *)msg_h_files,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-13,
+                       (unsigned char *)msg_h_files,FILECOLOR);
+-      gdImageStringUp(im,gdFontSmall,494,s-i-j-15,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,494,s-i-j-15,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-j-16,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,494,s-i-j-24,
+-                      (unsigned char *)msg_h_hits,dkgrey);
++                      (unsigned char *)msg_h_hits,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-j-25,
+                       (unsigned char *)msg_h_hits,HITCOLOR);
+    }
+@@ -563,7 +563,7 @@
+       x2 = x1 + 7;
+       y1 = 176 - (percent * 147);
+       gdImageFilledRectangle(im, x1, y1, x2, 176, HITCOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 176, black);
++      gdImageRectangle(im, x1, y1, x2, 176, grey);
+    }
+ 
+    /* data2 */
+@@ -575,7 +575,7 @@
+       x2 = x1 + 7;
+       y1 = 176 - (percent * 147);
+       gdImageFilledRectangle(im, x1, y1, x2, 176, FILECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 176, black);
++      gdImageRectangle(im, x1, y1, x2, 176, grey);
+    }
+ 
+    /* data7 */
+@@ -588,7 +588,7 @@
+       x2 = x1 + 7;
+       y1 = 176 - (percent * 147);
+       gdImageFilledRectangle(im, x1, y1, x2, 176, PAGECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 176, black);
++      gdImageRectangle(im, x1, y1, x2, 176, grey);
+    }
+ 
+    /* sites / visits */
+@@ -612,7 +612,7 @@
+       x2 = x1 + 8;
+       y1 = 276 - (percent * 92);
+       gdImageFilledRectangle(im, x1, y1, x2, 276, VISITCOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 276, black);
++      gdImageRectangle(im, x1, y1, x2, 276, grey);
+    }
+ 
+    /* data 3 */
+@@ -624,7 +624,7 @@
+       x2 = x1 + 7;
+       y1 = 276 - (percent * 92);
+       gdImageFilledRectangle(im, x1, y1, x2, 276, SITECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 276, black);
++      gdImageRectangle(im, x1, y1, x2, 276, grey);
+    }
+ 
+    /* xfer */
+@@ -659,7 +659,7 @@
+       }
+       y1 = 375 - ( percent * 91 );
+       gdImageFilledRectangle(im, x1, y1, x2, 375, KBYTECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 375, black);
++      gdImageRectangle(im, x1, y1, x2, 375, grey);
+    }
+ 
+    if (dump_inout != 0)
+@@ -673,7 +673,7 @@
+ 	 x2 = x1 + 7;
+ 	 y1 = 375 - ( percent * 91 );
+ 	 gdImageFilledRectangle(im, x1, y1, x2, 375, IKBYTECOLOR);
+-	 gdImageRectangle(im, x1, y1, x2, 375, black);
++	 gdImageRectangle(im, x1, y1, x2, 375, grey);
+       }
+ 
+       /* data6 */
+@@ -685,7 +685,7 @@
+ 	 x2 = x1 + 7;
+ 	 y1 = 375 - ( percent * 91 );
+ 	 gdImageFilledRectangle(im, x1, y1, x2, 375, OKBYTECOLOR);
+-	 gdImageRectangle(im, x1, y1, x2, 375, black);
++	 gdImageRectangle(im, x1, y1, x2, 375, grey);
+       }
+    }
+ 
+@@ -762,19 +762,19 @@
+           ( j=(strlen(msg_h_files)*6) )+
+           ( strlen(msg_h_hits)*6 )+ 52;
+       gdImageStringUp(im,gdFontSmall,494,s,
+-                      (unsigned char *)msg_h_pages,dkgrey);
++                      (unsigned char *)msg_h_pages,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-1,
+                       (unsigned char *)msg_h_pages,PAGECOLOR);
+-      gdImageStringUp(im,gdFontSmall,494,s-i-3,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,494,s-i-3,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-4,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,494,s-i-12,
+-                      (unsigned char *)msg_h_files,dkgrey);
++                      (unsigned char *)msg_h_files,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-13,
+                       (unsigned char *)msg_h_files,FILECOLOR);
+-      gdImageStringUp(im,gdFontSmall,494,s-i-j-15,(unsigned char *)"/",dkgrey);
++      gdImageStringUp(im,gdFontSmall,494,s-i-j-15,(unsigned char *)"/",grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-j-16,(unsigned char *)"/",black);
+       gdImageStringUp(im,gdFontSmall,494,s-i-j-24,
+-                      (unsigned char *)msg_h_hits,dkgrey);
++                      (unsigned char *)msg_h_hits,grey);
+       gdImageStringUp(im,gdFontSmall,493,s-i-j-25,
+                       (unsigned char *)msg_h_hits,HITCOLOR);
+    }
+@@ -788,7 +788,7 @@
+       x2 = x1 + 10;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, HITCOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 232, black);
++      gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    /* data2 */
+@@ -800,7 +800,7 @@
+       x2 = x1 + 10;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, FILECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 232, black);
++      gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    /* data3 */
+@@ -812,7 +812,7 @@
+       x2 = x1 + 10;
+       y1 = 232 - (percent * 203);
+       gdImageFilledRectangle(im, x1, y1, x2, 232, PAGECOLOR);
+-      gdImageRectangle(im, x1, y1, x2, 232, black);
++      gdImageRectangle(im, x1, y1, x2, 232, grey);
+    }
+ 
+    /* stat the file */
+@@ -900,7 +900,7 @@
+ 	 snprintf(buffer,sizeof(buffer),"%s (%d%%)",legend[i], percent);
+          x=480-(strlen(buffer)*7);
+          gdImageString(im,gdFontMediumBold, x+1, y+1,
+-                       (unsigned char *)buffer, black);
++                       (unsigned char *)buffer, grey);
+          gdImageString(im,gdFontMediumBold, x, y,
+                        (unsigned char *)buffer, i+5);
+          y+=20;
+@@ -916,9 +916,9 @@
+            msg_h_other,100-(int)(s_arc*100));
+       x=480-(strlen(buffer)*7);
+       gdImageString(im,gdFontMediumBold, x+1, y+1,
+-                    (unsigned char *)buffer, black);
++                    (unsigned char *)buffer, grey);
+       gdImageString(im,gdFontMediumBold, x, y,
+-                    (unsigned char *)buffer, white);
++                    (unsigned char *)buffer, black);
+    }
+ 
+    /* stat the file */
+@@ -979,12 +979,16 @@
+ 
+    im = gdImageCreate(xsize,ysize);
+ 
+-   /* allocate color maps, background color first (grey) */
+-   grey    = gdImageColorAllocate(im, 192, 192, 192);
+-   dkgrey  = gdImageColorAllocate(im, 128, 128, 128);
+-   black   = gdImageColorAllocate(im, 0, 0, 0);
+-   white   = gdImageColorAllocate(im, 255, 255, 255);
+-   blue    = gdImageColorAllocate(im, 0, 0, 255);
++   /* allocate color maps, background color first (grey). Sentora: the same five colours in the
++      same order (the pie chart picks its slice colours by position), restyled flat for the
++      panel: a transparent background, so the graph sits on the page in Light or Dark; faint
++      grid lines; slate text; no bevel and no shadows (grey is the invisible colour) */
++   grey    = gdImageColorAllocateAlpha(im, 255, 255, 255, 127);
++   dkgrey  = gdImageColorAllocateAlpha(im, 125, 136, 150, 80);
++   black   = gdImageColorAllocate(im, 125, 136, 150);
++   white   = gdImageColorAllocate(im, 203, 210, 217);
++   blue    = gdImageColorAllocate(im, 79, 143, 207);
++   gdImageColorTransparent(im, grey);
+    r=getred(hit_color); g=getgreen(hit_color); b=getblue(hit_color);
+    hit_or_green = gdImageColorAllocate(im, r, g, b);
+    r=getred(site_color); g=getgreen(site_color); b=getblue(site_color);
+@@ -1002,21 +1006,9 @@
+    r=getred(visit_color); g=getgreen(visit_color); b=getblue(visit_color);
+    visit_or_yellow = gdImageColorAllocate(im, r, g, b);
+ 
+-   /* black outside border */
+-   gdImageRectangle(im, 0, 0, xsize-1, ysize-1, black);
+-
+-   /* do shadow effect (bevel) border */
+-   for (i=1; i<5 ;i++)
+-   {
+-      gdImageLine(im, i, i, xsize-i-2, i, white);
+-      gdImageLine(im, i, i, i, ysize-i-2, white);
+-      gdImageLine(im, i+1, ysize-i-1, xsize-i-1, ysize-i-1, dkgrey);
+-      gdImageLine(im, xsize-i-1, i+1, xsize-i-1, ysize-i-1, dkgrey);
+-   }
+-
+-   /* generic inside shadow box */
+-   gdImageRectangle(im, 20, 25, xsize-21, ysize-21, black);
+-   gdImageRectangle(im, 19, 24, xsize-22, ysize-22, white);
++   /* Sentora: one faint frame around the plot instead of the black border, the bevel
++      and the inside shadow box */
++   gdImageRectangle(im, 20, 25, xsize-21, ysize-21, dkgrey);
+ 
+    /* display the graph title */
+    gdImageString(im, gdFontMediumBold, 20, 8,

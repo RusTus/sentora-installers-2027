@@ -1,0 +1,99 @@
+/* PHP Hardening in the panel's style: colours from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto. */
+.ph { --ph-ink: var(--sn-ink, #1f2933); --ph-muted: var(--sn-muted, #6b7785); --ph-line: var(--sn-line, #e6e9ee);
+      --ph-card: var(--sn-card, #ffffff); --ph-bg: var(--sn-soft, #f4f6f9); --ph-accent: var(--sn-accent, #447fb3);
+      --ph-accent-soft: var(--sn-accent-soft, #e3edf6); --ph-ok: var(--sn-ok, #1b7a50); --ph-ok-soft: var(--sn-ok-soft, #e3f5ec);
+      --ph-warn: var(--sn-warn, #8f5b00); --ph-warn-soft: var(--sn-warn-soft, #fff4d6); --ph-bad: var(--sn-bad, #b42318); --ph-bad-soft: var(--sn-bad-soft, #fdecea);
+      color: var(--ph-ink); background: var(--ph-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.ph * { box-sizing: border-box; }
+.ph-muted { color: var(--ph-muted); font-size: 12px; font-weight: normal; }
+.ph-msg { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.ph-msg.is-ok { color: var(--ph-ok); background: var(--ph-ok-soft); }
+.ph-msg.is-bad { color: var(--ph-bad); background: var(--ph-bad-soft); }
+.ph-card { background: var(--ph-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 16px 18px; margin: 0 0 14px; min-width: 0; overflow-x: auto; }
+.ph-card h3 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+.ph-intro p { margin: 0 0 6px; line-height: 1.5; max-width: 80ch; }
+.ph-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ph-table th { text-align: left; color: var(--ph-muted); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--ph-line); }
+.ph-table td { padding: 8px; border-bottom: 1px solid var(--ph-line); vertical-align: top; }
+.ph-table select { min-width: 120px; padding: 3px 6px; border: 1px solid var(--ph-line); border-radius: 4px; background: var(--ph-card); color: var(--ph-ink); }
+.ph-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--ph-line); color: var(--ph-muted); white-space: nowrap; }
+.ph-pill.is-ok { background: var(--ph-ok-soft); color: var(--ph-ok); }
+.ph-pill.is-bad { background: var(--ph-bad-soft); color: var(--ph-bad); }
+.ph-pill.is-watch { background: var(--ph-warn-soft); color: var(--ph-warn); }
+.ph-pill.is-wait { background: var(--ph-accent-soft); color: var(--ph-accent); }
+.ph-note { font-size: 12px; color: var(--ph-bad); }
+.ph-rule { display: flex; gap: 10px; align-items: flex-start; font-weight: normal; margin: 0 0 10px; line-height: 1.4; }
+.ph-rule input { margin-top: 3px; flex: none; }
+.ph-pre { font-size: 11px; max-height: 320px; overflow: auto; white-space: pre; background: var(--ph-bg); color: var(--ph-ink); border: 1px solid var(--ph-line); }
+.ph-wide { max-width: 640px; }
+.ph-nowrap { white-space: nowrap; }
+.ph-file { overflow-wrap: anywhere; }
+.ph-form th { width: 190px; vertical-align: middle; } .ph-form td { vertical-align: middle; }
+/* the live list of what was caught */
+.ph-live-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ph-live-head h3 { margin: 0; }
+.ph-live-tools { display: flex; align-items: center; gap: 8px; }
+.ph-inline { display: inline; margin: 0; }
+.ph-live-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--ph-ok); }
+.ph-live-dot i { width: 8px; height: 8px; border-radius: 50%; background: var(--ph-ok); animation: ph-pulse 2s ease-in-out infinite; }
+.ph-live-dot.is-off { color: var(--ph-muted); }
+.ph-live-dot.is-off i { background: var(--ph-muted); animation: none; }
+.ph-live-dot.is-err { color: var(--ph-bad); }
+.ph-live-dot.is-err i { background: var(--ph-bad); animation: none; }
+.ph-looked { margin: 6px 0 10px; }
+.ph-table tr.ph-new td { animation: ph-flash 3s ease-out; }
+@keyframes ph-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes ph-flash { from { background: var(--ph-accent-soft); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .ph-live-dot i, .ph-table tr.ph-new td { animation: none; } }
+/* the list: tabs, filters, a scrolling table */
+.ph-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--ph-line); margin: 4px 0 12px; }
+.ph-tabs button { border: 0; background: none; padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--ph-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.ph-tabs button.on { color: var(--ph-accent); border-bottom-color: var(--ph-accent); }
+.ph-filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(140px, 1fr)); gap: 8px; margin-bottom: 6px; }
+@media (max-width: 900px) { .ph-filters { grid-template-columns: 1fr 1fr; } }
+.ph-count { margin: 4px 0 6px; }
+.ph-scroll { max-height: 560px; overflow: auto; border: 1px solid var(--ph-line); border-radius: 6px; margin-bottom: 10px; }
+.ph-scroll thead th { position: sticky; top: 0; background: var(--ph-card); z-index: 1; }
+.ph-scroll .ph-empty, .ph-more-wrap { margin: 10px; text-align: center; }
+.ph-kind { font-size: 12px; color: var(--ph-accent); }
+.ph-file { overflow-wrap: anywhere; }
+/* the statistics */
+.ph-range { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.ph-range .btn.active { background: var(--ph-accent); border-color: var(--ph-accent); color: #fff; }
+.ph-tiles { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 700px) { .ph-tiles { grid-template-columns: 1fr 1fr; } }
+.ph-tile { background: var(--ph-bg); border-radius: 8px; padding: 12px 14px; border-left: 4px solid var(--ph-accent); }
+.ph-tile b { display: block; font-size: 24px; line-height: 1.1; }
+.ph-tile span { font-size: 12px; color: var(--ph-muted); }
+.ph-tile.is-bad { border-left-color: var(--ph-bad); }
+.ph-tile.is-bad b { color: var(--ph-bad); }
+.ph-tile.is-watch { border-left-color: var(--ph-warn); }
+.ph-tile.is-watch b { color: var(--ph-warn); }
+.ph-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .ph-charts { grid-template-columns: 1fr; } }
+.ph-chart { border: 1px solid var(--ph-line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.ph-chart h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; }
+.ph-wide-chart { grid-column: 1 / -1; }
+.ph-chart svg { display: block; max-height: 260px; }
+.ph-grid { stroke: var(--ph-line); stroke-width: 1; }
+.ph-axis { fill: var(--ph-muted); font-size: 10px; }
+.ph-big { fill: var(--ph-ink); font-size: 22px; font-weight: 700; }
+.ph-area { fill: var(--ph-accent-soft); }
+.ph-line { fill: none; stroke: var(--ph-accent); stroke-width: 2; }
+.ph-pt { fill: var(--ph-accent); }
+.ph-donut { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.ph-donut svg { width: 160px; flex: none; }
+.ph-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 180px; font-size: 12px; }
+.ph-legend li { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; padding: 3px 4px; border-radius: 4px; }
+.ph-legend i { width: 12px; height: 12px; border-radius: 3px; }
+.ph-legend b { font-weight: 600; color: var(--ph-muted); white-space: nowrap; }
+.ph-bar { display: grid; grid-template-columns: minmax(80px, 40%) 1fr auto; gap: 8px; align-items: center; font-size: 12px; padding: 3px 4px; border-radius: 4px; }
+.ph-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-bar em { display: block; height: 10px; background: var(--ph-bg); border-radius: 5px; overflow: hidden; }
+.ph-bar em i { display: block; height: 100%; border-radius: 5px; }
+.ph-click { cursor: pointer; }
+.ph-legend li.ph-click:hover, .ph-bar.ph-click:hover { background: var(--ph-bg); }
+path.ph-click:hover { opacity: 0.8; }
+/* (hidden means hidden: the theme's .btn would otherwise show a hidden button) */
+.ph [hidden] { display: none !important; }

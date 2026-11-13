@@ -1,0 +1,10 @@
+# Only index.php (which checks the panel login) and the stylesheets may be requested:
+# adminer.php and the plugins must never run without it
+<FilesMatch ".">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^(index\.php|adminer\.css|adminer-dark\.css)?$">
+    Require all granted
+</FilesMatch>
+Options -Indexes
+DirectoryIndex index.php

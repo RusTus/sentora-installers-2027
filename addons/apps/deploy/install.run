@@ -1,0 +1,47 @@
+<?php
+/**
+ * Apps install step (run as root from the panel's folder, by zppy): every user group may use it
+ * (each account sees only its own websites; Module Admin can take it away from a group); its table;
+ * root's folder for its background tasks; WP-CLI (checksum checked) and the latest versions.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$appsInstall = function () {
+    global $zdbh;
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+        $add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+        foreach ($zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN) as $g) {
+            $has->execute(array(':g' => (int) $g, ':m' => $id));
+            if ((int) $has->fetchColumn() === 0) {
+                $add->execute(array(':g' => (int) $g, ':m' => $id));
+            }
+        }
+    }
+    echo "Apps: available to every user group.\n";
+    require_once dirname(__FILE__) . '/../code/apps.php';
+    require_once dirname(__FILE__) . '/../code/jobs.php';
+    apps::Ensure();
+    foreach (array(apps::DIR => 0755, apps::DIR . '/jobs' => 0700) as $d => $mode) {
+        if (!is_dir($d)) {
+            @mkdir($d, $mode, true);
+        }
+        if (is_dir($d) && !is_link($d)) {
+            @chown($d, 'root');
+            @chmod($d, $mode);
+        }
+    }
+    $w = apps_jobs::GetWpCli();
+    echo "Apps: " . ($w !== '' ? $w : 'WP-CLI is there.') . "\n";
+    $v = apps_jobs::GetVersions();
+    echo $v !== '' ? $v . "\n" : "Apps: latest versions read.\n";
+};
+$appsInstall();

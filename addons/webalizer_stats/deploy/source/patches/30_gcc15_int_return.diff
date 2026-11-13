@@ -1,0 +1,11 @@
+--- a/output.c
++++ b/output.c
+@@ -2728,7 +2728,7 @@
+          {
+             if (verbose)
+ 	    fprintf(stderr,"%s %s (symlink)\n",msg_no_open,".htaccess");
+-            return NULL;
++            return 1;
+          }
+       }
+ 

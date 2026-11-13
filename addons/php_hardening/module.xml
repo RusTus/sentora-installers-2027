@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Web Hardening</name>
+    <version>106</version>
+    <defaultcat>Server Admin</defaultcat>
+    <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught, the domains, accounts and rules left alone.</desc>
+    <authorname>Sentora-2027</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

@@ -1,0 +1,28 @@
+<?php
+/**
+ * Payment Plans remove step: its notices are withdrawn and the sellers' payment keys deleted; its
+ * other tables (invoices are records a seller may need to keep) stay, and come back with the add-on.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$ppRemove = function () {
+    global $zdbh;
+    try {
+        $keys = $zdbh->query("SELECT DISTINCT nt_key_vc FROM x_notices WHERE nt_source_vc = 'payment_plans' AND nt_deleted_ts IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($keys as $k) {
+            ctrl_notices::Withdraw((string) $k, 0);
+        }
+    } catch (Exception $e) {
+    }
+    // the sellers' payment keys go: secrets are not kept for a module that is gone
+    try {
+        $zdbh->exec("DELETE FROM x_pp_keys");
+    } catch (Exception $e) {
+    }
+    echo "Payment Plans: removed (its invoices and settings stay in the database, for your records; the sellers' payment keys are deleted).\n";
+};
+$ppRemove();

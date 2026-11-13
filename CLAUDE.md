@@ -30,13 +30,16 @@ HANDOFF.md (see "Where things are").
 
 ## Publishing an add-on (sentora-repo/)
 
-1. Raise `<version>` in the module's own module.xml.
-2. Zip it from inside the module's folder: `zip -qrX <name>.zpp module.xml module.zpm code assets deploy hooks`.
-3. Copy the .zpp into sentora-repo/, set `<latestversion>` in sentora-repo/<name>.xml to the same
-   number, and replace its line in sentora-repo/SHA256SUMS (`sha256sum`, then sort the file).
-4. Update its row in sentora-repo/README.md (and in the core's README.md), add a CHANGELOG bullet in
+Each add-on's files are in sentora-installers-2027's `addons/<name>/`, the one place it is changed (the .zpp in
+sentora-repo/ is built from it, never edited or zipped by hand).
+
+1. Change the files in `addons/<name>/` and raise `<version>` in its module.xml.
+2. Build it: `addons/build.sh <name>` (in sentora-installers-2027). It writes sentora-repo/<name>.zpp (the same files
+   always give the same zip), sets `<latestversion>` in sentora-repo/<name>.xml and puts its line in sentora-repo/SHA256SUMS.
+   `addons/check.sh` checks every .zpp matches its folder; the **Add-ons** workflow runs it and the add-on tests on every push.
+3. Update its row in sentora-repo/README.md (and in the core's README.md), add a CHANGELOG bullet in
    both repositories, commit, push and fast-forward master2027. Repo Browser offers it at once; a
-   panel release is only needed when the owner asks.
+   panel release is not needed for an add-on.
 
 ## Standing rules from the owner
 
@@ -92,7 +95,7 @@ speech to text: "Centaur", "Centora" = Sentora, "himsa" = hemsaw, "zPanel" somet
 **Several sessions work on these repositories at the same time (the owner's rule):** before
 changing anything, `git fetch origin master2027` and bring the branch up to it (fast-forward, or rebase
 your own commits on it); do it again just before pushing, and check that everything merges and the tests
-still pass. A .zpp add-on is a zip and can not be merged: when two sessions changed the same add-on,
-unzip both, merge the files, and build it again. Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
+still pass. Add-ons merge like any other files (their folders in addons/): after a merge, build the
+.zpp again with addons/build.sh (a .zpp itself is never merged). Commit trailers and branch: develop on the session's branch, fast-forward `master2027` after each
 push (`git fetch origin master2027 && git merge-base --is-ancestor origin/master2027 HEAD && git
 push origin HEAD:refs/heads/master2027`). Never put model names in repository content.

@@ -1,0 +1,38 @@
+<?php
+/**
+ * Web Hardening install step (run as root from the panel's folder, by zppy; upgrade.run is the same):
+ * administrators only; its tables; its name and description in the panel (the add-on was called
+ * "PHP Hardening" before version 101, and an upgrade does not change them). Nothing is switched on.
+ *
+ * Written by RusTus, 2026-11-10
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$phInstall = function () {
+    global $zdbh;
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        // administrators only (group 1); taken away from any other group
+        $zdbh->prepare("DELETE FROM x_permissions WHERE pe_module_fk = :m AND pe_group_fk <> 1")->execute(array(':m' => $id));
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = 1 AND pe_module_fk = :m");
+        $has->execute(array(':m' => $id));
+        if ((int) $has->fetchColumn() === 0) {
+            $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (1, :m)")->execute(array(':m' => $id));
+        }
+        // its own entry: the name and description of module.xml
+        $xml = @simplexml_load_file(dirname(dirname(__FILE__)) . '/module.xml');
+        if ($xml && (string) $xml->name !== '') {
+            $zdbh->prepare("UPDATE x_modules SET mo_name_vc = :n, mo_desc_tx = :d WHERE mo_id_pk = :m")
+                ->execute(array(':n' => (string) $xml->name, ':d' => (string) $xml->desc, ':m' => $id));
+        }
+    }
+    require_once dirname(__FILE__) . '/../code/ph.php';
+    ph::Ensure();
+    echo "Web Hardening: for administrators; ModSecurity and every PHP are off until you choose (Server Admin > Web Hardening).\n";
+};
+$phInstall();

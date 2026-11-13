@@ -1,0 +1,34 @@
+<?php
+/**
+ * Docker Hosting install step (run as root from the panel's folder, by zppy): every user group may
+ * open it (what each account sees depends on its share; administrators also manage the nodes); its
+ * tables, and the panel's own keys for its nodes.
+ *
+ * Written by RusTus, 2026-11-11
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$dhInstall = function () {
+    global $zdbh;
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+        $add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+        foreach ($zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN) as $g) {
+            $has->execute(array(':g' => (int) $g, ':m' => $id));
+            if ((int) $has->fetchColumn() === 0) {
+                $add->execute(array(':g' => (int) $g, ':m' => $id));
+            }
+        }
+    }
+    require_once dirname(__FILE__) . '/../code/dh.php';
+    dh::Ensure();
+    echo dh::Keys() ? "Docker Hosting: available to every user group; its tables and keys are there.\n"
+        : "Docker Hosting: installed, but this server has no secret key (cnf/security.php) to keep the node keys with: it can not link nodes.\n";
+};
+$dhInstall();

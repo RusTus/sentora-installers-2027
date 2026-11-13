@@ -1,0 +1,200 @@
+/* Docker Hosting in the panel's own style: colours from the theme's --sn-* variables (Light, Dark and Auto),
+   tabs, switches and card rows as the panel's reworked pages (Apache Config, DNS Config, Manage Clients). */
+.dh { --dh-ink: var(--sn-ink, #1f2933); --dh-muted: var(--sn-muted, #6b7785); --dh-line: var(--sn-line, #e6e9ee);
+      --dh-line-strong: var(--sn-line-strong, #cfd6de); --dh-card: var(--sn-card, #ffffff); --dh-bg: var(--sn-soft, #f4f6f9);
+      --dh-accent: var(--sn-accent, #447fb3); --dh-accent-soft: var(--sn-accent-soft, #e3edf6);
+      --dh-ok: var(--sn-ok, #1b7a50); --dh-ok-soft: var(--sn-ok-soft, #e3f5ec);
+      --dh-warn: var(--sn-warn, #8f5b00); --dh-warn-soft: var(--sn-warn-soft, #fff4d6);
+      --dh-bad: var(--sn-bad, #b42318); --dh-bad-soft: var(--sn-bad-soft, #fdecea); --dh-bad-line: var(--sn-bad-line, #f0a9a7);
+      color: var(--dh-ink); background: var(--dh-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.dh * { box-sizing: border-box; }
+
+/* ---- text ---- */
+.dh-muted { color: var(--dh-muted); font-size: 12px; font-weight: normal; }
+.dh-small { font-size: 12px; }
+.dh-small p, p.dh-small { font-size: 12.5px; line-height: 1.5; }
+.dh-note { font-size: 12px; color: var(--dh-bad); }
+.dh-note-soft { color: var(--dh-muted); max-width: 760px; }
+.dh-nowrap { white-space: nowrap; }
+.dh-fp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; letter-spacing: 1px; }
+.dh code { overflow-wrap: anywhere; }
+
+/* ---- messages ---- */
+.dh-msg { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.dh-msg.is-ok { color: var(--dh-ok); background: var(--dh-ok-soft); }
+.dh-msg.is-bad { color: var(--dh-bad); background: var(--dh-bad-soft); }
+.dh-msg.is-warn { color: var(--dh-warn); background: var(--dh-warn-soft); }
+.dh-msg ul { margin: 6px 0 8px; padding-left: 20px; }
+.dh-msg li { margin: 2px 0; }
+.dh-msg-act { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.dh-msg .dh-cardhead { margin: 0; }
+.dh-setup { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--dh-warn-soft); color: var(--dh-warn); font-size: 12px; line-height: 1.5; }
+.dh-setup code { user-select: all; color: inherit; background: transparent; font-weight: 700; }
+.dh-preview { margin-top: 6px; font-size: 13px; padding: 6px 10px; border-radius: 6px; background: var(--dh-bg); border: 1px dashed var(--dh-line-strong); overflow-wrap: anywhere; }
+.dh-cmd { display: block; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; padding: 10px 12px;
+          border-radius: 6px; background: var(--dh-bg); border: 1px solid var(--dh-line); user-select: all; }
+.dh-logs { max-height: 420px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+           background: #111820; color: #d8dee6; padding: 10px 12px; border-radius: 6px; }
+
+/* ---- tabs: as the panel's settings pages (a bar, the open tab underlined) ---- */
+.dh-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 14px; padding: 4px 10px 0; background: var(--dh-card);
+           border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); }
+.dh-tabs a { padding: 11px 14px 10px; font-size: 14px; color: var(--dh-muted) !important; text-decoration: none !important;
+             border-bottom: 2px solid transparent; white-space: nowrap; }
+.dh-tabs a:hover { color: var(--dh-ink) !important; }
+.dh-tabs a.on { color: var(--dh-accent) !important; border-bottom-color: var(--dh-accent); font-weight: 600; }
+
+/* ---- cards ---- */
+.dh-card { background: var(--dh-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 16px 18px; margin: 0 0 14px; min-width: 0; overflow-x: auto; }
+.dh-card h3 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+.dh-cardhead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 10px; }
+.dh-cardhead h3 { margin: 0; }
+.dh-card > p { line-height: 1.5; max-width: 900px; }
+.dh-intro p { margin: 0; line-height: 1.5; max-width: 820px; }
+.dh-limits { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0 0 10px; }
+.dh-limit { border: 1px solid var(--dh-line); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; }
+.dh-limit span { font-size: 12px; color: var(--dh-muted); }
+.dh-limit b { font-size: 16px; }
+
+/* ---- forms ---- */
+.dh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 18px 28px; }
+.dh-grid fieldset { margin: 0; padding: 0; border: 0; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.dh-grid legend { width: 100%; margin: 0 0 2px; padding: 0 0 4px; border: 0; border-bottom: 1px solid var(--dh-line);
+                  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--dh-muted); }
+.dh-field { display: block; margin: 0; font-weight: normal; max-width: 100%; }
+.dh-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.dh-field small { display: block; color: var(--dh-muted); font-size: 12px; margin-top: 4px; line-height: 1.45; }
+/* the panel's Bootstrap styles text boxes by their type only: the same size and look for every box here */
+.dh .form-control { display: block; width: 100%; max-width: 100%; min-height: 34px; margin: 0; padding: 6px 9px; font-size: 14px; line-height: 20px;
+                    background-color: var(--ml-input, var(--dh-card)); color: var(--dh-ink); border: 1px solid var(--ml-input-line, var(--dh-line-strong)); border-radius: 4px; box-shadow: none; }
+.dh textarea.form-control { height: auto; resize: vertical; }
+.dh .form-control[readonly] { background: var(--dh-bg); color: var(--dh-muted); }
+.dh-appform textarea, .dh-envbox { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.dh-envbox { max-width: 760px; }
+.dh-addr { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dh-addr input.form-control { flex: 1 1 160px; width: auto; }
+.dh-addr select.form-control { flex: 0 1 auto; width: auto; }
+.dh-check { font-weight: normal; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; line-height: 1.5; margin: 0; }
+.dh-check input { margin-top: 3px; flex: none; }
+/* buttons first, on the left (as the panel's reworked pages); a note follows them */
+.dh-foot { display: flex; align-items: center; justify-content: flex-start; gap: 8px 12px; flex-wrap: wrap; padding-top: 12px; margin-top: 14px; border-top: 1px solid var(--dh-line); }
+.dh-foot > .btn-primary { order: -2; }
+.dh-foot > .btn-default { order: -1; }
+.dh-foot > span:empty { display: none; }
+.dh-foot > .dh-muted { flex: 1 1 320px; line-height: 1.5; }
+.dh-inline { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+/* apps offered: one tidy box per app */
+.dh-apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 8px; margin-top: 4px; }
+.dh-apps label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; padding: 8px 10px; font-weight: 600; font-size: 13px;
+                 border: 1px solid var(--dh-line); border-radius: 6px; background: var(--dh-card); cursor: pointer; }
+.dh-apps label:has(input:checked) { border-color: var(--dh-accent); background: var(--dh-accent-soft); }
+.dh-apps label input { margin: 0; }
+.dh-apps label .dh-muted { order: 2; flex: 1 1 100%; padding-left: 21px; overflow-wrap: anywhere; }
+.dh-add { margin-top: 12px; }
+.dh-card > details.dh-small { margin-top: 12px; }
+.dh-card > details.dh-small > summary { cursor: pointer; color: var(--dh-accent); }
+.dh-add > summary { list-style: none; cursor: pointer; display: inline-block; }
+.dh-add > summary::-webkit-details-marker { display: none; }
+.dh-add[open] > form { margin-top: 10px; padding: 14px; border: 1px solid var(--dh-line); border-radius: 6px; }
+.dh-add[open] > form.dh-fromrun { background: var(--dh-bg); border-style: dashed; }
+.dh-adv { margin-top: 14px; border-top: 1px solid var(--dh-line); padding-top: 10px; }
+.dh-adv > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--dh-accent); }
+.dh-adv[open] > summary { margin-bottom: 8px; }
+/* an app's backups, in its settings (127): a section like Advanced */
+.dh-backups { margin-top: 14px; border-top: 1px solid var(--dh-line); padding-top: 10px; }
+.dh-backups > h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.dh-backups .dh-night { margin: 2px 0 8px; }
+.dh-backups-act { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+/* ---- pills, icons, switches ---- */
+.dh-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--dh-line); color: var(--dh-muted); white-space: nowrap; }
+.dh-pill.is-ok { background: var(--dh-ok-soft); color: var(--dh-ok); }
+.dh-pill.is-warn { background: var(--dh-warn-soft); color: var(--dh-warn); }
+.dh-pill.is-bad { background: var(--dh-bad-soft); color: var(--dh-bad); border: 1px solid var(--dh-bad-line); }
+.dh-ico { width: 15px; height: 15px; flex: none; }
+.dh .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.dh-del { padding-left: 8px; padding-right: 8px; }
+.dh-del:hover { color: var(--dh-bad) !important; border-color: var(--dh-bad-line) !important; }
+.dh .sf-switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; cursor: pointer; flex: none; }
+.dh .sf-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.dh .sf-toggle { position: absolute; inset: 0; border-radius: 12px; background: var(--dh-line-strong); transition: background 0.15s; pointer-events: none; }
+.dh .sf-toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+.dh .sf-switch input:checked + .sf-toggle { background: var(--dh-ok); }
+.dh .sf-switch input:checked + .sf-toggle::after { transform: translateX(20px); }
+.dh .sf-switch input:focus-visible + .sf-toggle { outline: 2px solid var(--dh-accent); outline-offset: 2px; }
+.dh-night { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.dh-night-label { font-size: 13px; white-space: nowrap; }
+
+/* ---- lists: one card row per app, node, plan or client (as Manage Clients) ---- */
+.dh-list { display: grid; gap: 8px; }
+.dh-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px 14px; padding: 10px 12px;
+           border: 1px solid var(--dh-line); border-left: 4px solid var(--dh-line); border-radius: 6px; background: var(--dh-card); }
+.dh-item.is-ok { border-left-color: var(--dh-ok); }
+.dh-item.is-warn { border-left-color: #f5a623; }
+/* a stopped app or an offline node: as a service that is down on the Services page */
+.dh-item.is-bad { border-color: var(--dh-bad-line); border-left-color: var(--dh-bad); background: var(--dh-bad-soft); }
+.dh-avatar { width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; font-weight: 700;
+             background: var(--dh-accent-soft); color: var(--dh-accent); align-self: start; margin-top: 2px; }
+.dh-avatar .dh-ico { width: 18px; height: 18px; }
+.dh-item.is-bad .dh-avatar { background: var(--dh-card); color: var(--dh-bad); }
+.dh-main { min-width: 0; }
+.dh-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dh-name b { font-size: 15px; }
+.dh-sub { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 3px; font-size: 12px; color: var(--dh-muted); overflow-wrap: anywhere; }
+.dh-sub a { font-weight: 600; }
+.dh-sub code { font-size: 11.5px; }
+.dh-main .dh-setup, .dh-main .dh-note, .dh-main > .dh-muted { margin-top: 6px; max-width: 640px; }
+.dh-switches { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.dh-switches:empty { display: none; }
+.dh-act { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.dh-act .btn.active { background: var(--dh-accent-soft); border-color: var(--dh-accent); }
+/* what opens under a row (Settings, Manage, Change) */
+.dh-more { grid-column: 1 / -1; background: var(--dh-bg); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.dh-more h4 { margin: 14px 0 6px; font-size: 14px; }
+.dh-more h4:first-child { margin-top: 0; }
+.dh-more .form-control { max-width: 320px; }
+.dh-more .dh-grid .form-control, .dh-more textarea.form-control { max-width: none; }
+.dh-more .btn { margin: 0 4px 4px 0; }
+.dh-more .dh-foot .btn { margin: 0; }
+.dh-more .dh-night { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 8px 0; }
+.dh-more .dh-night .dh-muted { flex: 1 1 220px; }
+.dh-lan { display: grid; gap: 4px; }
+.dh-lan-row .dh-night { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 2px 0; }
+.dh-found-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.dh-found-form select.form-control { width: auto; min-width: 140px; }
+
+/* ---- tables (the log, an app's settings) ---- */
+.dh-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dh-table th { text-align: left; font-size: 12px; color: var(--dh-muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--dh-line); }
+.dh-table td { padding: 8px; border-bottom: 1px solid var(--dh-line); vertical-align: middle; }
+.dh-table tr:last-child td { border-bottom: 0; }
+.dh-env { max-width: 760px; margin-bottom: 10px; }
+.dh-env td { padding: 4px 8px; }
+
+/* ---- narrower screens ---- */
+@media (max-width: 1100px) {
+    .dh-item { grid-template-columns: auto minmax(0, 1fr); }
+    .dh-item .dh-switches { grid-column: 2 / -1; flex-direction: row; flex-wrap: wrap; gap: 8px 18px; }
+    .dh-item .dh-act { grid-column: 2 / -1; justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+    .dh { padding: 10px; margin-left: -4px; margin-right: -4px; }
+    .dh-card { padding: 12px; }
+    .dh-tabs { padding: 2px 4px 0; }
+    .dh-tabs a { padding: 10px 10px 9px; font-size: 13px; }
+    /* a row uses the whole width: the round letter goes, the coloured edge stays */
+    .dh-item { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 8px; }
+    .dh-item > .dh-avatar { display: none; }
+    .dh-item .dh-switches, .dh-item .dh-act { grid-column: 1 / -1; }
+    .dh-more { padding: 12px; }
+    .dh-more .form-control { max-width: none; }
+    .dh-found-form select.form-control { flex: 1 1 100%; }
+    .dh-foot > .btn { flex: 1 1 auto; }
+    .dh-backups-act > form { flex: 1 1 auto; }
+    .dh-backups-act .btn { width: 100%; }
+    /* the log and other tables: each row becomes a small block */
+    .dh-table, .dh-table tbody, .dh-table tr, .dh-table td { display: block; width: 100%; }
+    .dh-table thead, .dh-table tr:first-child:has(th) { display: none; }
+    .dh-table tr { padding: 8px 0; border-bottom: 1px solid var(--dh-line); }
+    .dh-table td { border: 0; padding: 2px 0; }
+}

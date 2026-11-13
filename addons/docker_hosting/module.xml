@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Docker Hosting</name>
+    <version>134</version>
+    <defaultcat>Advanced</defaultcat>
+    <desc>Run apps in containers (Gitea, Nextcloud, Uptime Kuma, Vaultwarden) on separate servers ("nodes") linked to the panel. The administrator gives resellers a share (containers, CPU, memory, disk), resellers give their clients part of theirs; each app gets its own address under the customer's domain, with its certificate.</desc>
+    <authorname>Sentora-2027</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

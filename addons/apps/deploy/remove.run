@@ -1,0 +1,35 @@
+<?php
+/**
+ * Apps remove step (run as root from the panel's folder, by zppy): root's folder (WP-CLI, the
+ * tasks' input and output, the WordPress package) goes. The apps installed stay: they are the accounts' own websites,
+ * with their databases (in MySQL Databases), and keep working.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$appsRemove = function () {
+    global $zdbh;
+    // the "deploy failed" notices of Git apps
+    try {
+        foreach ($zdbh->query("SELECT DISTINCT nt_key_vc FROM x_notices WHERE nt_source_vc = 'apps' AND nt_deleted_ts IS NULL")->fetchAll(PDO::FETCH_COLUMN) as $k) {
+            ctrl_notices::Withdraw((string) $k, 0);
+        }
+    } catch (Exception $e) {
+    }
+    $dir = '/var/lib/sentora/apps';
+    if (is_dir($dir) && !is_link($dir)) {
+        foreach (array($dir . '/jobs', $dir . '/packages', $dir) as $d) {
+            foreach ((array) @scandir($d) as $f) {
+                if ($f !== '.' && $f !== '..' && (is_file($d . '/' . $f) || is_link($d . '/' . $f))) {
+                    @unlink($d . '/' . $f);
+                }
+            }
+            @rmdir($d);
+        }
+    }
+    echo "Apps: removed (the apps installed stay: they are the accounts' own websites).\n";
+};
+$appsRemove();

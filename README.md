@@ -160,6 +160,7 @@ fail2ban-client set <jail> unbanip <address>
 | `preconf/fail2ban/` | fail2ban jails and filters |
 | `preconf/goaccess/` | GoAccess source, built at install |
 | `preconf/php-build/` | Scripts to build and update the extra PHP versions |
+| `addons/` | Each add-on's files (`addons/<name>/`), the one place an add-on is changed; `addons/build.sh <name>` builds its `.zpp` into `sentora-repo/`, `addons/check.sh` checks they match |
 | `sentora-repo/` | The add-on module repository (QuickFig, Apps, Payment Plans, PHP-Adminer, Webalizer Stats, Visitor Stats, Log Forwarder), read by Repo Browser from GitHub; see its [README](sentora-repo/README.md) |
 | `docker-node/` | Docker Hosting's node installer (`sentora2027-docker-node`, every supported system) and its agent |
 | `backup-node/` | The Sentora backup node installer (`sentora2027-backup-node`) and its gate, for the panel's off-server backup |

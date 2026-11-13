@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Log Forwarder</name>
+    <version>202</version>
+    <defaultcat>Advanced</defaultcat>
+    <desc>Send your websites' logs live to your own log server (ELK, OpenSearch, Grafana Loki, Graylog), as syslog over TLS: each line within a second or two of being written.</desc>
+    <authorname>Sentora-2027 (rsyslog)</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

@@ -1,0 +1,110 @@
+/* PHP-Adminer for Sentora: Adminer in the panel's own style (the Modern template's colours, cards
+   and fields). The panel's Light or Dark decides which file Adminer loads: this one always, and
+   adminer-dark.css on top of it for Dark (see adminer-plugins/sentora.php). Adminer's own colours
+   come from --bg/--fg/--dim/--lit, so they are set here too.
+   Updated by RusTus, 2026-11-08 */
+:root { --s-bg: #f4f6f9; --s-card: #ffffff; --s-ink: #1f2933; --s-muted: #6b7785; --s-line: #e6e9ee; --s-line2: #f0f2f5;
+        --s-field: #ffffff; --s-field-line: #cfd6de; --s-head: #f7f9fb; --s-hover: #f4f6f9; --s-stripe: #fafbfc;
+        --s-accent: #447fb3; --s-accent-dark: #3a6d9a; --s-accent-soft: #e3edf6; --s-red: #e5533f; --s-red-dark: #c94532;
+        --s-ok: #1f8a5b; --s-ok-soft: #e3f5ec; --s-bad: #b42318; --s-bad-soft: #fdecea; --s-shadow: 0 1px 3px rgba(20,30,40,0.08);
+        --bg: var(--s-card); --fg: var(--s-ink); --dim: var(--s-head); --lit: var(--s-accent-soft); color-scheme: light; }
+html, body { background: var(--s-bg); color: var(--s-ink); }
+body { font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+a, a:visited, button.link { color: var(--s-accent); }
+a:link:hover, a:visited:hover, button.link:hover { color: var(--s-accent-dark); text-decoration: underline; }
+
+/* the top line: language, breadcrumb, who is logged in */
+#lang { color: var(--s-muted); font-size: 12px; }
+#breadcrumb { background: transparent; color: var(--s-muted); font-size: 12px; }
+#breadcrumb a { color: var(--s-accent); }
+.logout { background: var(--s-bg); box-shadow: 0 0 5px 5px var(--s-bg); padding: 4px 8px 0 0; color: var(--s-muted); }
+#jump.fixed { background: var(--s-bg); }
+
+/* the side menu: a card */
+#menu { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 8px; box-shadow: var(--s-shadow); margin: 14px 0 0 10px; }
+h1 { background: transparent; border-bottom: 1px solid var(--s-line); color: var(--s-muted); font-size: 18px; padding: 12px 14px; }
+#h1 { color: var(--s-ink); font-style: normal; font-weight: 600; }
+.version, #h1 .version { color: var(--s-muted); }
+#menu p, #logins, #tables { border-bottom: 1px solid var(--s-line2); padding: 10px 14px; }
+#logins a, #tables a, #tables span { background: transparent; }
+#tables li { padding: 1px 0; }
+#menu .active, #tables a.active { color: var(--s-ink); font-weight: 600; }
+
+/* the page */
+#content { margin-top: 2.4em; }
+h2 { background: transparent; border: 0; color: var(--s-ink); font-size: 20px; font-weight: 600; padding: 6px 0 4px; margin: 0 0 14px; margin-inline-start: 0; }
+h3 { color: var(--s-ink); font-size: 15px; font-weight: 600; }
+.links a { color: var(--s-accent); }
+p { color: var(--s-ink); }
+.time, small { color: var(--s-muted); }
+:target { background: var(--s-accent-soft); }
+
+/* fields and buttons, as in the panel */
+input, select, textarea { font: inherit; color: var(--s-ink); background: var(--s-field); border: 1px solid var(--s-field-line); border-radius: 6px; padding: 3px 5px; }
+input[type=checkbox], input[type=radio] { padding: 0; accent-color: var(--s-accent); }
+input:focus, select:focus, textarea:focus { outline: 0; border-color: var(--s-accent); box-shadow: 0 0 0 3px var(--s-accent-soft); }
+input[type=submit], input[type=button], button:not(.link):not(.icon):not(.jush-help) { cursor: pointer; color: #fff; background: var(--s-accent); border: 1px solid var(--s-accent); border-radius: 6px; padding: 5px 12px; font-weight: 500; }
+input[type=submit]:hover, input[type=button]:hover, button:not(.link):not(.icon):not(.jush-help):hover { background: var(--s-accent-dark); border-color: var(--s-accent-dark); }
+input[type=submit]:disabled, input[type=button]:disabled, button:disabled { opacity: 0.45; cursor: default; }
+input[name="delete"], input[name="drop"], input[name="truncate"], input[name="drop_col"] { background: var(--s-red); border-color: var(--s-red); }
+input[name="delete"]:hover, input[name="drop"]:hover, input[name="truncate"]:hover, input[name="drop_col"]:hover { background: var(--s-red-dark); border-color: var(--s-red-dark); }
+input.default { box-shadow: none; font-weight: 600; }
+#jump input[type="search"] { border-color: var(--s-field-line); border-radius: 999px; }
+fieldset { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 8px; box-shadow: var(--s-shadow); padding: 8px 12px 10px; }
+legend { color: var(--s-ink); font-weight: 600; padding: 0 4px; }
+.footer { box-shadow: 0 -5px 10px 10px var(--s-bg); }
+.footer > div { background: var(--s-bg); }
+
+/* tables: cards with soft lines */
+table { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 8px; box-shadow: var(--s-shadow); border-collapse: separate; font-size: 12.5px; }
+table, td, th, .column { border-color: var(--s-line2); }
+td, th { border-inline-end-width: 0; padding: 5px 9px; }
+td:first-child, th:first-child { border-inline-start-width: 0; }
+table >:first-child >:first-child > td, table >:first-child >:first-child > th { border-top-width: 0; }
+th { background: var(--s-head); color: var(--s-ink); font-weight: 600; }
+thead td, thead th { background: var(--s-head); color: var(--s-ink); border-block-end: 1px solid var(--s-line); }
+thead th a, thead td a { color: var(--s-accent); }
+tbody tr:hover td, tbody tr:hover th { background: var(--s-hover); }
+.odds tbody tr:nth-child(2n) { background: var(--s-stripe); }
+.js .checkable .checked td, .js .checkable .checked th { background: var(--s-accent-soft); }
+td table, fieldset table, table.layout { border: 0; box-shadow: none; border-radius: 0; background: transparent; }
+.column { background: var(--s-card); border: 1px solid var(--s-line); }
+
+/* code and messages */
+code { background: var(--s-head); border-radius: 4px; padding: 1px 4px; }
+pre.jush, .sqlarea { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 6px; padding: 6px 8px; }
+.message { color: var(--s-ok); background: var(--s-ok-soft); border: 1px solid transparent; border-radius: 6px; }
+.error { color: var(--s-bad); background: var(--s-bad-soft); border: 1px solid transparent; border-radius: 6px; }
+.error b { background: transparent; font-weight: 600; }
+.message table { background: var(--s-card); }
+#help, #jump-list { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 6px; box-shadow: 0 10px 30px rgba(10,20,30,0.18); }
+#jump-list .current { background: var(--s-accent-soft); }
+.icon { background-color: var(--s-accent); border-radius: 4px; }
+.icon:hover { background-color: var(--s-red); }
+@media all and (max-width: 800px) { #menu { background: var(--s-card); border-color: var(--s-line); box-shadow: 0 10px 30px rgba(10,20,30,0.18); } .js .logout { background-color: var(--s-bg); box-shadow: 0 0 5px 5px var(--s-bg); } }
+
+/* the login form: a plain form, not a table card */
+table:has(input[name^="auth["]), table:has(input[name^="auth["]) th, table:has(input[name^="auth["]) td { background: transparent; border: 0; box-shadow: none; }
+table:has(input[name^="auth["]) th { color: var(--s-muted); font-weight: 600; padding-left: 0; }
+
+/* the SQL editor: the panel's field frame and focus ring */
+.jush { --border-color: var(--s-field-line); }
+[contenteditable].jush, .sqlarea { border: 1px solid var(--s-field-line); border-radius: 6px; background: var(--s-field); }
+[contenteditable]:focus, .sqlarea:focus { outline: 0; border-color: var(--s-accent); box-shadow: 0 0 0 3px var(--s-accent-soft); }
+
+/* Adminer's list of loaded plugins (on the server page): technical, not for hosting customers */
+.plugins { display: none; }
+
+/* no scroll bars on the page itself (the panel's frame grows to fit it): a table wider than the
+   space scrolls sideways in its own area, with a thin bar in the theme's colours */
+body { min-width: 0; }
+html { overflow-x: hidden; }
+#content table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--s-field-line) transparent; }
+#content td table, #content fieldset table, #content table:has(input[name^="auth["]) { display: table; width: auto; max-width: none; overflow: visible; }
+#menu, #tables, #logins { scrollbar-width: thin; scrollbar-color: var(--s-field-line) transparent; }
+
+/* the open logins (on the login page) wrap instead of running over the form; table names that
+   are cut short show in full on hover, on the menu's own background */
+#logins { white-space: normal; }
+#logins a { display: block; overflow-wrap: anywhere; padding: 2px 0; }
+#tables a, #tables span { background: var(--s-card); }

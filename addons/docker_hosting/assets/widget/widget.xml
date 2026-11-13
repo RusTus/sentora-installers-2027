@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget>
+    <id>docker_hosting</id>
+    <name>Docker Hosting</name>
+    <description>Your Docker apps at a glance; for administrators, each node and what needs a look.</description>
+    <version>1.0</version>
+    <author>Sentora Docker Hosting</author>
+    <default>true</default>
+    <groups>administrators resellers users</groups>
+</widget>

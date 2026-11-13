@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>PHP-Adminer</name>
+    <version>635</version>
+    <defaultcat>Database Management</defaultcat>
+    <desc>Manage your MySQL databases in the browser with Adminer: tables, data, SQL queries, import and export. Log in with one of your own MySQL users.</desc>
+    <authorname>Sentora-2027 (Adminer 6.3.0 by Jakub Vrana, adminer.org)</authorname>
+    <authoremail></authoremail>
+    <authorurl>https://www.adminer.org/</authorurl>
+    <updateurl></updateurl>
+</module>

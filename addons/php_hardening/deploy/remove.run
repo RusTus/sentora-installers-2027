@@ -1,0 +1,30 @@
+<?php
+/**
+ * Web Hardening remove step (run as root): ModSecurity and Snuffleupagus switched off everywhere
+ * (their settings files taken out, Apache and PHP-FPM reloaded), the Snuffleupagus build it
+ * downloaded for the system PHP deleted; ModSecurity itself stays installed (switched off, as the
+ * installer left it); the add-on's tables stay and come back with it.
+ *
+ * Written by RusTus, 2026-11-10
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$phRemove = function () {
+    require_once dirname(__FILE__) . '/../code/ph.php';
+    require_once dirname(__FILE__) . '/../code/daemon.php';
+    require_once dirname(__FILE__) . '/../code/modsec.php';
+    try {
+        foreach (ph_daemon::AllOff() as $line) {
+            echo $line . "\n";
+        }
+        foreach (array_keys(ph::Versions()) as $v) {
+            ph::Set('mode:' . $v, 'off');
+        }
+    } catch (Exception $e) {
+        echo "Web Hardening: " . $e->getMessage() . "\n";
+    }
+    echo "Web Hardening: removed; ModSecurity and Snuffleupagus are switched off everywhere.\n";
+};
+$phRemove();

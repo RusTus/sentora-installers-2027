@@ -1,0 +1,12 @@
+Visitors 0.7 (web log analyzer by Salvatore Sanfilippo) for Sentora on Ubuntu 26.04
+
+0.7 is the last release. Ubuntu no longer packages it, so the installer builds it
+from this source into /usr/local/bin/visitors.
+
+visitors_0.7.orig.tar.gz   upstream source, from the Ubuntu archive
+patches/ (Debian 0.7-9)    browser list update, combined log maps, man page,
+                           build flags
+patches/90_escape_links    Sentora: escape logged URLs inside report links
+                           (a quote could otherwise add attributes to a link)
+
+Licensed under the GNU GPL v2 (see COPYING in the source).

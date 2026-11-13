@@ -1,0 +1,15 @@
+<?php
+/**
+ * PHP-Adminer upgrade step (run by zppy as root, in the panel's folder, after the new files are in
+ * place): removes files an earlier version used and this one does not. Today: the dark-mode switch
+ * plugin (Adminer now follows the panel's Light or Dark).
+ *
+ * Written by RusTus, 2026-11-08
+ */
+foreach (array('dark-switcher.php') as $adminerOld) {
+    $adminerFile = dirname(__DIR__) . '/app/adminer-plugins/' . $adminerOld;
+    if (is_file($adminerFile) && !is_link($adminerFile)) {
+        unlink($adminerFile);
+        echo "PHP-Adminer: removed app/adminer-plugins/" . $adminerOld . ".\n";
+    }
+}

@@ -1,0 +1,46 @@
+/* The Visitors report in the panel's style (put into the page by code/report.php, after the
+   report's own styles). The heat maps keep the colours Visitors gives each cell (inline styles);
+   everything else follows the panel's Light or Dark (--vz-* are set by report.php). */
+html { background: var(--vz-bg); color-scheme: var(--vz-scheme); }
+body { background: var(--vz-bg) !important; color: var(--vz-ink) !important; margin: 0; padding: 18px 20px 24px;
+       font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important; }
+td:not([style]), b, li, u, div, span { background-color: transparent !important; color: inherit !important;
+       font-family: inherit !important; font-size: inherit !important; }
+a, a:visited { color: var(--vz-accent) !important; text-decoration: none !important; background: none !important; }
+a:hover { text-decoration: underline !important; }
+
+/* the whole report: one card */
+table.maintable { width: 100%; max-width: 1000px; margin: 0 auto; border: 1px solid var(--vz-line) !important; border-radius: 8px;
+       border-collapse: separate; border-spacing: 0; overflow: hidden; background: var(--vz-card) !important;
+       box-shadow: 0 1px 3px rgba(20,30,40,0.08); }
+table.maintable > tbody > tr > td, table.maintable > tr > td { background-color: var(--vz-card); }
+.credits { color: var(--vz-muted) !important; font-weight: 400 !important; font-size: 12px !important; padding: 10px 16px !important; text-align: left; }
+
+/* each report: a heading, its explanation and its summary lines */
+td.title { background: var(--vz-head) !important; color: var(--vz-ink) !important; font-size: 15px !important; font-weight: 600 !important;
+       text-align: left !important; padding: 14px 16px 2px !important; border-top: 1px solid var(--vz-line); }
+td.subtitle { background: var(--vz-head) !important; color: var(--vz-muted) !important; font-size: 12px !important; font-weight: 400 !important;
+       text-align: left !important; padding: 0 16px 10px !important; }
+td.info { background: var(--vz-soft) !important; color: var(--vz-ink) !important; font-size: 12px !important; padding: 3px 16px !important; }
+td.reportlink { padding: 3px 16px !important; font-size: 13px !important; font-weight: 400 !important; }
+
+/* the rows: name, figure and bar */
+td.keyentry, td.keyentrywe, td.valueentry, td.bar { border-bottom: 1px solid var(--vz-line2) !important; padding: 4px 8px !important;
+       font-size: 12px !important; vertical-align: middle; }
+td.keyentry, td.keyentrywe { padding-left: 16px !important; overflow-wrap: anywhere; }
+td.keyentrywe { color: var(--vz-accent) !important; font-weight: 600; }
+td.valueentry { color: var(--vz-muted) !important; white-space: nowrap; border-bottom-style: solid !important; }
+td.bar { padding-right: 16px !important; }
+td.bar table { width: 100% !important; max-width: 400px; }
+td.barfill, td.barleft, td.barright { border: 0 !important; height: 8px !important; line-height: 8px !important; font-size: 0 !important; padding: 0 !important; }
+td.barfill { background: var(--vz-bar) !important; border-radius: 4px; }
+td.barleft { background: var(--vz-bar2) !important; border-radius: 4px 0 0 4px; }
+td.barright { background: var(--vz-line) !important; border-radius: 0 4px 4px 0; }
+td.barempty { font-size: 0 !important; line-height: 8px !important; }
+
+/* heat maps: square cells with a little gap, their own colours */
+td[style*="background-color"] { min-width: 14px; height: 14px; border: 1px solid var(--vz-card); border-radius: 3px; }
+/* the labels around the heat maps: tight, so the maps fit the page */
+table.maintable table td.valueentry, table.maintable table td.keyentry { padding: 1px 4px !important; border-bottom: 0 !important; font-size: 11px !important; text-align: center; }
+/* days and hours without traffic: Visitors paints them black; a faint cell instead */
+td[style*="#000000"] { background-color: var(--vz-line2) !important; }

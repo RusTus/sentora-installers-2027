@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Payment Plans</name>
+    <version>106</version>
+    <defaultcat>Account Information</defaultcat>
+    <desc>Bill your clients through the panel: prices for your packages, monthly or yearly plans (new clients on a priced package are billed by themselves), numbered invoices, reminders, and payment with PayPal or Stripe (your choice) straight into your own account. An unpaid invoice switches the client off after your grace days; paying switches it on again.</desc>
+    <authorname>Sentora-2027</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

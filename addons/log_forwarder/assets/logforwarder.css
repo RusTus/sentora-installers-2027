@@ -1,0 +1,65 @@
+/* Log Forwarder in the panel's style. Colours come from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto. */
+.lfw { --lf-ink: var(--sn-ink, #1f2933); --lf-muted: var(--sn-muted, #6b7785); --lf-line: var(--sn-line, #e6e9ee);
+       --lf-card: var(--sn-card, #ffffff); --lf-bg: var(--sn-soft, #f4f6f9); --lf-accent: var(--sn-accent, #447fb3);
+       --lf-accent-soft: var(--sn-accent-soft, #e3edf6);
+       --lf-ok: var(--sn-ok, #1b7a50); --lf-ok-soft: var(--sn-ok-soft, #e3f5ec);
+       --lf-warn: var(--sn-warn, #8f5b00); --lf-warn-soft: var(--sn-warn-soft, #fff4d6);
+       --lf-bad: var(--sn-bad, #b42318); --lf-bad-soft: var(--sn-bad-soft, #fdecea);
+       color: var(--lf-ink); background: var(--lf-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.lfw * { box-sizing: border-box; }
+.lfw-ico { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+.lfw-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin: 0 0 10px; }
+.lfw-card { background: var(--lf-card); border-radius: 8px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 14px 16px; margin-bottom: 14px; min-width: 0; }
+.lfw-state { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 24px 16px; }
+.lfw-state .lfw-ico { width: 40px; height: 40px; padding: 9px; border-radius: 10px; background: var(--lf-accent-soft); color: var(--lf-accent); }
+.lfw-state span, .lfw-note, .lfw-sent, .lfw-host { color: var(--lf-muted); }
+.lfw-warn { background: var(--lf-warn-soft); color: var(--lf-warn); }
+.lfw-note { font-size: 12px; margin: 8px 0; }
+
+/* destinations */
+.lfw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.lfw-grid .lfw-card { margin: 0; }
+.lfw-dest { display: flex; flex-direction: column; gap: 6px; border-top: 3px solid var(--lf-line); }
+.lfw-dest.is-ok { border-top-color: var(--lf-ok); } .lfw-dest.is-warn { border-top-color: var(--lf-warn); } .lfw-dest.is-bad { border-top-color: var(--lf-bad); }
+.lfw-dest header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lfw-name { font-weight: 600; font-size: 15px; display: inline-flex; gap: 8px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+.lfw-name .lfw-ico { color: var(--lf-accent); }
+.lfw-pill { flex: none; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--lf-line); color: var(--lf-muted); white-space: nowrap; }
+.lfw-pill.is-ok { background: var(--lf-ok-soft); color: var(--lf-ok); } .lfw-pill.is-warn { background: var(--lf-warn-soft); color: var(--lf-warn); } .lfw-pill.is-bad { background: var(--lf-bad-soft); color: var(--lf-bad); }
+.lfw-dest p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.lfw-host code { background: none; color: var(--lf-ink); padding: 0; }
+.lfw-why { padding: 6px 10px; border-radius: 6px; background: var(--lf-bg); }
+.lfw-why.is-warn { background: var(--lf-warn-soft); color: var(--lf-warn); } .lfw-why.is-bad { background: var(--lf-bad-soft); color: var(--lf-bad); }
+.lfw-logs b, .lfw-sent b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--lf-muted); margin-right: 4px; }
+.lfw-dest footer { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.lfw-dest footer .btn, .lfw-foot .btn { display: inline-flex; align-items: center; gap: 6px; }
+.lfw-inline { display: inline; margin: 0; }
+
+/* the form */
+.lfw-form h3, .lfw-help h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.lfw-form h3 .lfw-ico, .lfw-help h3 .lfw-ico { color: var(--lf-accent); }
+.lfw-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.lfw-field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; font-weight: normal; flex: 0 0 120px; }
+.lfw-field.lfw-wide { flex: 1 1 260px; }
+.lfw-field span, .lfw-label { font-size: 12px; font-weight: 700; color: var(--lf-muted); }
+.lfw-form > .lfw-field { max-width: 640px; }
+.lfw-logsel { margin-bottom: 12px; }
+.lfw-group { border: 1px solid var(--lf-line); border-radius: 8px; padding: 8px 12px 10px; margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.lfw-group legend { font-size: 12px; font-weight: 700; width: auto; border: 0; margin: 0; padding: 0 4px; color: var(--lf-ink); }
+.lfw-check { font-weight: normal; margin: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.lfw-ca { margin: 4px 0 10px; }
+.lfw-ca summary { cursor: pointer; font-size: 13px; color: var(--lf-accent); }
+.lfw-ca textarea { margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.lfw-ca small { color: var(--lf-muted); }
+.lfw-test { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin: 6px 0; }
+.lfw-test.is-ok { background: var(--lf-ok-soft); color: var(--lf-ok); } .lfw-test.is-bad { background: var(--lf-bad-soft); color: var(--lf-bad); }
+.lfw-foot { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--lf-line); padding-top: 12px; margin-top: 4px; }
+
+/* help */
+.lfw-help p { font-size: 13px; }
+.lfw-help details { border-top: 1px solid var(--lf-line); padding: 8px 0; }
+.lfw-help summary { cursor: pointer; font-size: 13px; }
+.lfw-help summary small { color: var(--lf-muted); margin-left: 6px; }
+.lfw-help pre { margin: 8px 0 0; white-space: pre; overflow-x: auto; font-size: 12px; background: #10151b; color: #d7dee6; border: 0; border-radius: 6px; padding: 10px 12px; }
+@media (max-width: 640px) { .lfw { padding: 12px; } .lfw-grid { grid-template-columns: 1fr; } }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Webalizer Stats</name>
+    <version>206</version>
+    <type>user</type>
+    <defaultcat>Advanced</defaultcat>
+    <desc>See how your websites are used: hits, visits, pages, traffic, top pages, referrers and search terms, by month, day and hour, made every hour with Webalizer 2.23.</desc>
+    <authorname>Sentora-2027 (Webalizer 2.23)</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

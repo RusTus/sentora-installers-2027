@@ -1,0 +1,30 @@
+<?php
+/**
+ * PHP-Adminer install step (run by the Sentora daemon as root, from the panel's
+ * folder, right after the package is unpacked): every user group may use it,
+ * since each account logs in with its own MySQL users only.
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$folder = basename(dirname(__DIR__));
+$sql = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+$sql->execute(array(':f' => $folder));
+$moduleId = (int) $sql->fetchColumn();
+if ($moduleId <= 0) {
+    echo "PHP-Adminer: module not registered yet.\n";
+    exit(1);
+}
+$groups = $zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN);
+$has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+$add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+$n = 0;
+foreach ($groups as $g) {
+    $has->execute(array(':g' => (int) $g, ':m' => $moduleId));
+    if ((int) $has->fetchColumn() === 0) {
+        $add->execute(array(':g' => (int) $g, ':m' => $moduleId));
+        $n++;
+    }
+}
+echo "PHP-Adminer: available to all " . count($groups) . " user groups (" . $n . " added).\n";

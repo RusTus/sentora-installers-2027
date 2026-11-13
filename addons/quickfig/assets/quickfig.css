@@ -1,0 +1,105 @@
+/* QuickFig in the panel's style. Colours come from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto. */
+.qf { --qf-ink: var(--sn-ink, #1f2933); --qf-muted: var(--sn-muted, #6b7785); --qf-line: var(--sn-line, #e6e9ee);
+      --qf-card: var(--sn-card, #ffffff); --qf-bg: var(--sn-soft, #f4f6f9); --qf-accent: var(--sn-accent, #447fb3);
+      --qf-accent-soft: var(--sn-accent-soft, #e3edf6);
+      --qf-ok: var(--sn-ok, #1b7a50); --qf-ok-soft: var(--sn-ok-soft, #e3f5ec);
+      --qf-warn: var(--sn-warn, #8f5b00); --qf-warn-soft: var(--sn-warn-soft, #fff4d6);
+      --qf-bad: var(--sn-bad, #b42318); --qf-bad-soft: var(--sn-bad-soft, #fdecea);
+      color: var(--qf-ink); background: var(--qf-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.qf * { box-sizing: border-box; }
+.qf-ico { width: 16px; height: 16px; flex: none; vertical-align: -3px; margin-right: 4px; }
+.qf-intro { margin: 0 2px 14px; color: var(--qf-muted); line-height: 1.5; }
+.qf-muted { color: var(--qf-muted); font-size: 12px; font-weight: normal; }
+.qf-bad { color: var(--qf-bad); }
+.qf-msg { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.qf-msg.is-ok { color: var(--qf-ok); background: var(--qf-ok-soft); }
+.qf-msg.is-bad { color: var(--qf-bad); background: var(--qf-bad-soft); }
+.qf-msg.is-info { color: var(--qf-accent); background: var(--qf-accent-soft); }
+.qf-msg .qf-ico, .qf-same .qf-ico { width: 14px; height: 14px; vertical-align: -2px; margin-right: 5px; }
+.qf-card { background: var(--qf-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 16px 18px; margin: 0 0 14px; min-width: 0; }
+.qf-card h3 { display: flex; align-items: center; gap: 4px; margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+.qf-card h3 .qf-ico { color: var(--qf-accent); }
+.qf-card h3 .qf-muted { margin-left: auto; }
+.qf-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.qf-head h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.qf-head .btn { display: inline-flex; align-items: center; }
+.qf-sub { color: var(--qf-muted); font-weight: normal; }
+
+/* the list of websites */
+.qf-sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.qf-site { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px 16px; background: var(--qf-card); border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(20,30,40,0.08); color: var(--qf-ink) !important; text-decoration: none !important; border-top: 3px solid var(--qf-line); }
+.qf-site:hover { box-shadow: 0 2px 8px rgba(20,30,40,0.14); }
+.qf-site b { font-size: 15px; overflow-wrap: anywhere; }
+.qf-site small { color: var(--qf-muted); }
+.qf-site small.qf-same { color: var(--qf-accent); font-weight: 600; }
+.qf-pill { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--qf-line); color: var(--qf-muted); white-space: nowrap; }
+.qf-pill .qf-ico { width: 12px; height: 12px; vertical-align: -2px; }
+.qf-pill.is-wp { background: var(--qf-accent-soft); color: var(--qf-accent); }
+.qf-pill.is-mage { background: var(--qf-warn-soft); color: var(--qf-warn); }
+.qf-pill.is-app { background: var(--qf-ok-soft); color: var(--qf-ok); }
+.qf-pill.is-off { background: var(--qf-warn-soft); color: var(--qf-warn); }
+
+/* a site's page */
+.qf-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.qf-side { display: grid; gap: 0; }
+.qf-group { margin: 0 0 14px; padding: 0; border: 0; display: grid; gap: 12px; }
+.qf-group legend { width: auto; margin: 0 0 4px; padding: 0 0 4px; border: 0; border-bottom: 1px solid var(--qf-line); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--qf-muted); }
+.qf-field { display: block; margin: 0; font-weight: normal; }
+.qf-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.qf-field > span code { font-size: 11px; font-weight: normal; color: var(--qf-muted); background: none; padding: 0; }
+.qf-field small { display: block; color: var(--qf-muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
+.qf-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; margin-top: 4px; border-top: 1px solid var(--qf-line); }
+.qf-tool { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 0; border-top: 1px solid var(--qf-line); }
+.qf-tool:first-of-type { border-top: 0; padding-top: 0; }
+.qf-tool b { font-size: 13px; }
+.qf-tool small { color: var(--qf-muted); font-size: 12px; line-height: 1.4; }
+.qf-tool.is-warn { margin: 0 -10px 6px; padding: 10px; border: 0; border-radius: 6px; background: var(--qf-warn-soft); }
+.qf-tool.is-warn b { color: var(--qf-warn); }
+.qf-inline { display: inline; margin: 0; }
+.qf-plugins, .qf-versions { list-style: none; margin: 0; padding: 0; }
+.qf-plugins li, .qf-versions li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--qf-line); font-size: 13px; overflow-wrap: anywhere; }
+.qf-plugins li:first-child, .qf-versions li:first-child { border-top: 0; }
+.qf-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0 0 12px; font-size: 13px; }
+.qf-dl dt { color: var(--qf-muted); font-weight: 600; }
+.qf-dl dd { margin: 0; overflow-wrap: anywhere; }
+.qf-dl code { background: none; color: var(--qf-ink); padding: 0; overflow-wrap: anywhere; word-break: break-all; white-space: normal; }
+.qf-log { max-height: 420px; overflow: auto; margin: 0; padding: 10px; background: #1b222b; color: #e6e9ee; border: 0; border-radius: 6px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qf-subform { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.qf-subform .qf-field { flex: 1 1 260px; }
+.qf-subform .btn { display: inline-flex; align-items: center; }
+@media (max-width: 991px) { .qf-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .qf { padding: 12px; } }
+.qf-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.qf-jobs { list-style: none; margin: 0; padding: 0; }
+.qf-jobs li { padding: 8px 0; border-top: 1px solid var(--qf-line); font-size: 13px; }
+.qf-jobs li:first-child { border-top: 0; }
+.qf-job { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qf-job > span:first-child { flex: 1 1 200px; }
+.qf-jobs details { margin-top: 6px; }
+.qf-jobs summary { cursor: pointer; color: var(--qf-muted); font-size: 12px; }
+.qf-pill.is-ok { background: var(--qf-ok-soft); color: var(--qf-ok); }
+.qf-pill.is-bad { background: var(--qf-bad-soft); color: var(--qf-bad); }
+.qf-card p code { background: none; color: var(--qf-ink); padding: 0; overflow-wrap: anywhere; }
+
+/* crawlers */
+.qf-bots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px 18px; margin: 4px 0 12px; }
+.qf-botgroup > b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--qf-muted); margin-bottom: 4px; }
+.qf-bot { display: flex; gap: 8px; align-items: flex-start; font-weight: normal; font-size: 12px; line-height: 1.4; margin: 0 0 6px; }
+.qf-bot input { margin-top: 2px; }
+.qf-bot b { font-size: 13px; }
+
+/* Who visited (Crawlers card) */
+.qf-subhead { margin: 16px 0 6px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--qf-muted); }
+.qf-scroll { overflow-x: auto; }
+.qf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.qf-table th { text-align: left; font-weight: 600; color: var(--qf-muted); padding: 6px 8px; border-bottom: 1px solid var(--qf-line); white-space: nowrap; }
+.qf-table td { padding: 6px 8px; border-bottom: 1px solid var(--qf-line); vertical-align: middle; }
+.qf-table td b { overflow-wrap: anywhere; }
+.qf-table .qf-num { text-align: right; white-space: nowrap; }
+.qf-share { white-space: nowrap; color: var(--qf-muted); }
+.qf-bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: var(--qf-line); vertical-align: middle; overflow: hidden; }
+.qf-bar i { display: block; height: 100%; background: var(--qf-accent); }
+.qf-bot.is-off { opacity: .55; }
+.qf-ok-line { color: var(--qf-ok); font-weight: 600; }

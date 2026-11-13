@@ -1,0 +1,61 @@
+<div class="zmodule_content panel" id="zmodule_header_<@ ModuleName @>">
+    <div class="panel-heading">
+        <img src="<@ ModuleIcon @>" width="35" height="35" border="0" alt="<@ ModuleName @>">
+        <div class="zmodule_title"><@ ModuleName @></div>
+        <div class="zmodule_desc" id="zmodule_desc_<@ ModuleName @>"><@ ModuleDesc @></div>
+    </div>
+    <link rel="stylesheet" href="modules/PHP-Adminer/assets/adminer-page.css">
+
+    <div class="pa" id="pa">
+        <% if HasNoMySQLUsers %>
+        <div class="pa-card pa-state">
+            <svg class="pa-ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 9v12"/></svg>
+            <b><: You have no MySQL users yet :></b>
+            <span><: Create a database in MySQL Databases and a user for it in MySQL Users, then come back here. :></span>
+            <span class="pa-links"><a class="btn btn-default btn-sm" href="./?module=mysql_databases"><: MySQL Databases :></a> <a class="btn btn-default btn-sm" href="./?module=mysql_users"><: MySQL Users :></a></span>
+        </div>
+        <% endif %>
+        <% if HasMySQLUsers %>
+        <div class="pa-card pa-bar">
+            <div class="pa-say">
+                <svg class="pa-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span><: Log in with one of your MySQL users and its password. You see the databases that user may use. :></span>
+            </div>
+            <div class="pa-facts"><@ Facts @></div>
+            <div class="pa-btns">
+                <a class="btn btn-default btn-sm" href="./?module=mysql_users"><: MySQL Users :></a>
+                <a class="btn btn-default btn-sm pa-newwin" href="<@ AppUrl @>" target="_blank" rel="noopener"><svg class="pa-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg><: New window :></a>
+            </div>
+        </div>
+        <div class="pa-frame-wrap">
+            <iframe class="pa-frame sn-autoheight" data-src="<@ AppUrl @>" title="Adminer"></iframe>
+            <noscript><iframe class="pa-frame pa-fixed" src="<@ AppUrl @>" title="Adminer"></iframe></noscript>
+        </div>
+        <script src="etc/lib/sentora/frame-height.js"></script>
+        <% endif %>
+    </div>
+</div>
+<script>
+(function () {
+    'use strict';
+    var pa = document.getElementById('pa'), frame = pa && pa.querySelector('.pa-frame[data-src]');
+    if (!frame) { return; }
+    // Adminer in the panel's Light or Dark: a cookie for Adminer's folder only, set before it loads
+    // (also for New window); Adminer reads it in adminer-plugins/sentora.php
+    var dark = (getComputedStyle(document.documentElement).colorScheme || '').indexOf('dark') >= 0;
+    var path = new URL(frame.getAttribute('data-src'), window.location.href).pathname;
+    document.cookie = 'sentora_theme=' + (dark ? 'dark' : 'light') + '; path=' + path + '; samesite=lax' + (location.protocol === 'https:' ? '; secure' : '');
+    // The frame grows with each Adminer page (etc/lib/sentora/frame-height.js), so there is no scroll
+    // bar of its own. Each new page starts from a small frame (else a short page after a long one
+    // would keep the long one's height) and, when the page was scrolled past it, shows from its top.
+    var first = true;
+    frame.addEventListener('load', function () {
+        frame.style.height = '480px';
+        if (!first && frame.getBoundingClientRect().top < 0) {
+            frame.scrollIntoView({ block: 'start' });
+        }
+        first = false;
+    });
+    frame.src = frame.getAttribute('data-src');
+})();
+</script>

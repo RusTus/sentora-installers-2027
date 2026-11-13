@@ -1,0 +1,49 @@
+<@ Init @>
+<div class="zmodule_content panel" id="zmodule_header_<@ ModuleName @>">
+    <div class="panel-heading">
+        <img src="<@ ModuleIcon @>" width="35" height="35" border="0" alt="<@ ModuleName @>">
+        <div class="zmodule_title"><@ ModuleName @></div>
+        <div class="zmodule_desc" id="zmodule_desc_<@ ModuleName @>"><@ ModuleDesc @></div>
+    </div>
+    <link rel="stylesheet" href="modules/webalizer_stats/assets/webalizer.css">
+
+    <div class="wz" id="wz">
+        <% if NoDomains %>
+        <div class="wz-card wz-state">
+            <svg class="wz-ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+            <b><: You have no websites yet :></b>
+            <span><: Reports appear here once you add a domain and it has had visitors. :> <a href="./?module=domains"><: Create a new domain :></a></span>
+        </div>
+        <% endif %>
+        <% if Domains %>
+        <div class="wz-card wz-bar">
+            <@ DomainPicker @>
+            <@ ReportInfo @>
+        </div>
+        <% if NotMadeYet %>
+        <div class="wz-card wz-state">
+            <svg class="wz-ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            <b><: This report has not been made yet :></b>
+            <span><: Reports are made every hour from the web server logs, once a site has had visitors. :></span>
+        </div>
+        <% endif %>
+        <div class="wz-frame-wrap"><@ Frame @></div>
+        <p class="wz-note"><: Reports are made every hour from the web server logs. Pick a month in the summary for its daily and hourly figures, top pages, referrers, search terms and browsers. :></p>
+        <% endif %>
+    </div>
+</div>
+<script>
+(function () {
+    'use strict';
+    var wz = document.getElementById('wz'); if (!wz) { return; }
+    // the report in the panel's Light or Dark (the theme is part of its address, so its own links keep it)
+    var dark = (getComputedStyle(document.documentElement).colorScheme || '').indexOf('dark') >= 0;
+    var themed = function (url) { return dark ? url.replace('/report.php/light/', '/report.php/dark/') : url; };
+    var frame = wz.querySelector('.wz-frame');
+    if (frame) { frame.src = themed(frame.getAttribute('src')); }
+    var win = wz.querySelector('.wz-newwin');
+    if (win) { win.href = themed(win.getAttribute('href')); }
+    var reload = wz.querySelector('.wz-reload');
+    if (reload && frame) { reload.addEventListener('click', function () { try { frame.contentWindow.location.reload(); } catch (e) { frame.src = frame.src; } }); }
+})();
+</script>

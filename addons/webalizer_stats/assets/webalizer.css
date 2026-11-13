@@ -1,0 +1,34 @@
+/* Webalizer Stats in the panel's style. Colours come from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto.
+   The report itself is styled by code/report.php (assets/report.css) to match. */
+.wz { --wz-ink: var(--sn-ink, #1f2933); --wz-muted: var(--sn-muted, #6b7785); --wz-line: var(--sn-line, #e6e9ee);
+      --wz-card: var(--sn-card, #ffffff); --wz-bg: var(--sn-soft, #f4f6f9); --wz-field-line: var(--sn-line-strong, #cfd6de);
+      --wz-accent: var(--sn-accent, #447fb3); --wz-accent-soft: var(--sn-accent-soft, #e3edf6);
+      color: var(--wz-ink); background: var(--wz-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.wz * { box-sizing: border-box; }
+.wz [hidden] { display: none !important; }
+.wz-ico { width: 16px; height: 16px; flex: none; }
+.wz-ico-lg { width: 44px; height: 44px; padding: 9px; border-radius: 10px; background: var(--wz-accent-soft); color: var(--wz-accent); }
+.wz-card { background: var(--wz-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 14px 16px; margin-bottom: 14px; }
+.wz-state { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 28px 16px; }
+.wz-state b { font-size: 15px; }
+.wz-state span { color: var(--wz-muted); font-size: 13px; }
+.wz-note { color: var(--wz-muted); font-size: 12px; margin: 10px 2px 0; }
+
+/* the bar: domain, facts and buttons */
+.wz-bar { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
+.wz-pick { display: flex; align-items: center; gap: 10px; margin: 0; flex: 0 1 440px; min-width: 0; }
+.wz-pick label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--wz-muted); white-space: nowrap; }
+.wz-pick label .wz-ico { color: var(--wz-accent); width: 18px; height: 18px; }
+.wz-pick select { flex: 1; min-width: 0; }
+.wz-facts { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 13px; color: var(--wz-ink); }
+.wz-facts b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--wz-muted); }
+.wz-btns { display: flex; gap: 6px; margin-left: auto; }
+.wz-btns .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* the report */
+.wz-frame-wrap { border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,30,40,0.08); background: var(--wz-card); }
+.wz-frame-wrap:empty { display: none; }
+.wz-frame { display: block; width: 100%; height: 900px; border: 0; }
+
+@media (max-width: 640px) { .wz { padding: 12px; } .wz-pick { flex-basis: 100%; } .wz-btns { margin-left: 0; } }

@@ -1,0 +1,38 @@
+<?php
+/**
+ * QuickFig remove step (run as root from the panel's folder, by zppy): its reminders are withdrawn
+ * (nothing would take them away any more) and root's folder (WP-CLI, the background tasks' output)
+ * goes. The backups it kept are the accounts' own files (quickfig-backups in each home folder) and
+ * stay; the WordPress cron tasks it made stay in Cron Manager, where they can be deleted.
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$quickfigRemove = function () {
+    global $zdbh;
+    try {
+        $keys = $zdbh->query("SELECT DISTINCT nt_key_vc FROM x_notices WHERE nt_source_vc = 'quickfig' AND nt_deleted_ts IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($keys as $k) {
+            ctrl_notices::Withdraw((string) $k, 0);
+        }
+        echo "QuickFig: " . count($keys) . " reminder(s) withdrawn.\n";
+    } catch (Exception $e) {
+        echo "QuickFig: reminders not withdrawn (" . $e->getMessage() . ").\n";
+    }
+    $dir = '/var/lib/sentora/quickfig';
+    if (is_dir($dir) && !is_link($dir)) {
+        foreach (array($dir . '/jobs', $dir . '/agents', $dir) as $d) {
+            foreach ((array) @scandir($d) as $f) {
+                if ($f !== '.' && $f !== '..' && (is_file($d . '/' . $f) || is_link($d . '/' . $f))) {
+                    @unlink($d . '/' . $f);
+                }
+            }
+            @rmdir($d);
+        }
+    }
+    echo "QuickFig: removed (the backups in the accounts' quickfig-backups folders and the cron tasks stay).\n";
+};
+$quickfigRemove();

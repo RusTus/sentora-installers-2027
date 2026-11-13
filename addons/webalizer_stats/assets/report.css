@@ -1,0 +1,48 @@
+/* Webalizer's own report pages in the panel's style (put into each page by code/report.php).
+   The report is old HTML with colours in its attributes: these rules override them. The colour
+   of each figure (hits, files, pages...) stays, as a bar under its heading, because the graphs
+   use the same colours. --wz-* are set for Light or Dark by report.php. */
+html { background: var(--wz-bg); color-scheme: var(--wz-scheme); }
+body { background: var(--wz-bg) !important; color: var(--wz-ink) !important; margin: 0; padding: 18px 20px 24px;
+       font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+h2 { font-size: 20px; font-weight: 600; margin: 0 0 2px; color: var(--wz-ink); }
+body > small, body > small strong { color: var(--wz-muted); font-weight: 400; font-size: 12px; }
+hr { border: 0; border-top: 1px solid var(--wz-line); margin: 14px 0 16px; }
+a, a:visited { color: var(--wz-accent) !important; text-decoration: none; }
+a:hover { text-decoration: underline; }
+font { font-size: inherit !important; }
+font[color] { color: inherit !important; }
+th font[color="#C0C0C0" i] { visibility: hidden; }
+
+/* the links to each part of a month's page, as small buttons */
+small > a[href^="#"] { display: inline-block; margin: 2px; padding: 3px 10px; border-radius: 999px; background: var(--wz-soft);
+                     border: 1px solid var(--wz-line); font-size: 12px; }
+small > a[href^="#"]:hover { border-color: var(--wz-accent); text-decoration: none; }
+
+/* graphs: drawn flat on a transparent background (deploy/source/patches/90_sentora_flat_graphs.diff),
+   each in a card like the tables, so they suit Light and Dark alike */
+img { background: var(--wz-card); border: 1px solid var(--wz-line); border-radius: 8px; padding: 10px;
+      box-shadow: 0 1px 3px rgba(20,30,40,0.08); max-width: 100%; height: auto; box-sizing: content-box; }
+
+/* tables as cards */
+table { border-collapse: separate !important; border-spacing: 0 !important; border: 1px solid var(--wz-line) !important;
+        background: var(--wz-card) !important; border-radius: 8px; overflow: hidden; margin: 0 auto 20px;
+        box-shadow: 0 1px 3px rgba(20,30,40,0.08); max-width: 100%; }
+th, td { border: 0 !important; padding: 5px 9px !important; font-size: 12px; color: var(--wz-ink); }
+td { border-top: 1px solid var(--wz-line2) !important; }
+tr:hover > td { background: var(--wz-hover); }
+th { background: var(--wz-head) !important; font-weight: 600; }
+/* Webalizer's 4-pixel spacer rows */
+tr:has(> th[height="4"]:only-child) { display: none; }
+[bgcolor="#C0C0C0" i] { background: var(--wz-head) !important; }
+[bgcolor="#D0D0E0" i] { background: var(--wz-soft) !important; }
+/* the figure colours: a bar under the heading, the cell itself plain. The new palette (webalizer.conf)
+   and Webalizer's own colours, which months made before it keep, both get the new bar colour. */
+[bgcolor="#059669" i], [bgcolor="#00805c" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #059669; }
+[bgcolor="#2563eb" i], [bgcolor="#0040ff" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #2563eb; }
+[bgcolor="#06b6d4" i], [bgcolor="#00e0ff" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #06b6d4; }
+[bgcolor="#eab308" i], [bgcolor="#ffff00" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #eab308; }
+[bgcolor="#f97316" i], [bgcolor="#ff8000" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #f97316; }
+[bgcolor="#ef4444" i], [bgcolor="#ff0000" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #ef4444; }
+[bgcolor="#3b82f6" i], [bgcolor="#0080ff" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #3b82f6; }
+[bgcolor="#22c55e" i], [bgcolor="#00e000" i] { background: var(--wz-card) !important; box-shadow: inset 0 -3px 0 #22c55e; }

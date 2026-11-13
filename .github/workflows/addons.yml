@@ -1,0 +1,49 @@
+# Add-ons: what Repo Browser offers (sentora-repo/*.zpp) must be what is in addons/<name>/ (addons/check.sh:
+# same files, version and SHA256SUMS line), and the add-ons that have tests (tests/<name>/run.sh) pass them,
+# run on their folder. An add-on is changed in its folder and built with addons/build.sh <name>.
+name: Add-ons
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master2027]
+    paths:
+      - addons/**
+      - sentora-repo/**
+      - tests/**
+      - .github/workflows/addons.yml
+  pull_request:
+    paths:
+      - addons/**
+      - sentora-repo/**
+      - tests/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Every .zpp matches its folder
+        run: addons/check.sh
+      - name: Built again, the same zips
+        run: |
+          addons/build.sh $(cd addons && ls -d */ | tr -d /)
+          git diff --stat --exit-code sentora-repo/ || { echo "::error::addons/build.sh gives other zips than the ones in sentora-repo/: build them with addons/build.sh and commit"; exit 1; }
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        addon: [docker_hosting, payment_plans, php_hardening]
+    steps:
+      - uses: actions/checkout@v5
+      - name: PHP for the tests
+        run: php -m | grep -qi sodium && php -m | grep -qi pdo_sqlite || sudo apt-get install -y php-cli php-sqlite3 php-curl
+      - name: Tests of ${{ matrix.addon }}
+        run: bash tests/${{ matrix.addon }}/run.sh "$PWD/addons/${{ matrix.addon }}"

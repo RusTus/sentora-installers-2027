@@ -1,0 +1,65 @@
+/* Apps in the panel's style. Colours come from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto. */
+.ap { --ap-ink: var(--sn-ink, #1f2933); --ap-muted: var(--sn-muted, #6b7785); --ap-line: var(--sn-line, #e6e9ee);
+      --ap-card: var(--sn-card, #ffffff); --ap-bg: var(--sn-soft, #f4f6f9); --ap-accent: var(--sn-accent, #447fb3);
+      --ap-accent-soft: var(--sn-accent-soft, #e3edf6);
+      --ap-ok: var(--sn-ok, #1b7a50); --ap-ok-soft: var(--sn-ok-soft, #e3f5ec);
+      --ap-bad: var(--sn-bad, #b42318); --ap-bad-soft: var(--sn-bad-soft, #fdecea);
+      color: var(--ap-ink); background: var(--ap-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.ap * { box-sizing: border-box; }
+.ap-ico { width: 16px; height: 16px; flex: none; vertical-align: -3px; margin-right: 4px; }
+.ap-muted { color: var(--ap-muted); font-size: 12px; font-weight: normal; }
+.ap-msg { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.ap-msg.is-ok { color: var(--ap-ok); background: var(--ap-ok-soft); }
+.ap-msg.is-bad { color: var(--ap-bad); background: var(--ap-bad-soft); }
+.ap-card { background: var(--ap-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 16px 18px; margin: 0 0 14px; min-width: 0; }
+.ap-card h3 { display: flex; align-items: center; gap: 4px; margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+.ap-card h3 .ap-ico { color: var(--ap-accent); }
+.ap-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.ap-head h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.ap-head .btn { display: inline-flex; align-items: center; }
+.ap-apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+.ap-app { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px 16px; border: 1px solid var(--ap-line); border-radius: 8px; }
+.ap-app p { margin: 0; font-size: 13px; color: var(--ap-muted); line-height: 1.45; flex: 1; }
+.ap-app-head { display: flex; align-items: center; gap: 8px; width: 100%; }
+.ap-app-head b { font-size: 15px; }
+.ap-app-head .ap-muted { margin-left: auto; }
+.ap-logo { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 8px; background: var(--ap-accent-soft); color: var(--ap-accent); flex: none; }
+.ap-logo .ap-ico { width: 20px; height: 20px; margin: 0; }
+.ap-form fieldset { margin: 0 0 14px; padding: 0; border: 0; display: grid; gap: 12px; max-width: 560px; }
+.ap-form legend { width: 100%; margin: 0 0 4px; padding: 0 0 4px; border: 0; border-bottom: 1px solid var(--ap-line); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--ap-muted); }
+.ap-field { display: block; margin: 0; font-weight: normal; }
+.ap-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.ap-field small { display: block; color: var(--ap-muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
+.ap-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--ap-line); }
+.ap-foot small { max-width: 640px; line-height: 1.4; }
+.ap-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.ap-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 0; border-top: 1px solid var(--ap-line); }
+.ap-row:first-child { border-top: 0; }
+.ap-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ap-row-main .ap-muted { overflow-wrap: anywhere; margin-top: 2px; }
+.ap-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ap-actions .btn { display: inline-flex; align-items: center; }
+.ap-inline { display: inline; margin: 0; }
+.ap-row details { flex-basis: 100%; }
+.ap-row summary { cursor: pointer; font-size: 12px; color: var(--ap-muted); }
+.ap-log { max-height: 320px; overflow: auto; margin: 6px 0 0; padding: 10px; font-size: 12px; background: #1f2933; color: #e6e9ee; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ap-pill { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--ap-line); color: var(--ap-muted); white-space: nowrap; vertical-align: 1px; }
+.ap-pill.is-ok { background: var(--ap-ok-soft); color: var(--ap-ok); }
+.ap-pill.is-bad { background: var(--ap-bad-soft); color: var(--ap-bad); }
+.ap-pill.is-run { background: var(--ap-accent-soft); color: var(--ap-accent); }
+@media (max-width: 600px) { .ap { padding: 10px; } .ap-card { padding: 14px; } }
+.ap-note { margin: -4px 0 14px; max-width: 560px; line-height: 1.45; }
+
+/* Deploy from Git */
+.ap-pill.is-warn { background: #fff4e0; color: #a35b00; }
+.ap-check { display: flex; gap: 8px; align-items: flex-start; font-weight: normal; margin: 0 0 8px; }
+.ap-check input { margin-top: 3px; }
+.ap-check span { font-size: 13px; line-height: 1.45; }
+.ap-check small, .ap-check span { color: inherit; }
+.ap-webpath { margin-top: 6px; }
+.ap-git { margin-top: 4px; font-size: 12px; color: var(--ap-muted); overflow-wrap: anywhere; }
+.ap-git code { font-size: 12px; }
+.ap-more { padding-top: 6px; font-size: 13px; }
+.ap-more p { margin: 8px 0 4px; }
+.ap-copy { max-height: none; user-select: all; }

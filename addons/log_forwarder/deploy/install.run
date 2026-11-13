@@ -1,0 +1,42 @@
+<?php
+/**
+ * Log Forwarder install step (run as root from the panel's folder, by zppy or the daemon): rsyslog,
+ * its TLS support and the ACL tools (each system's package command), the module's folders and AppArmor rule file, the destinations
+ * table, and every user group may use it (each account forwards its own logs only).
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+require_once dirname(__FILE__) . '/../code/logforwarder.php';
+
+$logForwarderInstall = function () {
+    global $zdbh;
+    $say = function ($m) { echo "Log Forwarder: " . $m . "\n"; };
+    // rsyslog, its TLS support and the ACL tools, with this system's package command
+    $did = log_forwarder::InstallMissing();
+    if ($did !== '') {
+        $say($did);
+    }
+    log_forwarder::Ensure();
+    foreach (log_forwarder::Setup() as $l) {
+        $say($l . '.');
+    }
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = :g AND pe_module_fk = :m");
+        $add = $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (:g, :m)");
+        foreach ($zdbh->query("SELECT ug_id_pk FROM x_groups")->fetchAll(PDO::FETCH_COLUMN) as $g) {
+            $has->execute(array(':g' => (int) $g, ':m' => $id));
+            if ((int) $has->fetchColumn() === 0) {
+                $add->execute(array(':g' => (int) $g, ':m' => $id));
+            }
+        }
+        $say('available to all user groups; set up destinations in Advanced > Log Forwarder.');
+    }
+};
+$logForwarderInstall();

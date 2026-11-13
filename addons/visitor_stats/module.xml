@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<module>
+    <name>Visitor Stats</name>
+    <version>206</version>
+    <defaultcat>Advanced</defaultcat>
+    <desc>See who has been visiting your websites: visitors per day and month, pages, referrers, search terms, browsers and the busiest hours, made every hour with Visitors 0.7.</desc>
+    <authorname>Sentora-2027 (Visitors 0.7)</authorname>
+    <authoremail></authoremail>
+    <authorurl></authorurl>
+    <updateurl></updateurl>
+</module>

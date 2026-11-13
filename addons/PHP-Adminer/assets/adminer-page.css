@@ -1,0 +1,28 @@
+/* PHP-Adminer's page in the panel's style. Colours come from the theme's shared --sn-* variables
+   (etc/styles/THEMES.md), with these as the fallback, so it follows Light, Dark and Auto.
+   Adminer itself is styled by app/adminer.css and app/adminer-dark.css to match. */
+.pa { --pa-ink: var(--sn-ink, #1f2933); --pa-muted: var(--sn-muted, #6b7785); --pa-line: var(--sn-line, #e6e9ee);
+      --pa-card: var(--sn-card, #ffffff); --pa-bg: var(--sn-soft, #f4f6f9); --pa-accent: var(--sn-accent, #447fb3);
+      --pa-accent-soft: var(--sn-accent-soft, #e3edf6);
+      color: var(--pa-ink); background: var(--pa-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.pa * { box-sizing: border-box; }
+.pa-ico { width: 16px; height: 16px; flex: none; }
+.pa-ico-lg { width: 44px; height: 44px; padding: 9px; border-radius: 10px; background: var(--pa-accent-soft); color: var(--pa-accent); }
+.pa-card { background: var(--pa-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 14px 16px; margin-bottom: 14px; }
+.pa-state { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 28px 16px; }
+.pa-state b { font-size: 15px; }
+.pa-state span { color: var(--pa-muted); font-size: 13px; }
+.pa-links { margin-top: 6px; }
+.pa-bar { display: flex; align-items: center; gap: 12px 22px; flex-wrap: wrap; }
+.pa-say { display: flex; align-items: center; gap: 10px; flex: 1 1 320px; min-width: 0; font-size: 13px; color: var(--pa-muted); }
+.pa-say .pa-ico { color: var(--pa-accent); width: 18px; height: 18px; }
+.pa-facts { display: flex; gap: 6px 18px; font-size: 13px; }
+.pa-facts b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--pa-muted); }
+.pa-btns { display: flex; gap: 6px; }
+.pa-btns .btn { display: inline-flex; align-items: center; gap: 6px; }
+.pa-frame-wrap { border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(20,30,40,0.08); border: 1px solid var(--pa-line); }
+/* the frame grows to fit each Adminer page (the panel page scrolls, not the frame); wide tables
+   scroll sideways in their own area inside Adminer (app/adminer.css) */
+.pa-frame { display: block; width: 100%; height: 480px; border: 0; background: var(--pa-bg); }
+.pa-frame.pa-fixed { height: max(560px, calc(100vh - 250px)); }
+@media (max-width: 640px) { .pa { padding: 12px; } .pa-btns { width: 100%; } }

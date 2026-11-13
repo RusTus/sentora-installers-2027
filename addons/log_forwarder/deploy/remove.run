@@ -1,0 +1,10 @@
+<?php
+/**
+ * Log Forwarder removal (run as root): rsyslog stops forwarding, and the ACLs, CA files and AppArmor
+ * rule file the module made are taken away. The destinations table stays (a reinstall keeps them).
+ *
+ * Written by RusTus, 2026-11-09
+ */
+require_once dirname(__FILE__) . '/../code/logforwarder.php';
+log_forwarder::Remove();
+echo "Log Forwarder: rsyslog no longer forwards; its settings and permissions are removed.\n";

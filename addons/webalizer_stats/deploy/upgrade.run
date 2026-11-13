@@ -1,0 +1,29 @@
+<?php
+/**
+ * Webalizer Stats upgrade step (run by zppy as root, in the panel's folder, after the new files are
+ * in place). The module sets up and repairs what it needs itself:
+ * - removes files an earlier version used and this one does not (its own copy of jQuery);
+ * - builds webalizer again from the bundled source, so a change to its patches (such as the flat
+ *   graphs, deploy/source/patches/90_sentora_flat_graphs.diff) reaches servers that have it already.
+ *   Only the copy this module built (/usr/local/bin) is rebuilt; if the build fails, the program
+ *   that was there stays.
+ *
+ * Written by RusTus, 2026-11-08
+ */
+foreach (array('modules/webalizer_stats/assets/jquery.js', 'modules/webalizer_stats/assets/jquery.autoheight.js') as $webalizerOld) {
+    if (is_file($webalizerOld) && !is_link($webalizerOld)) {
+        unlink($webalizerOld);
+    }
+}
+if (is_executable('/usr/local/bin/webalizer')) {
+    $webalizerSrc = dirname(__FILE__) . '/source';
+    if (is_executable('/usr/bin/apt-get')) {
+        exec('DEBIAN_FRONTEND=noninteractive apt-get -y -q -o DPkg::Lock::Timeout=600 install gcc make patch libgd-dev libpng-dev zlib1g-dev > /dev/null 2>&1');
+    } elseif (is_executable('/usr/bin/dnf')) {
+        exec('dnf -y -q install gcc make patch gd-devel libpng-devel zlib-devel > /dev/null 2>&1');
+    }
+    $webalizerOut = array();
+    exec('bash ' . escapeshellarg($webalizerSrc . '/build-webalizer.sh') . ' ' . escapeshellarg($webalizerSrc) . ' 2>&1', $webalizerOut, $webalizerRc);
+    echo 'Webalizer Stats: ' . ($webalizerRc === 0 ? 'webalizer built again with this version\'s patches: ' . trim((string) end($webalizerOut))
+        : 'the rebuild FAILED, the previous program stays: ' . implode(' | ', array_slice($webalizerOut, -5))) . "\n";
+}

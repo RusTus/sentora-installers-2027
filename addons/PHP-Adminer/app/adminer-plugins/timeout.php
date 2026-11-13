@@ -1,0 +1,76 @@
+<?php
+
+/** Specify a timeout for every query
+* @link https://www.adminer.org/plugins/#use
+* @author Jakub Vrana, https://www.vrana.cz/
+* @license https://www.apache.org/licenses/LICENSE-2.0 Apache License, Version 2.0
+* @license https://www.gnu.org/licenses/gpl-2.0.html GNU General Public License, version 2 (one or other)
+*/
+class AdminerTimeout extends Adminer\Plugin {
+	private $seconds;
+
+	/**
+	* @param int $seconds
+	*/
+	function __construct($seconds = 5) {
+		$this->seconds = $seconds;
+	}
+
+	function afterConnect() {
+		$seconds = Adminer\get_setting("timeout", "adminer_config", $this->seconds);
+		if ($seconds != '') {
+			$ms = $seconds * 1000;
+			$conn = Adminer\connection();
+			switch (Adminer\JUSH) {
+				case 'sql':
+					$conn->query("SET max_execution_time = $ms");
+					break;
+				case 'pgsql':
+					$conn->query("SET statement_timeout = $ms");
+					break;
+				default:
+					if (method_exists($conn, 'timeout')) {
+						$conn->timeout($ms);
+					}
+			}
+		}
+	}
+
+	function config() {
+		$seconds = Adminer\get_setting("timeout", "adminer_config", $this->seconds);
+		return array($this->lang('Query timeout') => '<input type="number" name="config[timeout]" min="0" value="' . Adminer\h($seconds) . '" class="size"> ' . $this->lang('seconds'));
+	}
+
+	protected $translations = array(
+		'cs' => array(
+			'' => 'Nastaví timeout pro spouštění každého dotazu',
+			'Query timeout' => 'Timeout dotazů',
+			'seconds' => 'sekund',
+		),
+		'de' => array(
+			'' => 'Legt ein Timeout für die Ausführung jeder Abfrage fest', // Claude Opus 5
+		),
+		'hr' => array(
+			'' => 'Postavljanje vremenskog ograničenja upita',
+			'Query timeout' => 'Vremensko ograničenje upita',
+			'seconds' => 'sekundi',
+		),
+		'ja' => array(
+			'' => 'すべてのクエリの実行にタイムアウトを設定', // Claude Opus 5
+		),
+		'pl' => array(
+			'' => 'Ustawia limit czasu wykonania każdego zapytania', // Claude Opus 5
+		),
+		'ro' => array(
+			'' => 'Stabilește un timeout pentru executarea fiecărei interogări', // Claude Opus 5
+		),
+		'sk' => array(
+			'' => 'Nastaví timeout pre spúšťanie každého dotazu', // Claude Opus 5
+		),
+		'zh' => array(
+			'' => '为每个查询指定超时', // Claude Opus 5
+			'Query timeout' => '查询超时', // Claude Opus 5
+			'seconds' => '秒', // Claude Opus 5
+		),
+	);
+}

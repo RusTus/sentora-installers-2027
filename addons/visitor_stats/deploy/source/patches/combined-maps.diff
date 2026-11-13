@@ -1,0 +1,18 @@
+Add the number of requests as a title value in combined maps,
+by Alexander Schier <alexander_schier@yahoo.de> (#415235).
+
+---
+ visitors.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/visitors.c
++++ b/visitors.c
+@@ -2291,7 +2291,7 @@
+ 			r = (0xAA*val)/max;
+ 			g = (0xBB*val)/max;
+ 			b = (0xFF*val)/max;
+-			fprintf(fp, "<td style=\"background-color: #%02X%02X%02X;\">&nbsp;</td>\n", r, g, b);
++			fprintf(fp, "<td style=\"background-color: #%02X%02X%02X;\" title=\"%d\">&nbsp;</td>\n", r, g, b, val);
+ 		}
+ 		fprintf(fp, "</tr>\n");
+ 	}

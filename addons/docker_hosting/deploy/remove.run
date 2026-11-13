@@ -1,0 +1,9 @@
+<?php
+/**
+ * Docker Hosting remove step: nothing on the nodes is touched (their containers keep running, and
+ * come back under the panel's control with the add-on); its tables stay. The panel's keys stay too,
+ * so the nodes are still linked when the add-on comes back.
+ *
+ * Written by RusTus, 2026-11-11
+ */
+echo "Docker Hosting: removed from the panel. The containers on the nodes keep running; installing the add-on again brings them back.\n";
