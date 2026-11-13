@@ -1,8 +1,12 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Add-on files are kept byte for byte (their .zpp is built from them and must match them)
+/addons/** -text
+
 # Not part of the release zips (git archive): GitHub-only files, so changing the release
 # workflow does not change the zip and its SHA-256
 /.github export-ignore
 /.gitattributes export-ignore
 /CLAUDE.md export-ignore
+/addons export-ignore
