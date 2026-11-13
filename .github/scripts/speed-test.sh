@@ -105,3 +105,22 @@ for f in $(grep -o '\(href\|src\)="[^"]*\.\(css\|js\)[^"]*"' "$TMP/p.html" | cut
 done
 say ""
 say "The dashboard page asks the browser for $(grep -o '\(href\|src\)="[^"]*\.\(css\|js\|png\|svg\|woff2\?\)[^"]*"' "$TMP/p.html" | wc -l) files."
+
+say ""
+say "The database server (after the test; only what usually matters):"
+st() { qr "SHOW GLOBAL STATUS LIKE '$1'" | awk '{print $2}'; }
+va() { qr "SHOW GLOBAL VARIABLES LIKE '$1'" | awk '{print $2}'; }
+say "  $(qr 'SELECT VERSION()'), up $(st Uptime) s"
+bp=$(va innodb_buffer_pool_size); data=$(qr "SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE engine = 'InnoDB'")
+say "  InnoDB buffer pool: $(( bp / 1048576 )) MB for $(( data / 1048576 )) MB of InnoDB data (all of it fits: $([ "$bp" -gt "$data" ] && echo yes || echo NO))"
+rr=$(st Innodb_buffer_pool_read_requests); rd=$(st Innodb_buffer_pool_reads)
+[ "${rr:-0}" -gt 0 ] && say "  reads served from memory: $(awk -v a="$rr" -v b="$rd" 'BEGIN { printf "%.2f", 100 - 100 * b / a }')% ($rd of $rr read from disk)"
+say "  temporary tables: $(st Created_tmp_tables), on disk $(st Created_tmp_disk_tables) (tmp_table_size $(( $(va tmp_table_size) / 1048576 )) MB)"
+say "  tables opened: $(st Opened_tables), open now $(st Open_tables), table_open_cache $(va table_open_cache)"
+say "  connections: $(st Connections), threads made $(st Threads_created), thread_cache_size $(va thread_cache_size), max used $(st Max_used_connections) of $(va max_connections)"
+say "  slow queries: $(st Slow_queries) (long_query_time $(va long_query_time) s), full table scans (Select_scan): $(st Select_scan), joins without index: $(st Select_full_join)"
+say "  sort merge passes: $(st Sort_merge_passes) (sort_buffer_size $(( $(va sort_buffer_size) / 1024 )) KB)"
+say "  memory on this server: $(free -m | awk '/^Mem:/ {print $2 " MB, " $7 " MB available"}')"
+say ""
+say "Tables of the panel without an index for what is looked up (queries of this test that read every row):"
+qr "SELECT DIGEST_TEXT, COUNT_STAR, SUM_NO_INDEX_USED FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME = 'sentora_core' AND SUM_NO_INDEX_USED > 0 ORDER BY SUM_NO_INDEX_USED DESC LIMIT 15" | cut -c1-220 | sed 's/^/  /' | tee -a "$R"
