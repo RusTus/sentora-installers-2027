@@ -1,0 +1,59 @@
+# Speed test: Sentora is installed as in the install test, then .github/scripts/speed-test.sh times every page of
+# the panel and counts its database queries (see that script). Run by hand (Actions > Speed test), for one system
+# and the core branch to measure, so a change can be compared with master2027. The report is the run's artifact
+# and is also printed in the log.
+name: Speed test
+
+on:
+  workflow_dispatch:
+    inputs:
+      system:
+        description: System (ub26.04 deb13 alma10 rocky10 fedora45)
+        default: ub26.04
+      core_ref:
+        description: Core branch to measure
+        default: master2027
+      installers_ref:
+        description: Installers branch
+        default: master2027
+
+permissions:
+  contents: read
+
+jobs:
+  speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-installers-2027
+          ref: ${{ inputs.installers_ref }}
+          path: installers
+      - uses: actions/checkout@v5
+        with:
+          repository: RusTus/sentora-core-2027
+          ref: ${{ inputs.core_ref }}
+          path: core
+      - name: Runner's AppArmor profiles off (as in the install test)
+        run: |
+          sudo aa-teardown > /dev/null 2>&1 || true
+          sudo systemctl restart docker
+      - name: Install Sentora (${{ inputs.system }})
+        continue-on-error: true   # (a failed check of the install test does not stop the timing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_KEEP: 1
+        run: bash installers/.github/scripts/install-test.sh "${{ inputs.system }}" core installers results
+      - name: Speed test
+        run: |
+          N=sentora-test-${{ inputs.system }}
+          docker cp installers/.github/scripts/speed-test.sh "$N:/root/speed-test.sh"
+          docker exec "$N" bash /root/speed-test.sh /root/speed-test
+          docker cp "$N:/root/speed-test" results/speed-test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speed-test-${{ inputs.system }}
+          path: results/speed-test
+          retention-days: 14
