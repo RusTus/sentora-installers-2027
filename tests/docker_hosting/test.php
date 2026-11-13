@@ -658,7 +658,9 @@ check(strpos($r['text'], 'ok: Linkding was added') !== false, 'the administrator
 $ap = row("SELECT * FROM x_dh_apps");
 check($ap['ap_id_vc'] === 'my-linkding' && $ap['ap_volumes_tx'] === '["\/etc\/linkding\/data"]' && strpos($ap['ap_env_tx'], 'enc1:') === 0 && strpos($ap['ap_env_tx'], 'LD_SECRET') === false, 'kept: its id, folders; its settings encrypted', json_encode($ap));
 $r = req(1, '', array(), array('tab' => 'nodes'));
-check(strpos($r['html'], 'Your own apps') !== false && strpos($r['html'], 'ghcr.io/sissbruecker/linkding:1') !== false && strpos($r['html'], 'your own') !== false && strpos($r['html'], 'LD_SECRET={secret}') !== false, 'listed on Nodes and apps, settings shown to the administrator');
+check(strpos($r['html'], 'Your own apps') !== false && strpos($r['html'], 'ghcr.io/sissbruecker/linkding:1') !== false && strpos($r['html'], 'your own') !== false && strpos($r['html'], 'app=my-linkding') !== false && strpos($r['html'], 'LD_SECRET={secret}') === false, 'listed on Nodes and apps as a row with Change (its settings stay closed)');
+$r = req(1, '', array(), array('tab' => 'nodes', 'app' => 'my-linkding'));
+check(strpos($r['html'], 'LD_SECRET={secret}') !== false && strpos($r['html'], 'class="dh-more"><form class="dh-appform"') !== false, 'Change opens its form under the row, settings shown to the administrator');
 $r = req(1, 'App', $own);
 check(strpos($r['text'], 'ok:') !== false && (int) val("SELECT COUNT(*) FROM x_dh_apps WHERE ap_id_vc = 'my-linkding-2'") === 1, 'the same name again gets its own id');
 $r = req(1, 'AppRemove', array('inId' => 'my-linkding-2'));
