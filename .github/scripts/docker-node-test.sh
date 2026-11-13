@@ -252,13 +252,15 @@ for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it after the restore" || bad "after the restore: HTTP $C"
 
 say "A private image: downloaded with a registry login, which does not stay on the node"
-# (a registry with a password on the node itself, as root; the customer's user downloads from it over 127.0.0.1)
+# (a registry with a password on the node itself, as root, on the node's own network (no port forwarding) and with root's own
+# simple storage (vfs: overlay is not possible inside the test's container); the customer's user downloads from it over 127.0.0.1)
 in_box 'mkdir -p /root/regauth /etc/containers/registries.conf.d && php -r "echo \"bot:\", password_hash(\"pw-reg-123\", PASSWORD_BCRYPT), \"\\n\";" > /root/regauth/htpasswd
   printf "[[registry]]\nlocation = \"127.0.0.1:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/90-sentora-test.conf
-  podman run -d --name testreg -p 127.0.0.1:5000:5000 -v /root/regauth:/auth:Z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=test -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd docker.io/library/registry:2 > /dev/null
-  podman create --name testweb docker.io/library/busybox:1 > /dev/null && podman commit -q --change "CMD [\"busybox\", \"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/etc\"]" testweb 127.0.0.1:5000/private/web:1 > /dev/null
+  RP="podman --storage-driver vfs"
+  $RP run -d --name testreg --network host -e REGISTRY_HTTP_ADDR=127.0.0.1:5000 -v /root/regauth:/auth:Z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=test -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd docker.io/library/registry:2 > /dev/null
+  $RP create --name testweb docker.io/library/busybox:1 > /dev/null && $RP commit -q --change "CMD [\"busybox\", \"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/etc\"]" testweb 127.0.0.1:5000/private/web:1 > /dev/null
   for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:5000/v2/ && break; sleep 1; done
-  podman push -q --tls-verify=false --creds bot:pw-reg-123 127.0.0.1:5000/private/web:1' 2>&1 | tail -3
+  $RP push -q --tls-verify=false --creds bot:pw-reg-123 127.0.0.1:5000/private/web:1' 2>&1 | tail -3
 if in_box 'curl -s -u bot:pw-reg-123 http://127.0.0.1:5000/v2/_catalog' | grep -q private/web; then
     ok "a registry with a login on the node holds 127.0.0.1:5000/private/web:1"
     in_box 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/v2/_catalog' | grep -qx 401 && ok "(it refuses a download without the login)" || bad "the test registry answers without a login"
@@ -277,9 +279,9 @@ if in_box 'curl -s -u bot:pw-reg-123 http://127.0.0.1:5000/v2/_catalog' | grep -
     panel act "$PID" delete > /dev/null
     wait_for 180 bash -c "php '$T/node_real.php' state $PID | grep -x deleted" > /dev/null || bad "private app not deleted"
 else
-    bad "the test registry did not start: $(in_box 'podman logs testreg 2>&1 | tail -5')"
+    bad "the test registry did not start: $(in_box 'podman --storage-driver vfs logs testreg 2>&1 | tail -5')"
 fi
-in_box 'podman rm -f testreg testweb > /dev/null 2>&1; rm -f /etc/containers/registries.conf.d/90-sentora-test.conf' || true
+in_box 'podman --storage-driver vfs rm -f testreg testweb > /dev/null 2>&1; rm -f /etc/containers/registries.conf.d/90-sentora-test.conf' || true
 
 say "Restarting the node"
 docker restart "$NAME" > /dev/null
