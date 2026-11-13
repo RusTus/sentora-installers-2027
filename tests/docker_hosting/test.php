@@ -543,8 +543,29 @@ check(!is_file(getenv('DH_MAIL')), 'not again on the next run (only again after 
 $nt = json_decode((string) @file_get_contents(getenv('DH_W') . '/notices.json'), true);
 $n1 = isset($nt['docker-hosting-node-1']) && is_array($nt['docker-hosting-node-1']) ? $nt['docker-hosting-node-1'] : array();
 check($n1 && $n1['scope'] === 'groups' && $n1['targets'] === array(1) && $n1['type'] === 'warning' && strpos($n1['title'], 'node "node1" needs a look') !== false
-    && strpos($n1['body'], '- Security updates waiting') !== false && strpos($n1['body'], '- Needs a restart') !== false && strpos($n1['body'], '(./?module=docker_hosting&tab=nodes)') !== false
+    && strpos($n1['body'], '- Almost out of disk') !== false && strpos($n1['body'], '(./?module=docker_hosting&tab=nodes)') !== false
     && strpos($n1['body'], 'GB free') === false, 'a panel notice to the administrators (group 1), without figures that change, with the link to Nodes and apps', json_encode($nt));
+check(strpos($n1['body'], 'ecurity updates') === false && strpos($n1['body'], 'restart') === false, '(134) only urgent things are panel notices: updates and a restart are in the widget and on the page', $n1['body']);
+// (134) the dashboard widget: put where the panel finds uploaded widgets, and drawn for each account
+$pr = getenv('DH_W') . '/panelroot';
+@mkdir($pr . '/modules/dashboard/code', 0755, true);
+file_put_contents($pr . '/modules/dashboard/code/widgets.php', "<?php\n");
+@symlink($T . '/root/modules/docker_hosting', $pr . '/modules/docker_hosting');
+$zdbh->prepare("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('sentora_root', :r)")->execute(array(':r' => $pr . '/'));
+$d = daemon();
+$wd = $pr . '/etc/dashboard-widgets/docker_hosting';
+check(is_file($wd . '/widget.xml') && is_file($wd . '/widget.php') && is_file($wd . '/widget.css') && strpos($d, 'dashboard widget was put in place') !== false, 'the add-on puts its dashboard widget where the panel finds it', $d);
+check(strpos(daemon(), 'dashboard widget') === false, 'and leaves it alone while it is the same');
+if (!class_exists('dashboard_widgets')) {
+    eval('class dashboard_widgets { static function CanOpen($u, $f) { return true; } }');
+}
+require_once $wd . '/widget.php';
+$wa = dashboard_widget_docker_hosting::Render(array('userid' => 1, 'usergroupid' => 1));
+check(strpos($wa, '>Nodes<') !== false && strpos($wa, 'node1') !== false && strpos($wa, 'low on disk +2') !== false && strpos($wa, 'label-danger') !== false && strpos($wa, 'tab=nodes') !== false, 'the widget: an administrator sees each node and, in a word or two, what needs a look (the most urgent first, in red)', $wa);
+$wc = dashboard_widget_docker_hosting::Render(array('userid' => 3, 'usergroupid' => 3));
+check(strpos($wc, '>Nodes<') === false && strpos($wc, 'My apps') !== false && strpos($wc, 'running') !== false && strpos($wc, 'node1') === false, 'a client sees only its own apps', $wc);
+$w4 = dashboard_widget_docker_hosting::Render(array('userid' => 4, 'usergroupid' => 3));
+check(strpos($w4, (string) val("SELECT dc_domain_vc FROM x_dh_containers WHERE dc_acc_fk = 3 AND dc_deleted_in IS NULL LIMIT 1")) === false, 'nobody sees another account\'s apps', $w4);
 $info = json_decode((string) val("SELECT nd_info_tx FROM x_dh_nodes WHERE nd_id_pk = 1"), true);
 $keep = $info;
 $info['disk_free_mb'] = $info['disk_total_mb'] = 900000; $info['sys_security'] = 0; $info['sys_reboot'] = 0;
@@ -591,7 +612,7 @@ daemon();
 check(strpos($ntx(), 'Runs agent') === false, '(131) with Nightly node updates on, the panel notice does not mention the newer agent (it installs itself)', $ntx());
 req(1, 'NodeAct', array('inId' => '1', 'inWhat' => 'autoagent', 'inAutoagent' => '0'));
 daemon();
-check(strpos($ntx(), 'Runs agent') !== false, '(131) switched off, it does', $ntx());
+check(strpos($ntx(), 'Runs agent') === false, '(134) switched off, it is in the widget and on the page, not a notice either', $ntx());
 $d = shell_exec('DH_TEST_HOUR=2 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1');
 check(strpos((string) $d, 'updates to agent') === false, 'switched off, it waits for "Update now"');
 check((int) $zdbh->query("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_action_vc = 'node-update' AND jb_state_vc = 'queued'")->fetchColumn() === 0, 'and nothing is queued');
