@@ -20,6 +20,9 @@
 //   node_real.php found <cid> <column>  a column of an app on the found list ('none' when it is not there)
 //   node_real.php adopt <cid> <acc>     give a found app to an account (as Uptime Kuma)
 //   node_real.php domainto <acc>        example.test belongs to this account now
+//   node_real.php backup <id>           back the app up now (as client1)
+//   node_real.php restore <id>          put its newest backup back (as client1)
+//   node_real.php backupstate <id>      its newest backup's state, size and note
 set_error_handler(function ($no, $str, $file, $line) {
     fwrite(STDERR, "PHP problem: $str in $file:$line\n");
     exit(3);
@@ -34,7 +37,7 @@ switch ($a[1]) {
     case 'init':
         $zdbh->exec("INSERT INTO x_groups (ug_id_pk) VALUES (1), (2), (3)");
         $zdbh->exec("INSERT INTO x_modules (mo_folder_vc, mo_name_vc, mo_enabled_en) VALUES ('docker_hosting', 'Docker Hosting', 'true')");
-        $zdbh->exec("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('dns_hasupdates', '')");
+        $zdbh->exec("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('dns_hasupdates', ''), ('offsite_enabled', 'true'), ('offsite_time', '02:30')");
         $zdbh->exec("INSERT INTO x_accounts (ac_id_pk, ac_user_vc, ac_reseller_fk, ac_group_fk) VALUES (1, 'zadmin', 1, 1), (2, 'res1', 1, 2), (3, 'client1', 2, 3), (4, 'client2', 2, 3)");
         $zdbh->exec("INSERT INTO x_vhosts (vh_id_pk, vh_acc_fk, vh_name_vc) VALUES (10, 3, 'example.test')");
         $zdbh->exec("INSERT INTO x_dns (dn_acc_fk, dn_name_vc, dn_vhost_fk, dn_type_vc, dn_host_vc, dn_ttl_in, dn_target_vc) VALUES (3, 'example.test', 10, 'A', '@', 3600, '192.0.2.1')");
@@ -53,6 +56,18 @@ switch ($a[1]) {
         break;
     case 'settings':
         echo dh::SetNodeSettings(1, $a[2], $a[3] === '1', 1) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'backup':
+        echo dh_backup::Start((int) $a[2], 3) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'restore':
+        echo dh_backup::Restore((int) $a[2], 3) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
+    case 'backupstate':
+        $q = $zdbh->prepare("SELECT * FROM x_dh_backups WHERE bk_ct_fk = :c AND bk_kind_vc = 'backup' ORDER BY bk_id_pk DESC LIMIT 1");
+        $q->execute(array(':c' => (int) $a[2]));
+        $b = $q->fetch(PDO::FETCH_ASSOC);
+        echo $b ? $b['bk_state_vc'] . ' ' . $b['bk_size_bi'] . ' bytes ' . $b['bk_note_vc'] . "\n" : "none\n";
         break;
     case 'forget':
         $zdbh->exec("DELETE FROM x_dh_containers WHERE dc_id_pk = " . (int) $a[2]);

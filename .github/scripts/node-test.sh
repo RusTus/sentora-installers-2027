@@ -39,6 +39,8 @@ say "Stand-in panel with the add-on"
 W=$(mktemp -d)
 rm -rf "$T/root/modules"; mkdir -p "$T/root/modules"; cp -r "$MOD" "$T/root/modules/docker_hosting"
 export DH_DB="$W/panel.sqlite"
+# (app backups need a Sentora backup server for the off-server backup: the stand-in says it has one)
+export DH_BACKUP_DIR="$W/dhbackups" DH_OFFSITE_STATE="$W/offsite.json"; echo '{"gate":1}' > "$W/offsite.json"
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 php -d display_errors=stderr -d error_reporting=-1 -S "$GW:18092" -t "$T/root" > "$OUT/panel-web.log" 2>&1 &
 WEB=$!
@@ -232,6 +234,22 @@ M=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob move | grep -E '^(done 
 sleep 2; S=$(panel state "$CID")
 [[ "$S" == running* ]] && [ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | tr -d '\r')" = "kept-$CID" ] && ok "moved back to client1, data kept" || { bad "back: $S / $(panel lastjob move)"; diag; }
 in_box 'ls /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left in the work folders" || bad "copies left: $(in_box 'ls -la /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>&1')"
+
+say "App backups: backed up to the panel, changed, put back"
+podu sdh3 "exec sdh-$CID sh -c 'echo before-backup > /app/data/sentora-backup.txt'"
+panel backup "$CID" | grep -qx ok || bad "backup refused: $(panel backup "$CID")"
+B=$(wait_for 600 bash -c "php '$T/node_real.php' backupstate $CID | grep -E '^(stored|failed)'"); echo "  $B"
+[[ "$B" == stored* ]] && ok "backed up to the panel: $B" || { bad "backup: $B / $(panel state "$CID")"; diag; }
+wait_for 120 state_is "$CID" running > /dev/null && ok "the app runs again after its backup" || bad "not running after the backup: $(panel state "$CID")"
+podu sdh3 "exec sdh-$CID sh -c 'echo after-backup > /app/data/sentora-backup.txt'"
+panel restore "$CID" | grep -qx ok || bad "restore refused: $(panel restore "$CID")"
+R=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob restore | grep -E '^(done|failed)'"); echo "  $R"
+wait_for 120 state_is "$CID" running > /dev/null
+[ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-backup.txt" | tr -d '\r')" = before-backup ] && [[ "$R" == done* ]] && ok "put back: the app runs with the backup's data" || { bad "restore: $R / $(panel state "$CID")"; diag; }
+podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | grep -qx "kept-$CID" && ok "(and the data it had then)" || bad "the restore lost data"
+in_box 'ls /home/sdh3/.sentora-move /var/lib/sentora-node/transfer 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left on the node" || bad "copies left: $(in_box 'ls -laR /home/sdh3/.sentora-move /var/lib/sentora-node/transfer 2>&1')"
+for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "Caddy serves it after the restore" || bad "after the restore: HTTP $C"
 
 say "Restarting the node"
 docker restart "$NAME" > /dev/null

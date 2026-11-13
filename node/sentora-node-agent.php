@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '110';
+    const VERSION = '111';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -511,7 +511,7 @@ class snode
         if (isset($d['mem']) && (!is_int($d['mem']) || $d['mem'] < 16 || $d['mem'] > 4194304)) {
             return 'bad memory';
         }
-        if ($action === 'create' || $action === 'update' || $action === 'recreate' || $action === 'move') {
+        if ($action === 'create' || $action === 'update' || $action === 'recreate' || $action === 'move' || $action === 'restore') {
             if (!isset($d['image']) || !is_string($d['image']) || strlen($d['image']) > 255
                 || !preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+(:[A-Za-z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$#', $d['image'])) {
                 return 'bad image';
@@ -878,6 +878,10 @@ class snode
                 return self::Inspect($d, $s);
             case 'move':
                 return self::Move($d, $s);
+            case 'backup':
+                return self::Backup($d, $s);
+            case 'restore':
+                return self::Restore($d, $s);
             case 'delete':
                 if (self::Uid($d['user']) >= 0) {
                     $r = self::Podman($d['user'], array('rm', '--force', '--time', '10', '--ignore', $name), 300);
@@ -1337,6 +1341,431 @@ class snode
         }
         $px = self::Proxy($s);
         return $px === '' ? array(true, 'moved to ' . $u . ' as ' . $name . ', with its data') : array(false, $px);
+    }
+
+    // ----- app backups, restores and moves (agent 111) -----
+    // An app's data folders go to the panel in pieces (the panel's sealed messages carry at most 4 MB) and
+    // come back the same way: nodes never talk to each other, and nothing on a node is opened for the panel.
+
+    /** One piece of a backup on its way to or from the panel. */
+    const PIECE = 2097152;
+
+    /** A sealed message to the panel outside the poll (a piece of a backup), or null. */
+    static function Tell($type, array $data)
+    {
+        $cfg = self::$cfg;
+        $sk = self::Bin($cfg['sign_sk'], SODIUM_CRYPTO_SIGN_SECRETKEYBYTES);
+        $kp = self::Bin($cfg['box_kp'], SODIUM_CRYPTO_BOX_KEYPAIRBYTES);
+        return self::Call(self::Msg($type, $cfg['node'], $data), $sk, $kp, $cfg);
+    }
+
+    /** Root's own work folder for one backup (customers can not reach it). */
+    static function TransferDir($token)
+    {
+        @mkdir(self::$state . '/transfer', 0700, true);
+        @chmod(self::$state . '/transfer', 0700);
+        $p = self::$state . '/transfer/' . $token;
+        @mkdir($p, 0700, true);
+        return $p;
+    }
+
+    /** The user's own work folder (it reads and writes only its own). */
+    static function UserDir($user)
+    {
+        $p = self::$home . '/' . $user . '/.sentora-move';
+        if (!is_dir($p)) {
+            @mkdir($p, 0700, true);
+        }
+        @chown($p, $user);
+        @chmod($p, 0700);
+        return $p;
+    }
+
+    static function Wipe($dir)
+    {
+        foreach ((array) glob($dir . '/*') as $f) {
+            @unlink($f);
+        }
+        @rmdir($dir);
+    }
+
+    static function Pause($s)
+    {
+        $w = getenv('SNODE_RETRY_WAIT');
+        sleep($w !== false ? (int) $w : $s);
+    }
+
+    /** Whether a transfer's details are sound: '' or what is wrong. */
+    static function CheckTransfer(array $d, $withFiles)
+    {
+        if (!isset($d['token']) || !is_string($d['token']) || !preg_match('/^[a-f0-9]{32}$/', $d['token'])) {
+            return 'bad transfer';
+        }
+        if (!$withFiles) {
+            return '';
+        }
+        if (!isset($d['files']) || !is_array($d['files']) || !isset($d['volumes']) || count($d['files']) !== count($d['volumes'])) {
+            return 'bad files';
+        }
+        foreach (array_values($d['files']) as $i => $f) {
+            if (!is_array($f) || !isset($f['name'], $f['size'], $f['sha']) || $f['name'] !== 'v' . $i . '.tar.gz' || !is_int($f['size']) || $f['size'] < 1
+                || !is_string($f['sha']) || !preg_match('/^[a-f0-9]{64}$/', $f['sha'])) {
+                return 'bad files';
+            }
+        }
+        return '';
+    }
+
+    /** Send one file to the panel, piece by piece: '' or what went wrong. */
+    static function Upload($token, $file, $path)
+    {
+        $size = (int) filesize($path);
+        $sha = hash_file('sha256', $path);
+        $fh = fopen($path, 'rb');
+        if (!$fh) {
+            return 'the copy could not be read';
+        }
+        $off = 0;
+        $tries = 0;
+        $end = time() + 6 * 3600;
+        while (time() < $end) {
+            fseek($fh, $off);
+            $piece = $off < $size ? (string) fread($fh, self::PIECE) : '';
+            $r = self::Tell('put', array('token' => $token, 'file' => $file, 'offset' => $off, 'size' => $size, 'sha' => $sha, 'data' => base64_encode($piece)));
+            $d = $r && isset($r['data']) && is_array($r['data']) ? $r['data'] : null;
+            if (!$d) {
+                if (++$tries > 10) {
+                    fclose($fh);
+                    return 'the panel did not take the copy';
+                }
+                self::Pause(min(60, 5 * $tries));
+                continue;
+            }
+            if (isset($d['stop'])) {
+                fclose($fh);
+                return 'the panel stopped it: ' . substr((string) $d['stop'], 0, 200);
+            }
+            if (isset($d['busy'])) {
+                self::Pause(max(5, min(120, (int) $d['busy'])));
+                continue;
+            }
+            $tries = 0;
+            if (!empty($d['done'])) {
+                fclose($fh);
+                return '';
+            }
+            if (!isset($d['have']) || !is_int($d['have']) || $d['have'] < 0 || $d['have'] > $size) {
+                fclose($fh);
+                return 'the panel answered oddly';
+            }
+            $off = $d['have'];
+        }
+        fclose($fh);
+        return 'the copy took too long';
+    }
+
+    /** Fetch one file from the panel, piece by piece, and check it: '' or what went wrong. */
+    static function Download($token, array $f, $path)
+    {
+        $fh = fopen($path, 'wb');
+        if (!$fh) {
+            return 'no room for the copy';
+        }
+        $off = 0;
+        $tries = 0;
+        $end = time() + 6 * 3600;
+        while ($off < $f['size']) {
+            if (time() > $end) {
+                fclose($fh);
+                return 'the copy took too long';
+            }
+            $r = self::Tell('get', array('token' => $token, 'file' => $f['name'], 'offset' => $off));
+            $d = $r && isset($r['data']) && is_array($r['data']) ? $r['data'] : null;
+            if (!$d) {
+                if (++$tries > 10) {
+                    fclose($fh);
+                    return 'the panel did not hand the copy over';
+                }
+                self::Pause(min(60, 5 * $tries));
+                continue;
+            }
+            if (isset($d['stop'])) {
+                fclose($fh);
+                return 'the panel stopped it: ' . substr((string) $d['stop'], 0, 200);
+            }
+            if (isset($d['busy'])) {
+                self::Pause(max(5, min(120, (int) $d['busy'])));
+                continue;
+            }
+            $bin = isset($d['data']) && is_string($d['data']) ? base64_decode($d['data'], true) : false;
+            if ($bin === false || $bin === '' || strlen($bin) > self::PIECE || $off + strlen($bin) > $f['size']) {
+                fclose($fh);
+                return 'a piece of the copy did not arrive whole';
+            }
+            fwrite($fh, $bin);
+            $off += strlen($bin);
+            $tries = 0;
+        }
+        fclose($fh);
+        clearstatcache();
+        if ((int) filesize($path) !== $f['size'] || hash_file('sha256', $path) !== $f['sha']) {
+            return 'the copy did not arrive whole (its checksum differs)';
+        }
+        return '';
+    }
+
+    /**
+     * Back an app's data up to the panel: the app stops while its data folders are read (so the copy is
+     * whole), then runs again (for a move, it stays stopped until the panel says how the move went).
+     * [ok, JSON of the files sent, the exact version it runs and whether it ran]
+     */
+    static function Backup(array $d, array &$s)
+    {
+        $key = (string) $d['cid'];
+        if (!isset($s['containers'][$key])) {
+            return array(false, 'no such container here');
+        }
+        $bad = self::CheckTransfer($d, false);
+        if ($bad !== '') {
+            return array(false, 'refused: ' . $bad);
+        }
+        $u = $d['user'];
+        $name = self::Name($d['cid']);
+        $n = (int) $s['containers'][$key]['volumes'];
+        $dir = self::TransferDir($d['token']);
+        $ud = self::UserDir($u);
+        $st = self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name));
+        if ($st[0] !== 0) {
+            return array(false, 'no such container here');
+        }
+        $was = trim($st[1]);
+        $id = trim(self::Podman($u, array('container', 'inspect', '--format', '{{.Image}}', $name))[1]);
+        $ref = '';
+        $rd = self::Podman($u, array('image', 'inspect', '--format', '{{json .RepoDigests}}', $id), 60);
+        $list = json_decode(trim($rd[1]), true);
+        foreach (is_array($list) ? $list : array() as $x) {
+            if (is_string($x) && strlen($x) <= 255 && preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$#', $x)) {
+                $ref = $x;
+                break;
+            }
+        }
+        $keepStopped = !empty($d['move']);
+        if ($was === 'running') {
+            self::Podman($u, array('stop', '--time', '20', $name), 120);
+        }
+        $files = array();
+        $err = '';
+        for ($i = 0; $i < $n; $i++) {
+            $tmp = $ud . '/b-' . $d['token'] . '-' . $i . '.tar';
+            @unlink($tmp);
+            $r = self::Podman($u, array('volume', 'export', '--output', $tmp, $name . '-' . $i), 3600);
+            $to = $dir . '/v' . $i . '.tar';
+            clearstatcache();
+            if ($r[0] !== 0 || is_link($tmp) || !is_file($tmp) || !@rename($tmp, $to)) {
+                @unlink($tmp);
+                $err = 'data folder ' . $i . ' could not be read (' . self::Tail($r[1]) . ')';
+                break;
+            }
+            @chown($to, 0);
+            $g = self::Run(array('gzip', '-1', '-f', $to), null, 3600);
+            if ($g[0] !== 0 || !is_file($to . '.gz')) {
+                $err = 'data folder ' . $i . ' could not be packed (' . self::Tail($g[1]) . ')';
+                break;
+            }
+            $files[] = array('name' => 'v' . $i . '.tar.gz', 'path' => $to . '.gz');
+        }
+        // the app runs again as soon as its data is read (a move: only when the panel says so)
+        if ($was === 'running' && ($err !== '' || !$keepStopped)) {
+            self::Podman($u, array('start', $name));
+        } elseif ($keepStopped) {
+            $s['containers'][$key]['stopped'] = 1;
+            self::SaveState($s);
+        }
+        if ($err !== '') {
+            self::Wipe($dir);
+            return array(false, $err);
+        }
+        $out = array();
+        foreach ($files as $f) {
+            $size = (int) filesize($f['path']);
+            $sha = hash_file('sha256', $f['path']);
+            $e = self::Upload($d['token'], $f['name'], $f['path']);
+            if ($e !== '') {
+                self::Wipe($dir);
+                if ($keepStopped && $was === 'running') {
+                    unset($s['containers'][$key]['stopped']);
+                    self::SaveState($s);
+                    self::Podman($u, array('start', $name));
+                }
+                return array(false, $e);
+            }
+            $out[] = array('name' => $f['name'], 'size' => $size, 'sha' => $sha);
+        }
+        self::Wipe($dir);
+        return array(true, json_encode(array('files' => $out, 'image' => $ref, 'was' => $was)));
+    }
+
+    /**
+     * Put a backup back: over the app's own data (today's data is kept aside and put back when anything
+     * fails), or as a new app on this node (a move: the same version, by its digest). [ok, output]
+     */
+    static function Restore(array $d, array &$s)
+    {
+        $bad = self::CheckTransfer($d, true);
+        if ($bad !== '') {
+            return array(false, 'refused: ' . $bad);
+        }
+        $key = (string) $d['cid'];
+        $u = $d['user'];
+        $name = self::Name($d['cid']);
+        $here = isset($s['containers'][$key]);
+        $n = count($d['volumes']);
+        $catalogImage = $d['image'];
+        if ($here && (int) $s['containers'][$key]['volumes'] !== $n) {
+            return array(false, 'refused: the app has ' . (int) $s['containers'][$key]['volumes'] . ' data folders, the backup ' . $n);
+        }
+        if (!$here) {
+            foreach ($s['containers'] as $k => $c) {
+                if ((int) $c['hostport'] === $d['hostport']) {
+                    return array(false, 'refused: port ' . $d['hostport'] . ' is taken');
+                }
+            }
+            if (self::Podman($u, array('container', 'exists', $name))[0] === 0) {
+                return array(false, 'refused: ' . $name . ' is already here');
+            }
+            $e = self::EnsureUser($u);
+            if ($e !== '') {
+                return array(false, $e);
+            }
+            $fe = self::Fence();
+            if ($fe !== '') {
+                self::Out($fe);
+            }
+        }
+        $dir = self::TransferDir($d['token']);
+        $ud = self::UserDir($u);
+        $tars = array();
+        $clean = function () use ($dir, &$tars) {
+            foreach ($tars as $t) {
+                @unlink($t);
+            }
+            self::Wipe($dir);
+        };
+        // 1. the copy, checked
+        foreach (array_values($d['files']) as $i => $f) {
+            $p = $dir . '/' . $f['name'];
+            $e = self::Download($d['token'], $f, $p);
+            if ($e === '') {
+                $g = self::Run(array('gzip', '-d', '-f', $p), null, 3600);
+                $e = $g[0] === 0 && is_file($dir . '/v' . $i . '.tar') ? '' : 'the copy could not be unpacked (' . self::Tail($g[1]) . ')';
+            }
+            $t = $ud . '/r-' . $d['token'] . '-' . $i . '.tar';
+            if ($e === '' && !@rename($dir . '/v' . $i . '.tar', $t)) {
+                $e = 'no room to unpack the copy';
+            }
+            if ($e !== '') {
+                $clean();
+                return array(false, $e);
+            }
+            @chown($t, $u);
+            @chmod($t, 0600);
+            $tars[] = $t;
+        }
+        // 2. the version: the one the app runs (here), or the same one again (a move)
+        $was = '';
+        if ($here) {
+            $id = trim(self::Podman($u, array('container', 'inspect', '--format', '{{.Image}}', $name))[1]);
+            if (!preg_match('/^(sha256:)?[A-Za-z0-9._-]{3,128}$/', $id)) {
+                $clean();
+                return array(false, 'the version the app runs could not be read');
+            }
+            $d['image'] = $id;
+            $was = trim(self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name))[1]);
+        } else {
+            $ref = isset($d['image_ref']) && is_string($d['image_ref']) && preg_match('#^[a-z0-9.-]+(:\d{1,5})?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$#', $d['image_ref']) ? $d['image_ref'] : '';
+            $pull = $ref !== '' ? self::Podman($u, array('pull', '--quiet', $ref), 1800) : array(1, '');
+            if ($pull[0] === 0) {
+                $d['image'] = $ref;
+            } else {
+                $pull = self::Podman($u, array('pull', '--quiet', $d['image']), 1800);
+                if ($pull[0] !== 0) {
+                    $clean();
+                    return array(false, 'pull: ' . self::Tail($pull[1]));
+                }
+            }
+            $was = 'running';
+        }
+        // 3. today's data kept aside (an app restored in place)
+        $safe = array();
+        if ($here) {
+            self::Podman($u, array('stop', '--time', '20', $name), 120);
+            for ($i = 0; $i < $n; $i++) {
+                $t = $ud . '/s-' . $d['token'] . '-' . $i . '.tar';
+                @unlink($t);
+                $r = self::Podman($u, array('volume', 'export', '--output', $t, $name . '-' . $i), 3600);
+                if ($r[0] !== 0) {
+                    $clean();
+                    if ($was === 'running') {
+                        self::Podman($u, array('start', $name));
+                    }
+                    return array(false, 'today\'s data (folder ' . $i . ') could not be kept aside, so nothing was changed (' . self::Tail($r[1]) . ')');
+                }
+                $safe[] = $t;
+                $tars[] = $t;
+            }
+        }
+        // 4. the data folders made anew from a set of copies, and the app with them
+        $build = function (array $from, $start) use ($u, $name, $n, $d) {
+            self::Podman($u, array('rm', '--force', '--ignore', $name), 300);
+            for ($i = 0; $i < $n; $i++) {
+                self::Podman($u, array('volume', 'rm', '--force', $name . '-' . $i));
+                $r = self::Podman($u, array('volume', 'create', $name . '-' . $i));
+                if ($r[0] === 0) {
+                    $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, $from[$i]), 3600);
+                }
+                if ($r[0] !== 0) {
+                    return 'data folder ' . $i . ' could not be put back (' . self::Tail($r[1]) . ')';
+                }
+            }
+            $r = self::Podman($u, self::CreateArgs($d, $name));
+            if ($r[0] !== 0) {
+                return 'create: ' . self::Tail($r[1]);
+            }
+            if (!$start) {
+                return '';
+            }
+            $r = self::Podman($u, array('start', $name));
+            if ($r[0] !== 0) {
+                return 'start: ' . self::Tail($r[1]);
+            }
+            sleep((int) (getenv('SNODE_UPDATE_WAIT') !== false ? getenv('SNODE_UPDATE_WAIT') : 20));
+            $st = trim(self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name))[1]);
+            return $st === 'running' ? '' : 'it stopped after starting (' . $st . ')';
+        };
+        $e = $build($tars, $was === 'running');
+        if ($e !== '') {
+            if ($here) {
+                $e2 = $build($safe, $was === 'running');
+                $clean();
+                return array(false, $e . ($e2 === '' ? ': the app runs with its data from before the restore' : '; putting its data back failed too: ' . $e2));
+            }
+            self::Podman($u, array('rm', '--force', '--ignore', $name), 300);
+            for ($i = 0; $i < $n; $i++) {
+                self::Podman($u, array('volume', 'rm', '--force', $name . '-' . $i));
+            }
+            $clean();
+            return array(false, $e . ': nothing was left on this node');
+        }
+        $clean();
+        if (!$here) {
+            $s['containers'][$key] = array('user' => $u, 'domain' => $d['domain'], 'hostport' => $d['hostport'], 'public' => (int) $d['public'],
+                'auth' => (string) $d['auth'], 'volumes' => $n, 'image' => $catalogImage);
+        } elseif ($was === 'running') {
+            unset($s['containers'][$key]['stopped']);
+        }
+        self::SaveState($s);
+        $px = self::Proxy($s);
+        return $px === '' ? array(true, $here ? 'restored, with the backup\'s data' : 'made here from the backup, with its data') : array(false, $px);
     }
 
     // ----- commands -----

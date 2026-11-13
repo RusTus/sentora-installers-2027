@@ -233,7 +233,7 @@ case "$FAMILY" in
         PKG_REINSTALL="apt-get -y install --reinstall"
         # (php's sodium is part of php-common here; uidmap = newuidmap/newgidmap; dbus-user-session for each
         # customer's own session; unattended-upgrades for the node's security updates)
-        PACKAGES="podman skopeo php-cli php-curl curl ca-certificates nftables chrony uidmap libcap2-bin dbus-user-session systemd util-linux passt caddy unattended-upgrades ufw"
+        PACKAGES="podman skopeo php-cli php-curl curl ca-certificates nftables chrony uidmap libcap2-bin dbus-user-session systemd util-linux passt caddy unattended-upgrades ufw gzip"
         FIREWALL=ufw
         IDMAP_PKG=uidmap
         CHRONY_SERVICE=chrony
@@ -242,7 +242,7 @@ case "$FAMILY" in
         PKG=dnf
         PKG_INSTALL="dnf -y install"
         PKG_REINSTALL="dnf -y reinstall"
-        PACKAGES="podman skopeo php-cli php-sodium curl nftables policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core"
+        PACKAGES="podman skopeo php-cli php-sodium curl nftables policycoreutils-python-utils firewalld chrony util-linux shadow-utils libcap systemd dbus dnf-plugins-core gzip"
         FIREWALL=firewalld
         IDMAP_PKG=shadow-utils
         CHRONY_SERVICE=chronyd

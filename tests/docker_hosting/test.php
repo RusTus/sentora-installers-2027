@@ -1141,10 +1141,129 @@ $r = req(1);
 check(strpos($r['html'], 'On node relinked') !== false, 'the administrator sees which node each app is on');
 $r3 = req(3);
 check(strpos($r3['html'], 'On node') === false, 'a client does not see which node its apps are on');
-if ($pid) {
-    $zdbh->exec("UPDATE x_dh_containers SET dc_deleted_in = " . time() . " WHERE dc_id_pk = " . (int) $pid);
-    $zdbh->exec("DELETE FROM x_dh_jobs WHERE jb_ct_fk = " . (int) $pid);
+
+section('app backups, restores and moves (125)');
+$W = getenv('DH_W');
+$o = agent('once') . agent('once');
+$pc = dh::Container($pid);
+check($pc && $pc['dc_state_vc'] === 'running', 'the administrator\'s app runs on node relinked', $o);
+$vol = getenv('FAKE_DIR') . '/podman/sdh1/v/sdh-' . $pid . '-0';
+file_put_contents($vol . '/data.txt', 'night one');
+$r = req(1, '', array(), array('settings' => (string) $pid));
+check(strpos($r['html'], 'Nightly backup') === false && strpos($r['html'], 'Backed up') === false, 'no backup server: backups are not offered');
+check(!dh_backup::Start($pid, 1) && strpos(dh::$why, 'off-server backup') !== false, 'and can not be started', dh::$why);
+$zdbh->exec("INSERT INTO x_settings (so_name_vc, so_value_tx) VALUES ('offsite_enabled', 'true'), ('offsite_time', '02:30')");
+check(!dh_backup::Start($pid, 1) && strpos(dh::$why, 'Sentora backup server') !== false, 'an off-server backup to a plain SSH server is not enough', dh::$why);
+file_put_contents(getenv('DH_OFFSITE_STATE'), json_encode(array('gate' => 1)));
+$r = req(1, '', array(), array('settings' => (string) $pid));
+check(strpos($r['html'], 'Nightly backup') !== false && strpos($r['html'], 'Not backed up yet') !== false && strpos($r['html'], 'Put this backup back') === false, 'with a Sentora backup server: offered, nothing backed up yet');
+$zdbh->exec("UPDATE x_dh_containers SET dc_acc_fk = 3 WHERE dc_id_pk = " . (int) $pid);
+check(!dh_backup::Start($pid, 4) && !dh_backup::Restore($pid, 4), 'another client can not back up or restore someone\'s app');
+$zdbh->exec("UPDATE x_dh_containers SET dc_acc_fk = 1 WHERE dc_id_pk = " . (int) $pid);
+$r = req(1, 'Backup', array('inId' => (string) $pid));
+check(strpos($r['text'], 'ok: Backing it up') !== false && dh::Container($pid)['dc_state_vc'] === 'saving', 'Back up now: queued, shown as being backed up', $r['text']);
+check(!dh_backup::Start($pid, 1) && (strpos(dh::$why, 'busy') !== false || strpos(dh::$why, 'under way') !== false), 'not twice at once');
+$o = agent('once');
+$b = dh_backup::Newest($pid);
+check($b && $b['bk_state_vc'] === 'stored' && (int) $b['bk_size_bi'] > 0 && dh::Container($pid)['dc_state_vc'] === 'running', 'the node sent it in pieces; the panel checked and kept it; the app runs again', $o . json_encode(row("SELECT * FROM x_dh_backups ORDER BY bk_id_pk DESC")));
+$bf = getenv('DH_BACKUP_DIR') . '/' . $pid . '/' . ($b ? $b['bk_token_vc'] : 'x') . '/v0.tar.gz';
+check(is_file($bf) && strpos((string) shell_exec('tar -xzOf ' . escapeshellarg($bf) . ' ./data.txt 2>&1'), 'night one') !== false, 'the copy on the panel holds the app\'s data');
+$cl = calls();
+check(strpos($cl, 'stop --time 20 sdh-' . $pid) !== false && strpos($cl, 'volume export --output') !== false, 'the app was stopped while its data was read');
+check(count(glob(getenv('SNODE_STATE') . '/transfer/*')) === 0 && count(glob(getenv('SNODE_HOME') . '/sdh1/.sentora-move/*')) === 0, 'nothing is left on the node');
+$r = req(1, '', array(), array('settings' => (string) $pid));
+check(strpos($r['html'], 'Backed up ' . date('Y-m-d')) !== false && strpos($r['html'], 'Put this backup back') !== false, 'the row says when; the settings offer to put it back');
+// a piece for someone else's transfer, or after it is done: refused
+check(isset(dh_backup::Put((int) $rn['nd_id_pk'], array('token' => $b['bk_token_vc'], 'file' => 'v0.tar.gz', 'offset' => 0, 'size' => 10, 'sha' => str_repeat('a', 64), 'data' => base64_encode('x')))['stop']), 'a piece for a finished backup is refused');
+check(isset(dh_backup::Get((int) $rn['nd_id_pk'], array('token' => $b['bk_token_vc'], 'file' => 'v0.tar.gz', 'offset' => 0))['stop']), 'a backup is handed out only while it is being put back');
+
+file_put_contents($vol . '/data.txt', 'changed since');
+$r = req(1, 'Restore', array('inId' => (string) $pid));
+check(strpos($r['text'], 'ok: Putting its backup back') !== false, 'Put this backup back: queued', $r['text']);
+$o = agent('once');
+check(file_get_contents($vol . '/data.txt') === 'night one' && dh::Container($pid)['dc_state_vc'] === 'running' && dh_backup::Newest($pid)['bk_state_vc'] === 'stored', 'the node fetched it, checked it, and the app runs with the backup\'s data', $o);
+check(strpos(calls(), 'volume export --output ' . getenv('SNODE_HOME') . '/sdh1/.sentora-move/s-') !== false, 'today\'s data was kept aside first');
+// a copy damaged on the panel: refused, nothing changes
+file_put_contents($vol . '/data.txt', 'today');
+$fh = fopen($bf, 'r+'); fseek($fh, 20); fwrite($fh, 'XXXX'); fclose($fh);
+dh_backup::Restore($pid, 1);
+$o = agent('once');
+$c = dh::Container($pid);
+check(file_get_contents($vol . '/data.txt') === 'today' && $c['dc_state_vc'] === 'running' && strpos($c['dc_note_vc'], 'checksum') !== false, 'a damaged copy is refused by the node: the app keeps its data', $o . $c['dc_note_vc']);
+// a new backup replaces the old one on the panel
+$old = dh_backup::Newest($pid);
+dh_backup::Start($pid, 1);
+agent('once');
+$new = dh_backup::Newest($pid);
+clearstatcache();
+check($new && (int) $new['bk_id_pk'] !== (int) $old['bk_id_pk'] && !is_dir(dirname($bf)) && val("SELECT bk_state_vc FROM x_dh_backups WHERE bk_id_pk = " . (int) $old['bk_id_pk']) === 'replaced', 'a new backup replaces the old one (the backup server keeps the nights before)');
+// the nightly round: two hours before the off-server backup (02:30), each app once
+$zdbh->exec("UPDATE x_dh_backups SET bk_created_in = bk_created_in - 86400");
+dh_backup::Daemon(5);
+check((int) val("SELECT COUNT(*) FROM x_dh_backups WHERE bk_state_vc = 'queued'") === 0, 'not at another hour');
+dh_backup::Daemon(0);
+check((int) val("SELECT COUNT(*) FROM x_dh_backups WHERE bk_state_vc = 'queued' AND bk_ct_fk = " . (int) $pid) === 1, 'at night: the app is backed up');
+agent('once');
+dh_backup::Daemon(0);
+check((int) val("SELECT COUNT(*) FROM x_dh_backups WHERE bk_state_vc = 'queued'") === 0, 'once a night only');
+$zdbh->exec("UPDATE x_dh_containers SET dc_backup_in = 0 WHERE dc_id_pk = " . (int) $pid);
+$zdbh->exec("UPDATE x_dh_backups SET bk_created_in = bk_created_in - 86400");
+dh_backup::Daemon(0);
+check((int) val("SELECT COUNT(*) FROM x_dh_backups WHERE bk_state_vc = 'queued'") === 0, 'nightly backup off: left alone');
+
+// a second node, to move the app to (its own fake Podman: the same customer's user exists on both)
+$nb = $W . '/nb';
+@mkdir($nb . '/fake/registry', 0700, true);
+foreach (array('etc', 'state', 'caddy/sentora', 'run', 'home', 'sub') as $d) {
+    @mkdir($nb . '/' . $d, 0700, true);
 }
+touch($nb . '/sub/subuid'); touch($nb . '/sub/subgid'); touch($nb . '/fake/passwd');
+file_put_contents($nb . '/caddy/Caddyfile', "import sentora/*.caddy\n");
+file_put_contents($nb . '/fake/resolv.conf', "nameserver 192.168.1.1\n");
+$envB = 'FAKE_DIR=' . escapeshellarg($nb . '/fake') . ' SNODE_ETC=' . escapeshellarg($nb . '/etc') . ' SNODE_STATE=' . escapeshellarg($nb . '/state') . ' SNODE_CADDY=' . escapeshellarg($nb . '/caddy')
+    . ' SNODE_RUN=' . escapeshellarg($nb . '/run') . ' SNODE_HOME=' . escapeshellarg($nb . '/home') . ' SNODE_SUBID=' . escapeshellarg($nb . '/sub') . ' SNODE_KEYFILE=' . escapeshellarg($nb . '/key.txt')
+    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' ';
+$agentB = function ($args) use ($envB, $T) {
+    return (string) shell_exec($envB . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' ' . $args . ' 2>&1; echo "exit=$?"');
+};
+$o = $agentB("enroll --panel $web --panel-code " . dh::Fingerprint());
+preg_match('/Node key:  (SN1(-[A-Z2-9]{4}){6})/', $o, $kb);
+$r = req(1, 'AddNode', array('inName' => 'bravo', 'inKey' => isset($kb[1]) ? $kb[1] : ''));
+$o = $agentB('once') . $agentB('once');
+$bn = row("SELECT * FROM x_dh_nodes WHERE nd_name_vc = 'bravo'");
+check($bn && dh::Online($bn), 'a second node, bravo, is online', $o);
+$bid = (int) $bn['nd_id_pk'];
+check(!dh_backup::Move($pid, $bid, 3) && strpos(dh::$why, 'Only an administrator') !== false, 'a client can not move apps between nodes');
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $rn['nd_id_pk']));
+check(strpos($r['html'], 'Apps on this node') !== false && strpos($r['html'], 'action=MoveApp') !== false && strpos($r['html'], 'bravo - free:') !== false, 'the node\'s Manage lists its apps, with Move to the other node');
+file_put_contents($vol . '/data.txt', 'moving day');
+$r = req(1, 'MoveApp', array('inId' => (string) $pid, 'inTo' => (string) $bid));
+check(strpos($r['text'], 'ok: Moving it') !== false && dh::Container($pid)['dc_state_vc'] === 'moving', 'Move: queued, shown as being moved', $r['text']);
+$o = agent('once');
+$mv = row("SELECT * FROM x_dh_backups WHERE bk_kind_vc = 'move' ORDER BY bk_id_pk DESC");
+check($mv && $mv['bk_state_vc'] === 'restoring' && trim((string) file_get_contents(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $pid . '/state')) === 'exited', 'the old node sent its data; the app stays stopped there meanwhile', $o . json_encode($mv));
+$o = $agentB('once');
+$c = dh::Container($pid);
+$volB = $nb . '/fake/podman/sdh1/v/sdh-' . $pid . '-0/data.txt';
+check($c['dc_node_fk'] == $bid && $c['dc_state_vc'] === 'running' && is_file($volB) && file_get_contents($volB) === 'moving day', 'bravo made it from the copy, with its data, and runs it: the app is bravo\'s now', $o . json_encode($c));
+check(strpos((string) file_get_contents($nb . '/caddy/sentora/sites.caddy'), $c['dc_domain_vc']) !== false, 'bravo serves its address');
+check(count(glob(getenv('DH_BACKUP_DIR') . '/' . $pid . '/' . $mv['bk_token_vc'])) === 0, 'the move\'s copy is gone from the panel');
+$o = agent('once') . agent('once');
+clearstatcache();
+check(!is_dir(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $pid) && !is_dir($vol) && strpos((string) file_get_contents(getenv('SNODE_CADDY') . '/sentora/sites.caddy'), $c['dc_domain_vc']) === false, 'the old node removed its copy', $o);
+check((int) val("SELECT COUNT(*) FROM x_dh_found WHERE fd_cid_in = " . (int) $pid) === 0 && dh::Container($pid)['dc_state_vc'] === 'running', 'it was not taken for a found app; the app is fine');
+$r = req(1);
+check(strpos($r['html'], 'On node bravo') !== false, 'the row says it is on bravo now');
+// a move that fails on the new node: it runs again where it was
+dh_backup::Move($pid, (int) $rn['nd_id_pk'], 1);
+$agentB('once');
+touch(getenv('FAKE_DIR') . '/start-fail');
+$o = agent('once');
+unlink(getenv('FAKE_DIR') . '/start-fail');
+$o .= $agentB('once') . $agentB('once');
+$c = dh::Container($pid);
+check($c['dc_node_fk'] == $bid && $c['dc_state_vc'] === 'running' && strpos((string) val("SELECT lg_note_vc FROM x_dh_log WHERE lg_ct_fk = " . (int) $pid . " AND lg_what_vc = 'failed' ORDER BY lg_id_pk DESC"), 'moving it failed') !== false && trim((string) file_get_contents($nb . '/fake/podman/sdh1/c/sdh-' . $pid . '/state')) === 'running', 'a move that fails: the app runs again where it was, the log says why', $o . json_encode($c));
+check(!is_dir(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $pid), 'and nothing is left on the node it was going to');
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');

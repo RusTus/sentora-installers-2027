@@ -20,6 +20,7 @@ export DH_DB="$W/test.sqlite" DH_WEB=http://127.0.0.1:18092 DH_AGENT="$REPO/node
 export FAKE_DIR="$W/fake" SNODE_ETC="$W/node/etc" SNODE_STATE="$W/node/state" SNODE_CADDY="$W/node/caddy" SNODE_RUN="$W/node/run"
 export SNODE_HOME="$W/node/home" SNODE_SUBID="$W/node/sub" SNODE_USERPATH="$T/fakebin:/usr/bin:/bin"
 export SNODE_UPDATE_WAIT=0 SNODE_KEYFILE="$W/node/sentora-node-key.txt" DH_MAIL="$W/mail.txt"
+export DH_BACKUP_DIR="$W/dhbackups" DH_OFFSITE_STATE="$W/offsite.json" SNODE_RETRY_WAIT=0
 export SNODE_PASSWD="$W/fake/passwd" SNODE_RESOLV="$W/fake/resolv.conf" SNODE_RUNMARK="$W/node/runmark"
 printf "nameserver 192.168.1.1\nnameserver 8.8.8.8\n" > "$W/fake/resolv.conf"; touch "$W/fake/passwd"
 if [ -n "${DH_MYSQL:-}" ]; then
