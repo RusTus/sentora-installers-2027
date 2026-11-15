@@ -138,6 +138,7 @@ cg() { if [ "$GV" = 1 ]; then
 # the image check (Trivy 137): installed by the node's installer (pinned, checksum checked), run as its own user;
 # the app's image checked when it was made, its answer at the panel (Warn: it runs whatever it found)
 in_box '/usr/local/bin/trivy --version 2> /dev/null | head -1; id -u sentora-scan; stat -c "%U:%G %a" /var/lib/sentora-scan/in; ls /var/lib/sentora-scan/in | wc -l' | tr -d '\r' > "$OUT/trivy.txt"
+in_box 'grep -q "Image check ready" /var/log/sentora2027-docker-node.log' && ok "Trivy's database downloaded by the installer" || bad "the installer could not download Trivy's database"
 grep -q "^Version: 0.76.2" "$OUT/trivy.txt" && ok "Trivy 0.76.2 installed (the pinned release, checksum checked)" || bad "no Trivy: $(cat "$OUT/trivy.txt")"
 grep -qx "root:sentora-scan 750" "$OUT/trivy.txt" && ok "images are checked in root's folder that only the check's user may also read" || bad "the check's folder: $(cat "$OUT/trivy.txt")"
 [ "$(tail -1 "$OUT/trivy.txt")" = 0 ] && ok "no image copy left after the check" || bad "image copies left: $(tail -1 "$OUT/trivy.txt")"

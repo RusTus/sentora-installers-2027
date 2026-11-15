@@ -441,7 +441,8 @@ if [ -x /usr/local/bin/trivy ]; then
     install -d -m 750 -o root -g sentora-scan /var/lib/sentora-scan/in
     rm -f /var/lib/sentora-scan/in/*.tar
     command -v restorecon > /dev/null 2>&1 && restorecon -R /var/lib/sentora-scan > /dev/null 2>&1
-    if runuser -u sentora-scan -- /usr/local/bin/trivy image --download-db-only --cache-dir /var/lib/sentora-scan/cache --quiet >> "$LOG" 2>&1; then
+    # (started in its own folder: Trivy reads a trivy.yaml from where it is started)
+    if (cd /var/lib/sentora-scan && runuser -u sentora-scan -- /usr/local/bin/trivy image --download-db-only --cache-dir /var/lib/sentora-scan/cache --quiet) >> "$LOG" 2>&1; then
         note "Image check ready: Trivy's database of known security holes is in place (brought up to date every night)."
     else
         note "Trivy's database could not be downloaded now; the agent tries again every night (see $LOG)."

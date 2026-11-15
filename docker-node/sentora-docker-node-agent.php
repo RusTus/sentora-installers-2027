@@ -719,11 +719,12 @@ class snode
     }
 
     /**
-     * Trivy's database brought up to date (once a day), by its own user.
+     * Trivy's database brought up to date (once a day), by its own user (started in its own folder: Trivy reads a
+     * trivy.yaml from where it is started).
      */
     static function ScanDb()
     {
-        return self::Run(array('runuser', '-u', self::ScanUser(), '--', self::Trivy(), 'image', '--download-db-only', '--cache-dir', self::ScanDir() . '/cache', '--quiet'), null, 900);
+        return self::Run(array('runuser', '-u', self::ScanUser(), '--', self::Trivy(), 'image', '--download-db-only', '--cache-dir', self::ScanDir() . '/cache', '--quiet'), self::ScanDir(), 900);
     }
 
     /**
@@ -761,7 +762,7 @@ class snode
         $res = self::RootTemp('scan');
         $r = self::Run(array('systemd-run', '--scope', '--quiet', '--collect', '-p', 'MemoryMax=1536M', '-p', 'MemorySwapMax=0', '-p', 'CPUQuota=100%',
             'runuser', '-u', self::ScanUser(), '--', $t, 'image', '--input', $f, '--cache-dir', self::ScanDir() . '/cache', '--skip-db-update', '--skip-java-db-update',
-            '--scanners', 'vuln', '--format', 'json', '--quiet', '--timeout', '10m'), null, 900, null, $res);
+            '--scanners', 'vuln', '--format', 'json', '--quiet', '--timeout', '10m'), self::ScanDir(), 900, null, $res);
         @unlink($f);
         $json = is_file($res) && filesize($res) < 64 * 1048576 ? (string) file_get_contents($res) : '';
         @unlink($res);
