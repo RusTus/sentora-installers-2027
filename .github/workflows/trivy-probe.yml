@@ -1,0 +1,21 @@
+# A probe, not a test: which Trivy release to pin, and how the catalog's images score (Actions > Trivy probe).
+# The answers decide how Docker Hosting's image check is built (2026-11-15).
+name: Trivy probe
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Trivy version to check (empty: the newest release)"
+        required: false
+permissions:
+  contents: read
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get -qq update && sudo apt-get -qq install -y podman time > /dev/null
+      - run: bash .github/scripts/trivy-probe.sh
+        env:
+          TRIVY_VERSION: ${{ inputs.version }}
