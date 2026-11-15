@@ -493,6 +493,11 @@ class snode
         $uid = self::Uid($user);
         $env = array('env', 'HOME=' . self::$home . '/' . $user, 'XDG_RUNTIME_DIR=' . self::$run . '/' . $uid, 'DBUS_SESSION_BUS_ADDRESS=unix:path=' . self::$run . '/' . $uid . '/bus',
             'PATH=' . (getenv('SNODE_USERPATH') ?: '/usr/local/bin:/usr/bin:/bin'));
+        // A file given as input or output (root's, opened here) goes through a pipe the user's own shell makes:
+        // a program that opens /dev/stdout or /dev/stdin again (podman volume export) may not open root's file
+        if ($in !== null || $out !== null) {
+            $argv = array_merge(array('bash', '-c', 'set -o pipefail; ' . ($in !== null ? 'cat | ' : '') . '"$@"' . ($out !== null ? ' | cat' : ''), 'bash'), $argv);
+        }
         return self::Run(array_merge(array('runuser', '-u', $user, '--'), $env, $argv), self::$home . '/' . $user, $timeout, $in, $out);
     }
 
