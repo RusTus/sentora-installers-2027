@@ -124,8 +124,9 @@ in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no cont
 # its own slice (sentora-app-<id>.slice: runsc runs with --ignore-cgroups inside it), with 64 MB for gVisor itself
 RT=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.OCIRuntime}}' sdh-$CID" | tr -d '\r')
 case "$RT" in *runsc*) GV=1; ok "runs in gVisor ($RT)" ;; *) GV=0; bad "not in gVisor: '$RT' (new apps are)" ;; esac
+[ "$GV" = 1 ] && in_box "u=\$(id -u sdh3); e='env XDG_RUNTIME_DIR=/run/user/'\$u; echo '  where the app is:'; find /sys/fs/cgroup -type d -name 'sentora-app-*' | sed 's/^/    /'; c=\$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); for p in \$c; do echo \"    pid \$p: \$(cat /proc/\$p/cgroup 2> /dev/null)\"; done; runuser -u sdh3 -- \$e systemctl --user show sentora-app-$CID.slice -p ActiveState -p ControlGroup -p MemoryMax -p FragmentPath -p DropInPaths | sed 's/^/    /'" 2>&1 | tr -d '\r'
 cg() { if [ "$GV" = 1 ]; then
-    in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u systemctl --user show -p ControlGroup --value sentora-app-$CID.slice); cat /sys/fs/cgroup/user.slice/user-\$u.slice/user@\$u.service\$p/$1 /sys/fs/cgroup\$p/$1 2> /dev/null | head -1" | tr -d '\r'
+    in_box "d=\$(find /sys/fs/cgroup -type d -name sentora-app-$CID.slice 2> /dev/null | head -1); [ -n \"\$d\" ] && cat \"\$d/$1\"" | tr -d '\r'
   else
     in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman inspect --format '{{.State.CgroupPath}}' sdh-$CID 2> /dev/null); cat /sys/fs/cgroup\$p/$1 2> /dev/null || runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman exec sdh-$CID cat /sys/fs/cgroup/$1" | tr -d '\r'
   fi; }
