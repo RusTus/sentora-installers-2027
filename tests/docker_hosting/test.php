@@ -1377,7 +1377,7 @@ file_put_contents($nb . '/caddy/Caddyfile', "import sentora/*.caddy\n");
 file_put_contents($nb . '/fake/resolv.conf', "nameserver 192.168.1.1\n");
 $envB = 'FAKE_DIR=' . escapeshellarg($nb . '/fake') . ' SNODE_ETC=' . escapeshellarg($nb . '/etc') . ' SNODE_STATE=' . escapeshellarg($nb . '/state') . ' SNODE_CADDY=' . escapeshellarg($nb . '/caddy')
     . ' SNODE_RUN=' . escapeshellarg($nb . '/run') . ' SNODE_HOME=' . escapeshellarg($nb . '/home') . ' SNODE_SUBID=' . escapeshellarg($nb . '/sub') . ' SNODE_KEYFILE=' . escapeshellarg($nb . '/key.txt')
-    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' ';
+    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' SNODE_PROC=' . escapeshellarg($nb . '/fake/proc') . ' ';
 $agentB = function ($args) use ($envB, $T) {
     return (string) shell_exec($envB . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' ' . $args . ' 2>&1; echo "exit=$?"');
 };
@@ -1457,6 +1457,19 @@ check(trim((string) @file_get_contents($gdir . '/runtime')) === $runsc && strpos
 check(strpos($cl, 'systemctl --user set-property sentora-app-' . $gid . '.slice MemoryMax=' . ((int) $ga['dc_mem_in'] + 64) . 'M MemorySwapMax=0 CPUQuota=' . (int) $ga['dc_cpu_in'] . '% TasksMax=4096') !== false, 'its limits on the slice (memory + 64 MB for gVisor, no swap, its CPU)', $cl);
 $agentB('once');
 check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'gvisor', 'the node reports it runs on gVisor');
+// outside its slice (Podman did not move it): started once more, then stopped rather than run without limits
+file_put_contents($gfake . '/calls.log', '');
+touch($gfake . '/outside-slice');
+dh::Queue((int) $bid, $gid, 'restart', dh::Who($ga));
+$agentB('once');
+$cl = $gcalls();
+$lj = lastjob($gid);
+check(substr_count($cl, 'start sdh-' . $gid) >= 2 && trim((string) @file_get_contents($gdir . '/state')) !== 'running' && strpos((string) $lj['jb_result_tx'], 'inside its limits') !== false,
+    'outside its slice: tried once more, then stopped (never runs without its limits)', $cl . ' / ' . json_encode($lj));
+unlink($gfake . '/outside-slice');
+dh::Queue((int) $bid, $gid, 'start', dh::Who($ga));
+$agentB('once');
+check(trim((string) @file_get_contents($gdir . '/state')) === 'running', 'inside its slice: it runs');
 $r = req((int) $ga['dc_acc_fk'], '', array(), array('settings' => (string) $gid));
 check(strpos($r['html'], 'On: runs on gVisor') !== false && strpos($r['html'], 'Extra isolation (gVisor)') !== false, 'its Settings show it', '');
 check(((int) $ga['dc_acc_fk'] === 1) === (strpos($r['html'], 'name="inIso"') !== false), 'the switch is there for an administrator only');

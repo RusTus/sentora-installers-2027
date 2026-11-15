@@ -543,7 +543,37 @@ class snode
         if ($e !== '') {
             return array(125, $e);
         }
-        return self::AsUser($user, array_merge(array('podman'), $args), $timeout, $in, $out);
+        $r = self::AsUser($user, array_merge(array('podman'), $args), $timeout, $in, $out);
+        // An app in gVisor runs only inside its own slice, where its limits are: checked after every start, started
+        // once more if Podman left it outside (its user's systemd only just up), stopped if it is still outside
+        $last = (string) end($args);
+        if ($r[0] === 0 && in_array($args[0], array('start', 'restart'), true) && preg_match('/^sdh-(\d+)$/', $last, $m)
+            && self::IsoOf($user, $last) === 'gvisor' && !self::InSlice($user, $last, (int) $m[1])) {
+            self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
+            $r = self::AsUser($user, array('podman', 'start', $last), $timeout);
+            if ($r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
+                self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
+                $r = array(1, 'the app did not start inside its limits (gVisor), so it was stopped');
+            }
+        }
+        return $r;
+    }
+
+    /** Whether an app's processes (Podman's monitor and gVisor's sandbox) are inside its own slice. */
+    static function InSlice($user, $name, $cid)
+    {
+        $r = self::AsUser($user, array('podman', 'container', 'inspect', '--format', '{{.State.ConmonPid}} {{.State.Pid}}', $name), 60);
+        $pids = preg_split('/\s+/', trim($r[1]));
+        if ($r[0] !== 0 || count($pids) !== 2) {
+            return false;
+        }
+        foreach ($pids as $pid) {
+            $cg = ctype_digit($pid) && (int) $pid > 0 ? (string) @file_get_contents((getenv('SNODE_PROC') ?: '/proc') . '/' . $pid . '/cgroup') : '';
+            if (strpos($cg, '/' . self::Slice($cid) . '/') === false) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** A file of root's own for one piece of data on its way (root's transfer folder: customers can not reach it). */

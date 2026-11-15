@@ -24,6 +24,11 @@ case "$1" in
             foreach (file("php://stdin", FILE_IGNORE_NEW_LINES) as $l) { $o[] = $l; } echo json_encode($o), "\n";'; exit 0 ;;
           *.ImageName*) tail -1 "$P/c/$last/args"; exit 0 ;;
           *OCIRuntime*) cat "$P/c/$last/runtime" 2> /dev/null || echo crun; exit 0 ;;
+          # (its monitor and its process: their cgroup under the --cgroup-parent it was made with, unless the test
+          # puts it outside: the file outside-slice)
+          *ConmonPid*) n=$(( $(printf '%s' "$P/$last" | cksum | cut -d' ' -f1) % 30000 + 1000 )); cp=$(grep -A1 -x -- --cgroup-parent "$P/c/$last/args" | tail -1)
+            [ -f "$FAKE_DIR/outside-slice" ] && cp=user.slice; mkdir -p "$FAKE_DIR/proc/$n" "$FAKE_DIR/proc/$((n+1))"
+            for q in $n $((n+1)); do echo "0::/user.slice/user-1.slice/user@1.service/$cp/libpod-conmon-x.scope" > "$FAKE_DIR/proc/$q/cgroup"; done; echo "$n $((n+1))"; exit 0 ;;
           *.Image*) cat "$P/c/$last/imageid"; exit 0 ;;
           *State.Status*) cat "$P/c/$last/state"; exit 0 ;;
         esac ;;
