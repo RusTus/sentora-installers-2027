@@ -119,11 +119,14 @@ PS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) pod
 echo "$PS"
 echo "$PS" | grep -q "sdh-$CID 127.0.0.1:20000->3001/tcp" && ok "runs rootless as sdh3, on 127.0.0.1:20000 only" || bad "not running as sdh3 on 127.0.0.1:20000"
 in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no containers" || bad "root has containers"
-MEMMAX=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/memory.max" | tr -d '\r')
+# an app's limit as the kernel holds it: read in the node's cgroup tree, at the container's own cgroup (Fedora 45's
+# crun refuses "podman exec" in this test's container: setrlimit RLIMIT_NOFILE)
+cg() { in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman inspect --format '{{.State.CgroupPath}}' sdh-$CID 2> /dev/null); cat /sys/fs/cgroup\$p/$1 2> /dev/null || runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman exec sdh-$CID cat /sys/fs/cgroup/$1" | tr -d '\r'; }
+MEMMAX=$(cg memory.max)
 [ "$MEMMAX" = 268435456 ] && ok "memory limit held by the kernel (256 MB)" || bad "memory.max in the container: '$MEMMAX' (want 268435456)"
-CPUMAX=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/cpu.max" | tr -d '\r')
+CPUMAX=$(cg cpu.max)
 [ "$CPUMAX" = "50000 100000" ] && ok "CPU limit held by the kernel (0.5)" || bad "cpu.max in the container: '$CPUMAX' (want 50000 100000)"
-PIDS=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/pids.max" | tr -d '\r')
+PIDS=$(cg pids.max)
 [ "$PIDS" = 1024 ] && ok "process limit held (1024)" || bad "pids.max: '$PIDS'"
 
 say "Caddy in front"
@@ -179,7 +182,7 @@ L=$(wait_for 60 panel logs "$CID")
 echo "$L" | tail -3
 [ -n "$L" ] && ok "logs reach the panel" || { bad "no logs"; diag; }
 panel limits "$CID" 75 384 2 | grep -qx ok || bad "limits refused"
-for _ in $(seq 1 20); do MEMMAX=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman exec sdh-$CID cat /sys/fs/cgroup/memory.max" | tr -d '\r'); [ "$MEMMAX" = 402653184 ] && break; sleep 3; done
+for _ in $(seq 1 20); do MEMMAX=$(cg memory.max); [ "$MEMMAX" = 402653184 ] && break; sleep 3; done
 [ "$MEMMAX" = 402653184 ] && ok "new limits applied to the running container (384 MB)" || { bad "memory.max after the change: '$MEMMAX'"; diag; }
 say "The app's own settings (Advanced)"
 panel env "$CID" "SENTORA_TEST=hello there" | grep -qx ok || bad "settings refused: $(panel env "$CID" "SENTORA_TEST=hello there")"

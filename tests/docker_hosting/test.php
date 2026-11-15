@@ -35,7 +35,9 @@ function req($me, $action = '', $post = array(), $get = array())
 function daemon()
 {
     global $T;
-    $out = shell_exec('php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1; echo "exit=$?"');
+    // (at noon, unless a check asks for an hour: the nightly jobs (02-03) must not start because the test happens
+    // to run at night, 2026-11-15)
+    $out = shell_exec('DH_TEST_HOUR=12 php ' . escapeshellarg($T . '/run_daemon.php') . ' 2>&1; echo "exit=$?"');
     check(strpos($out, 'exit=0') !== false && strpos($out, 'PHP problem') === false, 'daemon run without PHP problems', $out);
     return $out;
 }
