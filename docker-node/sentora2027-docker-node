@@ -384,8 +384,10 @@ if [ -x /usr/local/bin/runsc ]; then
 #!/bin/sh
 # Sentora Docker Node: gVisor for the apps with Extra isolation. The app's limits are held by its own slice
 # (sentora-app-<id>.slice, set by the agent): runsc does not manage cgroups itself under rootless Podman.
-# Its network is the app's own namespace (Podman's pasta), used through the namespace's stack.
-exec /usr/local/bin/runsc --ignore-cgroups --network=host "$@"
+# Its network is the app's own namespace (Podman's pasta), used through the namespace's stack. Changes to the
+# app's own files go to Podman's layer, as without gVisor (kept over a restart; gVisor's in-memory overlay would
+# leave a scratch file behind after a hard stop, and the app would then not start again).
+exec /usr/local/bin/runsc --ignore-cgroups --network=host --overlay2=none "$@"
 RUNSC_EOF
     install -m 755 -o root -g root /usr/local/bin/runsc-sentora.new /usr/local/bin/runsc-sentora; rm -f /usr/local/bin/runsc-sentora.new
     command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/runsc-sentora > /dev/null 2>&1
