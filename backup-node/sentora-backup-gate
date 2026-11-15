@@ -42,7 +42,13 @@ inside() { # path -> prints the real path, or fails
 }
 DATE_RE='^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$'
 if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
-    OUT=(rsync --server)
+    # Every panel on this node is the same Linux user: what keeps one panel out of another's area is this
+    # gate. So rsync here never follows a link: options that would (-L, -k, -K and their long names) are
+    # refused, and --munge-links stores every symlink a panel sends defused (/rsyncd-munged/...; it goes
+    # back to the panel as it was when restoring), so no link in an area can lead into another one.
+    # Only the options Sentora's panels send are taken (2026-11-15: a panel could read and write another
+    # panel's copies through a symlink of its own and -L / -K).
+    OUT=(rsync --server --munge-links)
     dot=0 want=''
     for a in "${ARGS[@]:2}"; do
         if [ -n "$want" ]; then
@@ -63,10 +69,15 @@ if [ "${ARGS[0]:-}" = rsync ] && [ "${ARGS[1]:-}" = --server ]; then
                 OUT+=("${a%%=*}=$r") ;;
             --link-dest|--compare-dest|--copy-dest)
                 want=$a; OUT+=("$a") ;;
-            --daemon*|--config*|--rsh*|--rsync-path*|--log-file*|--write-batch*|--read-batch*|--only-write-batch*|--temp-dir*|-T*|--backup-dir*|--partial-dir*|--remove-*|--files-from*|--exclude-from*|--include-from*|--filter*)
-                refuse "option $a" ;;
-            --*=*|--*) OUT+=("$a") ;;
-            -*) OUT+=("$a") ;;
+            --sender|--delete|--delete-before|--delete-during|--delete-delay|--delete-after|--partial|--numeric-ids|--hard-links|--timeout=[0-9]*|--bwlimit=[0-9]*)
+                OUT+=("$a") ;;
+            --*) refuse "option $a" ;;
+            -*)
+                # a cluster of short options (-lHogDtprRe.LsfxCIvu): everything after e is rsync's own
+                # capability string, not options
+                c=${a#-}; c=${c%%e*}
+                case "$c" in *[LkKTfFM]*) refuse "option $a" ;; esac
+                OUT+=("$a") ;;
             *) refuse "unexpected argument $a" ;;
         esac
     done
@@ -106,9 +117,9 @@ case "$verb" in
         d=$(inside "${ARGS[2]:-/}") || refuse "a folder outside the area"
         cd "$d" 2> /dev/null || exit 3
         for h in */; do h=${h%/}; [ -L "$h" ] && continue
-            for d in "$h"/20??-??-??; do [ -d "$d" ] || continue
+            for d in "$h"/20??-??-??; do [ -d "$d" ] && [ ! -L "$d" ] || continue
                 echo "@@SNAPSHOT $d"
-                if [ -f "$d/manifest.json" ]; then cat "$d/manifest.json"; else echo '{"format":1}'; fi
+                if [ -f "$d/manifest.json" ] && [ ! -L "$d/manifest.json" ]; then cat "$d/manifest.json"; else echo '{"format":1}'; fi
                 echo; echo '@@END'
             done
         done ;;

@@ -169,6 +169,20 @@ grep -q 'ready to keep the backups of "panel2.example.test"' "$W/add.txt" && ok 
 [ "$("${SSH2[@]}" "$B" sentora-backup hello 2>&1)" = "sentora-backup 1 panel2.example.test" ] && ok "it has its own folder" || bad "panel2 hello"
 [ "$("${SSH2[@]}" "$B" sentora-backup count $H 2>&1)" = 0 ] && ok "it does not see the first panel's nights" || bad "panel2 sees panel1's nights"
 o=$(rsync -a -e "${SSH2[*]}" "$B:/../panel1.example.test/" "$W/p3" 2>&1); [ ! -d "$W/p3/panel1.example.test" ] && [ ! -f "$W/p3/2026-11-05" ] && ok "nor can it reach them" || bad "panel2 reached panel1's folder"
+# (2026-11-15: every panel is the same Linux user, so only the gate keeps them apart: a link a panel
+# uploads into its own folder must not lead into another's, neither read with -L nor written with -K)
+mkdir -p "$W/x2/steal"; ln -s /srv/sentora-backups/panel1.example.test "$W/x2/link"
+rsync -a -e "${SSH2[*]}" "$W/x2/link" "$B:/" > /dev/null 2>&1
+in_box 'readlink /srv/sentora-backups/panel2.example.test/link' | grep -q '^/rsyncd-munged/' && ok "a link it uploads is kept defused (/rsyncd-munged/)" || bad "link stored as: $(in_box 'readlink /srv/sentora-backups/panel2.example.test/link')"
+rm -rf "$W/p4"; rsync -aL -e "${SSH2[*]}" "$B:/" "$W/p4/" > /dev/null 2>&1
+[ -z "$(find "$W/p4" -name '2026-11-*' 2> /dev/null)" ] && ok "it can not read the first panel's copies through it (-L)" || bad "panel2 read panel1's copies through a link"
+o=$("${SSH2[@]}" "$B" rsync --server --sender -lLogDtpr . / 2>&1 < /dev/null); [[ "$o" == *refused* ]] && ok "-L in a cluster of options: refused" || bad "-L: $o"
+echo planted > "$W/x2/steal/planted"; in_box 'ln -sfn /srv/sentora-backups/panel1.example.test /srv/sentora-backups/panel2.example.test/steal; chown -h sentora-backup: /srv/sentora-backups/panel2.example.test/steal'
+rsync -aK -e "${SSH2[*]}" "$W/x2/" "$B:/" > /dev/null 2>&1
+in_box '[ ! -e /srv/sentora-backups/panel1.example.test/planted ]' && ok "nor write into them through a link (-K)" || bad "panel2 wrote into panel1's folder"
+for o in --copy-links --keep-dirlinks --copy-dirlinks --copy-unsafe-links --no-munge-links --log-file=/tmp/x; do
+    r=$("${SSH2[@]}" "$B" rsync --server --sender $o . / 2>&1 < /dev/null); [[ "$r" == *refused* ]] || bad "$o: $r"
+done; ok "link-following and other options it does not need: refused"
 L=$(in_box 'sentora-backup-node list'); echo "$L" | grep -q '^panel1.example.test' && echo "$L" | grep -q '^panel2.example.test' && ok "sentora-backup-node list shows the panels" || { bad "sentora-backup-node list"; in_box 'sentora-backup-node list; cut -c1-90 /etc/ssh/sentora-backup/authorized_keys'; }
 in_box 'sentora-backup-node remove panel2.example.test' > /dev/null
 "${SSH2[@]}" "$B" sentora-backup hello > /dev/null 2>&1 && bad "a removed panel still gets in" || ok "a removed panel is locked out"
