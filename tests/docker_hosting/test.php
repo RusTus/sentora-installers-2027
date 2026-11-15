@@ -1454,6 +1454,7 @@ $agentB('once');
 $args = (string) @file_get_contents($gdir . '/args');
 $cl = $gcalls();
 check(trim((string) @file_get_contents($gdir . '/runtime')) === $runsc && strpos($args, "--cgroup-parent\nsentora-app-" . $gid . ".slice") !== false, 'on: gVisor\'s runtime, in the app\'s own slice', $args);
+check(strpos($cl, 'systemd-run --user --scope --quiet --collect --slice=sentora-app-' . $gid . '.slice podman start sdh-' . $gid) !== false, 'started from inside its slice (where Podman leaves gVisor\'s sandbox)', $cl);
 check(strpos($cl, 'systemctl --user set-property sentora-app-' . $gid . '.slice MemoryMax=' . ((int) $ga['dc_mem_in'] + 64) . 'M MemorySwapMax=0 CPUQuota=' . (int) $ga['dc_cpu_in'] . '% TasksMax=4096') !== false, 'its limits on the slice (memory + 64 MB for gVisor, no swap, its CPU)', $cl);
 $agentB('once');
 check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'gvisor', 'the node reports it runs on gVisor');

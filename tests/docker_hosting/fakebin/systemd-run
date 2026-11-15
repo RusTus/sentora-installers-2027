@@ -1,3 +1,5 @@
 #!/bin/bash
 echo "systemd-run $*" >> "$FAKE_DIR/calls.log"
+# (--scope: the command runs here and now, as systemd-run does)
+for a in "$@"; do [ "$a" = --scope ] && { while [ "${1#-}" != "$1" ]; do shift; done; exec "$@"; }; done
 exit 0

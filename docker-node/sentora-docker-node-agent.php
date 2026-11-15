@@ -543,14 +543,18 @@ class snode
         if ($e !== '') {
             return array(125, $e);
         }
-        $r = self::AsUser($user, array_merge(array('podman'), $args), $timeout, $in, $out);
-        // An app in gVisor runs only inside its own slice, where its limits are: checked after every start, started
-        // once more if Podman left it outside (its user's systemd only just up), stopped if it is still outside
+        // An app in gVisor runs only inside its own slice, where its limits are: it is started from inside the slice
+        // (rootless Podman leaves its monitor, and so gVisor's sandbox, where it was started from), checked after,
+        // started once more if it is still outside, and stopped rather than run without its limits
         $last = (string) end($args);
-        if ($r[0] === 0 && in_array($args[0], array('start', 'restart'), true) && preg_match('/^sdh-(\d+)$/', $last, $m)
-            && self::IsoOf($user, $last) === 'gvisor' && !self::InSlice($user, $last, (int) $m[1])) {
+        $gv = in_array($args[0], array('start', 'restart'), true) && preg_match('/^sdh-(\d+)$/', $last, $m) && self::IsoOf($user, $last) === 'gvisor';
+        $in_slice = function (array $cmd) use ($user, $m) {
+            return array_merge(array('systemd-run', '--user', '--scope', '--quiet', '--collect', '--slice=' . self::Slice((int) $m[1]), 'podman'), $cmd);
+        };
+        $r = self::AsUser($user, $gv ? $in_slice($args) : array_merge(array('podman'), $args), $timeout, $in, $out);
+        if ($gv && $r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
             self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
-            $r = self::AsUser($user, array('podman', '--log-level=info', 'start', $last), $timeout);
+            $r = self::AsUser($user, $in_slice(array('--log-level=info', 'start', $last)), $timeout);
             if ($r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
                 self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
                 // (with what Podman said about where it put the app)
@@ -1243,6 +1247,10 @@ class snode
             if ($st[0] === 0 && !in_array(trim($st[1]), array('running', 'paused'), true)) {
                 $r = self::Podman($c['user'], array('start', $name), 300);
                 self::Out('started ' . $name . ' after the restart of the server: ' . ($r[0] === 0 ? 'ok' : self::Tail($r[1])));
+            } elseif ($st[0] === 0 && self::IsoOf($c['user'], $name) === 'gvisor' && !self::InSlice($c['user'], $name, (int) $cid)) {
+                // (started by Podman's own unit outside its slice: started again inside it, where its limits are)
+                $r = self::Podman($c['user'], array('restart', '--time', '20', $name), 300);
+                self::Out('restarted ' . $name . ' inside its limits after the restart of the server: ' . ($r[0] === 0 ? 'ok' : self::Tail($r[1])));
             }
         }
         @touch($mark);
