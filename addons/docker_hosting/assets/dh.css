@@ -158,6 +158,11 @@
 .dh-more .dh-foot .btn { margin: 0; }
 .dh-more .dh-night { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 8px 0; }
 .dh-more .dh-night .dh-muted { flex: 1 1 220px; }
+.dh-guards { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--dh-line); }
+.dh-guard { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.dh-guard-text { min-width: 0; }
+.dh-guard-text .dh-pill { margin-left: 6px; }
+.dh-guard-text small { display: block; margin-top: 6px; color: var(--dh-muted); line-height: 1.5; }
 .dh-lan { display: grid; gap: 4px; }
 .dh-lan-row .dh-night { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 2px 0; }
 .dh-found-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }

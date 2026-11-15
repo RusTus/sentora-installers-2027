@@ -133,6 +133,76 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * The person at the keyboard: the administrator while shadowing a client, else the logged-in account.
+     * Guards are theirs to change (an administrator may switch one off for a client's app while shadowing;
+     * the client never can).
+     *
+     * @return int
+     */
+    static function Person()
+    {
+        return !empty($_SESSION['ruid']) ? (int) $_SESSION['ruid'] : self::Me();
+    }
+
+    /**
+     * An app's Security settings (its guards): what it runs on now, and, for an administrator, the switch.
+     *
+     * @param int $id
+     * @param array $c
+     * @return string
+     */
+    static function GuardsHtml($id, array $c)
+    {
+        $g = dh::Guards($c);
+        $want = $g['iso'] === 'gvisor';
+        $is = (string) ($c['dc_iso_vc'] ?? '');
+        $before = strpos((string) ($c['dc_guard_tx'] ?? ''), '"before"') !== false && !$want;
+        if ($want && $is === 'gvisor') {
+            $now = '<span class="dh-pill is-ok">' . self::t('On: runs on gVisor') . '</span>';
+        } elseif ($want && $is === 'standard') {
+            $now = '<span class="dh-pill is-warn">' . self::t('Asked for, not in force: its node has no gVisor yet (it comes with the node\'s next update)') . '</span>';
+        } elseif ($want) {
+            $now = '<span class="dh-pill">' . self::t('On (its node confirms it at its next call)') . '</span>';
+        } else {
+            $now = '<span class="dh-pill is-warn">' . self::t($before ? 'Off: made before it existed' : 'Off: runs on the node\'s own kernel') . '</span>';
+        }
+        $out = '<form class="dh-guards" method="post" action="./?module=docker_hosting&amp;action=CtGuards">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $id . '">'
+            . '<h4>' . self::t('Security') . '</h4>'
+            . '<div class="dh-guard"><div class="dh-guard-text"><b>' . self::t('Extra isolation (gVisor)') . '</b> ' . $now
+            . '<small>' . self::t('The app runs on a small kernel of its own (gVisor) instead of the node\'s, so an attack on the kernel stays inside it. It costs about 64 MB of memory, given on top of the app\'s own. A few apps do not run on it: then switch it off for that app.') . '</small></div>';
+        if (dh::IsAdmin(dh::Account(self::Person()))) {
+            $out .= '<label class="sf-switch"><input type="checkbox" name="inIso" value="gvisor"' . ($want ? ' checked' : '') . ' onchange="if(!this.checked&&!confirm(this.dataset.ask)){this.checked=true;return;}this.form.submit()"'
+                . ' data-ask="' . self::t('Switch Extra isolation off for this app? It then runs on the node\'s own kernel: do this only for an app you trust. The app restarts (a few seconds).') . '" aria-label="' . self::t('Extra isolation (gVisor)') . '"><span class="sf-toggle"></span></label>'
+                . '<noscript><button class="btn btn-sm btn-default" type="submit">' . self::t('Save') . '</button></noscript>';
+        } else {
+            $out .= '<small class="dh-muted">' . self::t('Changed by an administrator') . '</small>';
+        }
+        return $out . '</div></form>';
+    }
+
+    /**
+     * Handle an app's Security switch (administrators only, also while shadowing its owner).
+     *
+     * @return void
+     */
+    static function doCtGuards()
+    {
+        runtime_csfr::Protect();
+        $id = (int) self::Int('inId');
+        $c = dh::Container($id);
+        if (!$c || (int) $c['dc_acc_fk'] !== self::Me()) {
+            self::Say('error', 'No such container.');
+            return;
+        }
+        $_GET['settings'] = (string) $id;
+        if (dh::SetGuards(self::Person(), $id, array('iso' => self::Post('inIso') === 'gvisor' ? 'gvisor' : 'standard'))) {
+            self::Say('ok', 'Saved: the app restarts with it (a few seconds). If it does not start, it comes back as it was.');
+        } else {
+            self::Say(dh::$why === 'Nothing changed.' ? 'ok' : 'error', dh::$why);
+        }
+    }
+
+    /**
      * A posted field.
      *
      * @param string $n
@@ -531,6 +601,8 @@ class module_controller extends ctrl_module
             $what = self::Post('inAutosec') === '1' ? 'autosec-on' : 'autosec-off';
         } elseif ($what === 'autoagent') {
             $what = self::Post('inAutoagent') === '1' ? 'autoagent-on' : 'autoagent-off';
+        } elseif ($what === 'trusted') {
+            $what = self::Post('inTrusted') === '1' ? 'trusted-on' : 'trusted-off';
         }
         $texts = array('node-update' => 'The node updates itself the next time it calls (a few seconds); it is back within a few minutes, its apps keep running.',
             'sys-security' => 'The node installs its security updates now; the result shows here when it is done.',
@@ -538,7 +610,9 @@ class module_controller extends ctrl_module
             'reboot' => 'The node restarts in about a minute; its apps start again by themselves.',
             'check-updates' => 'The node looks for updates now (its apps and its system); reload this page in a minute.',
             'autosec-on' => 'Security updates now install by themselves at night.', 'autosec-off' => 'Security updates now wait for you.',
-            'autoagent-on' => 'Node updates now install by themselves at night.', 'autoagent-off' => 'Node updates now wait for you (Update now).');
+            'autoagent-on' => 'Node updates now install by themselves at night.', 'autoagent-off' => 'Node updates now wait for you (Update now).',
+            'trusted-on' => 'Trusted: new apps on this node start with Extra isolation off (each app\'s Settings can still turn it on).',
+            'trusted-off' => 'Not trusted: new apps on this node start with every guard on.');
         self::Done(dh::NodeAct((int) self::Int('inId'), $what, self::Me()), isset($texts[$what]) ? $texts[$what] : 'Done.');
     }
 
@@ -1164,7 +1238,7 @@ class module_controller extends ctrl_module
                         . '<label class="dh-field"><span>' . self::t('Memory (MB)') . '</span><input type="text" class="form-control" name="inMem" value="' . (int) $c['dc_mem_in'] . '"><small>' . self::t('1024 MB = 1 GB.') . '</small></label>'
                         . '<label class="dh-field"><span>' . self::t('Disk (GB)') . '</span><input type="text" class="form-control" name="inDisk" value="' . self::h($gb) . '"><small>' . self::t('Room for the app\'s data. If it uses more, the app is stopped until you give it more room.') . '</small></label>'
                         . '</fieldset></div><div class="dh-foot"><a class="btn btn-default" href="./?module=docker_hosting">' . self::t('Cancel') . '</a> <button class="btn btn-primary" type="submit">' . self::t('Save') . '</button></div></form>'
-                        . self::AdvancedHtml($id, $c, $app) . self::BackupHtml($id, $c) . '</div>';
+                        . self::GuardsHtml($id, $c) . self::AdvancedHtml($id, $c, $app) . self::BackupHtml($id, $c) . '</div>';
                 }
                 $out .= '</div>';
             }
@@ -1868,6 +1942,7 @@ class module_controller extends ctrl_module
             . ($agentOld ? self::NodeButton($id, 'node-update', 'Update now', 'btn-primary', '', 'update')
                 : self::NodeButton($id, 'node-update', 'Update node', 'btn-default'))
             . self::Switch($id, 'autoagent', (int) $n['nd_autoagent_in'] === 1, 'Nightly node updates', '(installed by themselves between 02:00 and 03:00 when a new version is out)')
+            . self::Switch($id, 'trusted', (int) ($n['nd_trusted_in'] ?? 0) === 1, 'Trusted (my own apps)', '(for development or your own apps: new apps here start with Extra isolation off; every app\'s Settings can still turn it on)')
             . '<h4>' . self::t('The node\'s system') . '</h4><p>' . $sysLine . '</p>'
             . self::NodeButton($id, 'check-updates', 'Look for updates now')
             . self::NodeButton($id, 'sys-security', 'Install security updates', (int) $i['sys_security'] > 0 ? 'btn-primary' : 'btn-default')

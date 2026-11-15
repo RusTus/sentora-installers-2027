@@ -75,6 +75,7 @@ class dh
         if ($done) {
             return;
         }
+        $done = true;   // (set first: what it runs may read a setting, which calls it again)
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_dh_settings (st_name_vc VARCHAR(60) NOT NULL PRIMARY KEY, st_value_tx TEXT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_dh_nodes (
             nd_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, nd_name_vc VARCHAR(80) NOT NULL, nd_signpk_vc VARCHAR(100) NOT NULL DEFAULT '', nd_boxpk_vc VARCHAR(100) NOT NULL DEFAULT '',
@@ -130,6 +131,15 @@ class dh
             pl_cpu_in INT NOT NULL DEFAULT 0, pl_mem_in INT NOT NULL DEFAULT 0, pl_disk_in INT NOT NULL DEFAULT 0, pl_apps_tx TEXT NULL,
             pl_created_in INT NOT NULL, pl_deleted_in INT NULL, KEY pl_by (pl_by_fk)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         self::AddColumns('x_dh_grants', array('gr_plan_fk' => "INT NOT NULL DEFAULT 0"));
+        // (136) the guards: an app's own choices (JSON; none: the defaults), what its node says it runs on, a trusted node
+        self::AddColumns('x_dh_containers', array('dc_guard_tx' => "TEXT NULL", 'dc_iso_vc' => "VARCHAR(10) NOT NULL DEFAULT ''"));
+        self::AddColumns('x_dh_nodes', array('nd_trusted_in' => "TINYINT NOT NULL DEFAULT 0"));
+        // (apps made before the guards keep the standard runtime until an administrator turns Extra isolation on
+        // for them: switching a running app to gVisor by itself could stop one that does not run on it)
+        if (self::Get('guards_from') === '') {
+            $zdbh->exec("UPDATE x_dh_containers SET dc_guard_tx = '{\"iso\":\"standard\",\"before\":1}' WHERE dc_guard_tx IS NULL");
+            self::Set('guards_from', (string) time());
+        }
         // (125) app backups, restores and moves between nodes
         dh_backup::Ensure();
         $done = true;
@@ -1614,7 +1624,10 @@ class dh
             'sys-all' => array('sys-update', array('security' => false)), 'reboot' => array('reboot', array()), 'check-updates' => array('check-updates', array()));
         if ($what === 'autosec-on' || $what === 'autosec-off') {
             $zdbh->prepare("UPDATE x_dh_nodes SET nd_autosec_in = :a WHERE nd_id_pk = :n")->execute(array(':a' => $what === 'autosec-on' ? 1 : 0, ':n' => (int) $id));
-        } elseif ($what === 'autoagent-on' || $what === 'autoagent-off') {
+        } elseif ($what === 'trusted-on' || $what === 'trusted-off') {
+            // (a node of the administrator's own: its new apps start with the guards off; each app can still have them on)
+            $zdbh->prepare("UPDATE x_dh_nodes SET nd_trusted_in = :a WHERE nd_id_pk = :n")->execute(array(':a' => $what === 'trusted-on' ? 1 : 0, ':n' => (int) $id));
+                } elseif ($what === 'autoagent-on' || $what === 'autoagent-off') {
             $zdbh->prepare("UPDATE x_dh_nodes SET nd_autoagent_in = :a WHERE nd_id_pk = :n")->execute(array(':a' => $what === 'autoagent-on' ? 1 : 0, ':n' => (int) $id));
         } elseif (isset($jobs[$what])) {
             $q = $zdbh->prepare("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_node_fk = :n AND jb_ct_fk = 0 AND jb_action_vc = :a AND jb_state_vc IN ('queued','sent')");
@@ -2169,6 +2182,7 @@ class dh
             'image' => $app['image'], 'port' => (int) $app['port'], 'hostport' => (int) $c['dc_port_in'], 'env' => $env, 'volumes' => $app['volumes'],
             'cpu' => (int) $c['dc_cpu_in'], 'mem' => (int) $c['dc_mem_in'], 'disk' => (int) $c['dc_disk_in'], 'domain' => (string) $c['dc_domain_vc'],
             'public' => (int) $c['dc_public_in'], 'auth' => $setup !== '' ? password_hash($setup, PASSWORD_BCRYPT) : '',
+            'guards' => self::Guards($c),
         ), self::RegistryFor((string) $app['image']));
     }
 
@@ -2194,6 +2208,64 @@ class dh
      * @param array $c
      * @return array{cid:int, user:string}
      */
+    /**
+     * An app's guards (2026-11-15, owner: every guard on by default; only an administrator may switch one off
+     * for an app; a node an administrator marked "Trusted (my own apps)" starts its new apps with them off).
+     * iso: 'gvisor' (Extra isolation: the app runs on gVisor's own small kernel) or 'standard'.
+     *
+     * @param array $c an x_dh_containers row
+     * @return array<string, string>
+     */
+    static function Guards(array $c)
+    {
+        $g = json_decode((string) ($c['dc_guard_tx'] ?? ''), true);
+        $g = is_array($g) ? $g : array();
+        $n = self::Node((int) $c['dc_node_fk']);
+        $trusted = $n && (int) ($n['nd_trusted_in'] ?? 0) === 1;
+        return array('iso' => isset($g['iso']) && in_array($g['iso'], array('gvisor', 'standard'), true) ? $g['iso'] : ($trusted ? 'standard' : 'gvisor'));
+    }
+
+    /**
+     * Change an app's guards (administrators only); the app is made anew on its node with them.
+     *
+     * @param int $by the administrator
+     * @param int $id the app
+     * @param array<string, string> $want e.g. array('iso' => 'standard')
+     * @return bool (dh::$why when not)
+     */
+    static function SetGuards($by, $id, array $want)
+    {
+        global $zdbh;
+        if (!self::IsAdmin(self::Account((int) $by))) {
+            self::$why = 'Only an administrator can change an app\'s guards.';
+            return false;
+        }
+        $c = self::Container((int) $id);
+        if (!$c || $c['dc_deleted_in'] !== null) {
+            self::$why = 'No such app.';
+            return false;
+        }
+        $g = json_decode((string) ($c['dc_guard_tx'] ?? ''), true);
+        $g = is_array($g) ? $g : array();
+        $before = self::Guards($c);
+        if (isset($want['iso'])) {
+            if (!in_array($want['iso'], array('gvisor', 'standard'), true)) {
+                self::$why = 'Not a choice.';
+                return false;
+            }
+            $g['iso'] = $want['iso'];
+        }
+        $zdbh->prepare("UPDATE x_dh_containers SET dc_guard_tx = :g WHERE dc_id_pk = :c")->execute(array(':g' => json_encode($g), ':c' => (int) $id));
+        $c['dc_guard_tx'] = json_encode($g);
+        if (self::Guards($c) === $before) {
+            self::$why = 'Nothing changed.';
+            return false;
+        }
+        self::Queue((int) $c['dc_node_fk'], (int) $id, 'recreate', self::CreateData($c, ''));
+        self::Log('guards', $c['dc_domain_vc'] . ': Extra isolation ' . (self::Guards($c)['iso'] === 'gvisor' ? 'on' : 'off'), (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
+        return true;
+    }
+
     static function Who(array $c)
     {
         return array('cid' => (int) $c['dc_id_pk'], 'user' => 'sdh' . (int) $c['dc_acc_fk']);
@@ -3318,6 +3390,9 @@ class dh
             }
             $set->execute(array(':s' => $state, ':u' => isset($s['used_mb']) && is_numeric($s['used_mb']) ? max(0, (int) $s['used_mb']) : 0, ':c' => $cid));
             $bad = (string) $mine[$cid]['dc_want_vc'] === 'running' && !in_array($state, array('running', 'creating', 'starting', 'restarting', 'updating', 'applying', 'saving', 'restoring', 'moving'), true);
+            if (isset($s['iso']) && in_array($s['iso'], array('gvisor', 'standard'), true)) {
+                $zdbh->prepare("UPDATE x_dh_containers SET dc_iso_vc = :i WHERE dc_id_pk = :c")->execute(array(':i' => $s['iso'], ':c' => $cid));
+            }
             $zdbh->prepare("UPDATE x_dh_containers SET dc_update_in = :u, dc_badsince_in = :b WHERE dc_id_pk = :c")->execute(array(':u' => !empty($s['update']) ? 1 : 0,
                 ':b' => $bad ? ((int) $mine[$cid]['dc_badsince_in'] > 0 ? (int) $mine[$cid]['dc_badsince_in'] : time()) : 0, ':c' => $cid));
         }

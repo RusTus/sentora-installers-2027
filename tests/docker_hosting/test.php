@@ -1423,6 +1423,58 @@ $c = dh::Container($pid);
 check($c['dc_node_fk'] == $bid && $c['dc_state_vc'] === 'running' && strpos((string) val("SELECT lg_note_vc FROM x_dh_log WHERE lg_ct_fk = " . (int) $pid . " AND lg_what_vc = 'failed' ORDER BY lg_id_pk DESC"), 'moving it failed') !== false && trim((string) file_get_contents($nb . '/fake/podman/sdh1/c/sdh-' . $pid . '/state')) === 'running', 'a move that fails: the app runs again where it was, the log says why', $o . json_encode($c));
 check(!is_dir(getenv('FAKE_DIR') . '/podman/sdh1/c/sdh-' . $pid), 'and nothing is left on the node it was going to');
 
+section('guards (136): Extra isolation (gVisor)');
+// (on bravo, the second node, with the administrator's own app from the moves above)
+$ga = dh::Container($pid);
+check($ga && (int) $ga['dc_node_fk'] === (int) $bid && $ga['dc_state_vc'] === 'running', 'an app running on bravo to try it with');
+$gfake = $nb . '/fake';
+$gcalls = function () use ($gfake) { return (string) @file_get_contents($gfake . '/calls.log'); };
+
+$gid = (int) $ga['dc_id_pk'];
+$gu = 'sdh' . (int) $ga['dc_acc_fk'];
+$gdir = $gfake . '/podman/' . $gu . '/c/sdh-' . $gid;
+check(dh::Guards($ga)['iso'] === 'gvisor', 'a new app: Extra isolation on by default');
+check(isset(dh::CreateData($ga, '')['guards']['iso']) && dh::CreateData($ga, '')['guards']['iso'] === 'gvisor', 'the node is told so in every job that makes the app');
+check(!dh::SetGuards((int) $ga['dc_acc_fk'] === 1 ? 3 : (int) $ga['dc_acc_fk'], $gid, array('iso' => 'standard')) && strpos(dh::$why, 'Only an administrator') !== false, 'a customer can not switch it off', dh::$why);
+// this node has no gVisor yet: the app runs as before, and the panel says so
+$agentB('once');
+check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'standard', 'a node without gVisor reports the standard runtime (the panel shows "asked for, not in force")');
+// gVisor on the node (the installer's runsc-sentora)
+$runsc = $gfake . '/runsc-sentora';
+file_put_contents($runsc, "#!/bin/sh\nexit 0\n");
+chmod($runsc, 0755);
+file_put_contents($nb . '/etc/platform.conf', "RUNSC=" . $runsc . "\n", FILE_APPEND);
+$okg = dh::SetGuards(1, $gid, array('iso' => 'standard'));
+check($okg && lastjob($gid)['jb_action_vc'] === 'recreate', 'an administrator switches it off: the app is made anew', dh::$why . ' / ' . json_encode(lastjob($gid)));
+$agentB('once');
+check(trim((string) @file_get_contents($gdir . '/runtime')) === 'crun', 'off: the standard runtime');
+check(dh::SetGuards(1, $gid, array('iso' => 'gvisor')), 'and on again');
+file_put_contents($gfake . '/calls.log', '');
+$agentB('once');
+$args = (string) @file_get_contents($gdir . '/args');
+$cl = $gcalls();
+check(trim((string) @file_get_contents($gdir . '/runtime')) === $runsc && strpos($args, "--cgroup-parent\nsentora-app-" . $gid . ".slice") !== false, 'on: gVisor\'s runtime, in the app\'s own slice', $args);
+check(strpos($cl, 'systemctl --user set-property sentora-app-' . $gid . '.slice MemoryMax=' . ((int) $ga['dc_mem_in'] + 64) . 'M MemorySwapMax=0 CPUQuota=' . (int) $ga['dc_cpu_in'] . '% TasksMax=4096') !== false, 'its limits on the slice (memory + 64 MB for gVisor, no swap, its CPU)', $cl);
+$agentB('once');
+check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'gvisor', 'the node reports it runs on gVisor');
+$r = req((int) $ga['dc_acc_fk'], '', array(), array('settings' => (string) $gid));
+check(strpos($r['html'], 'On: runs on gVisor') !== false && strpos($r['html'], 'Extra isolation (gVisor)') !== false, 'its Settings show it', '');
+check(((int) $ga['dc_acc_fk'] === 1) === (strpos($r['html'], 'name="inIso"') !== false), 'the switch is there for an administrator only');
+// new limits: on the slice (Podman's own update does not reach an app on gVisor)
+file_put_contents($gfake . '/calls.log', '');
+dh::Queue((int) $bid, $gid, 'limits', array_merge(dh::Who($ga), array('cpu' => 25, 'mem' => 300)));
+$agentB('once');
+check(strpos($gcalls(), 'set-property sentora-app-' . $gid . '.slice MemoryMax=364M MemorySwapMax=0 CPUQuota=25%') !== false && strpos($gcalls(), 'podman[' . $gu . '] update') === false, 'new limits go to its slice', $gcalls());
+// a trusted node: its new apps start with it off; an app's own choice stays
+check(dh::NodeAct((int) $bid, 'trusted-on', 1), 'bravo marked Trusted (my own apps)');
+$fresh = $ga;
+$fresh['dc_guard_tx'] = null;
+check(dh::Guards($fresh)['iso'] === 'standard' && dh::Guards(dh::Container($gid))['iso'] === 'gvisor', 'trusted: a new app starts with it off; this app keeps its own choice');
+dh::NodeAct((int) $bid, 'trusted-off', 1);
+check(dh::Guards($fresh)['iso'] === 'gvisor', 'not trusted again: on');
+dh::SetGuards(1, $gid, array('iso' => 'standard'));
+$agentB('once');
+
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
 check((string) dh::Get('sign_sk') !== $before && strpos((string) $out, 'sentora-docker-node-relink') !== false && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')") === 0,

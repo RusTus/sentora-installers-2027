@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '115';
+    const VERSION = '116';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -60,6 +60,8 @@ class snode
     static $cfg = array();
     /** @var array Disk use per container (MB) and when measured. */
     static $disk = array();
+    /** Each app's runtime as Podman last said ('gvisor' or 'standard'), read again when an app is made anew. */
+    static $iso = array();
     static $diskAt = 0;
     static $sysCheckAt = 0;
     static $fence = null;
@@ -551,6 +553,9 @@ class snode
 
     static function Check(array $d, $action)
     {
+        if (isset($d['guards']) && (!is_array($d['guards']) || (isset($d['guards']['iso']) && !in_array($d['guards']['iso'], array('gvisor', 'standard'), true)))) {
+            return 'bad guards';
+        }
         if (!isset($d['cid']) || !is_int($d['cid']) || $d['cid'] <= 0 || !isset($d['user']) || !is_string($d['user']) || !preg_match('/^sdh\d{1,9}$/', $d['user'])) {
             return 'bad container or user';
         }
@@ -608,12 +613,63 @@ class snode
     /**
      * podman create's arguments for a container (the same for a new one and an updated one).
      */
+    /**
+     * Extra isolation (gVisor) asked for this app? The panel sends it in the job's guards; a panel from before
+     * them sends none: the standard runtime, as before.
+     */
+    static function WantGvisor(array $d)
+    {
+        return isset($d['guards']['iso']) && $d['guards']['iso'] === 'gvisor';
+    }
+
+    /** gVisor's runtime for the apps (the installer's runsc-sentora), or '' when this node has none. */
+    static function Runsc()
+    {
+        $r = self::P('RUNSC', '');
+        return $r !== '' && $r[0] === '/' && is_executable($r) ? $r : '';
+    }
+
+    /** The slice of the user's own that holds an app's limits when it runs on gVisor. */
+    static function Slice($cid)
+    {
+        return 'sentora-app-' . (int) $cid . '.slice';
+    }
+
+    /**
+     * An app on gVisor: its limits on its slice (memory with 64 MB for gVisor's own kernel, so the app keeps
+     * what its customer has; no swap; its CPU share; tasks: gVisor's own threads, the app's processes live
+     * inside it). Kept by the user's systemd, so they hold again after a restart.
+     */
+    static function SetSlice($user, $cid, $cpu, $mem)
+    {
+        return self::AsUser($user, array('systemctl', '--user', 'set-property', self::Slice($cid),
+            'MemoryMax=' . ((int) $mem + 64) . 'M', 'MemorySwapMax=0', 'CPUQuota=' . max(1, (int) $cpu) . '%', 'TasksMax=4096'), 60);
+    }
+
+    /** Which runtime an app runs on, from Podman: 'gvisor' or 'standard'. */
+    static function IsoOf($user, $name)
+    {
+        $r = self::Podman($user, array('container', 'inspect', '--format', '{{.OCIRuntime}}', $name), 60);
+        return $r[0] === 0 && strpos($r[1], 'runsc') !== false ? 'gvisor' : 'standard';
+    }
+
     static function CreateArgs(array $d, $name)
     {
-        $args = array('create', '--name', $name, '--label', 'sentora.cid=' . $d['cid'], '--restart', 'unless-stopped',
+        // Extra isolation: gVisor's runtime and the app's own slice (its limits set first)
+        $pre = array();
+        unset(self::$iso[(int) $d['cid']]);
+        if (self::WantGvisor($d) && self::Runsc() !== '') {
+            self::SetSlice($d['user'], $d['cid'], $d['cpu'], $d['mem']);
+            $pre = array('--runtime', self::Runsc());
+        }
+        $args = array_merge($pre, array('create', '--name', $name, '--label', 'sentora.cid=' . $d['cid'], '--restart', 'unless-stopped',
             '--cpus', sprintf('%d.%02d', intdiv($d['cpu'], 100), $d['cpu'] % 100), '--memory', $d['mem'] . 'm', '--memory-swap', $d['mem'] . 'm',
             '--pids-limit', '1024', '--security-opt', 'no-new-privileges', '--log-driver', 'k8s-file', '--log-opt', 'max-size=10mb',
-            '--publish', '127.0.0.1:' . $d['hostport'] . ':' . $d['port']);
+            '--publish', '127.0.0.1:' . $d['hostport'] . ':' . $d['port']));
+        if ($pre) {
+            $args[] = '--cgroup-parent';
+            $args[] = self::Slice($d['cid']);
+        }
         foreach (array_values($d['volumes']) as $i => $path) {
             $args[] = '--volume';
             $args[] = self::Name($d['cid']) . '-' . $i . ':' . $path;
@@ -911,7 +967,9 @@ class snode
                 if (!isset($s['containers'][$key], $d['cpu'], $d['mem'])) {
                     return array(false, 'no such container here');
                 }
-                $r = self::Podman($d['user'], array('update', '--cpus', sprintf('%d.%02d', intdiv($d['cpu'], 100), $d['cpu'] % 100), '--memory', $d['mem'] . 'm', '--memory-swap', $d['mem'] . 'm', $name));
+                // (an app on gVisor: its slice holds the limits; Podman's own update does not reach it there)
+                $r = self::IsoOf($d['user'], $name) === 'gvisor' ? self::SetSlice($d['user'], $d['cid'], $d['cpu'], $d['mem'])
+                    : self::Podman($d['user'], array('update', '--cpus', sprintf('%d.%02d', intdiv($d['cpu'], 100), $d['cpu'] % 100), '--memory', $d['mem'] . 'm', '--memory-swap', $d['mem'] . 'm', $name));
                 return array($r[0] === 0, $r[0] === 0 ? 'limits: done' : 'limits: ' . self::Tail($r[1]));
             case 'logs':
                 if (!isset($s['containers'][$key])) {
@@ -1095,7 +1153,10 @@ class snode
                     self::$disk[$cid] = self::DiskUse($user, (int) $cid, (int) $s['containers'][$cid]['volumes']);
                 }
                 $c = $s['containers'][$cid];
-                $out[$cid] = array('state' => $st, 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
+                if ($st !== 'missing' && !isset(self::$iso[$cid])) {
+                    self::$iso[$cid] = self::IsoOf($user, self::Name((int) $cid));
+                }
+                $out[$cid] = array('state' => $st, 'iso' => isset(self::$iso[$cid]) ? self::$iso[$cid] : '', 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
                     'update' => !empty($s['updates'][$cid]) ? 1 : 0,
                     // (what the panel needs to show an app it does not know, and to take it back)
                     'image' => isset($c['image']) ? (string) $c['image'] : '', 'domain' => (string) $c['domain'], 'hostport' => (int) $c['hostport'],

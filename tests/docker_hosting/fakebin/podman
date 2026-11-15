@@ -5,6 +5,8 @@ echo "podman[${FAKE_USER:-root}] $*" >> "$FAKE_DIR/calls.log"
 [ -n "${FAKE_USER:-}" ] || { echo "not as root" >&2; exit 125; }
 [ "$XDG_RUNTIME_DIR" = "$SNODE_RUN/$(cat "$FAKE_DIR/users/$FAKE_USER")" ] || { echo "wrong XDG_RUNTIME_DIR $XDG_RUNTIME_DIR" >&2; exit 125; }
 P=$FAKE_DIR/podman/$FAKE_USER; mkdir -p "$P/c" "$P/v"
+# (a runtime of its own: podman --runtime X create ...; kept with the container, as Podman does)
+RUNTIME=crun; if [ "$1" = --runtime ]; then RUNTIME=$2; shift 2; fi
 last=${!#}
 reg() { local f="$FAKE_DIR/registry/$(echo "$1" | tr '/:' '__')"; if [ -f "$f" ]; then cat "$f"; else echo "id-$(echo "$1" | tr '/:' '__')-1 sha256:$(printf '1%.0s' $(seq 1 64))"; fi; }
 mkdir -p "$P/i"
@@ -21,6 +23,7 @@ case "$1" in
           *Config.Env*) grep -A1 -x -- --env "$P/c/$last/args" | grep -vx -- --env | grep -vx -- -- | php -r '$o = array("PATH=/usr/bin", "container=podman", "HOSTNAME=abc");
             foreach (file("php://stdin", FILE_IGNORE_NEW_LINES) as $l) { $o[] = $l; } echo json_encode($o), "\n";'; exit 0 ;;
           *.ImageName*) tail -1 "$P/c/$last/args"; exit 0 ;;
+          *OCIRuntime*) cat "$P/c/$last/runtime" 2> /dev/null || echo crun; exit 0 ;;
           *.Image*) cat "$P/c/$last/imageid"; exit 0 ;;
           *State.Status*) cat "$P/c/$last/state"; exit 0 ;;
         esac ;;
@@ -47,7 +50,7 @@ case "$1" in
       [ "${args[$i]}" = --volume ] && { v=${args[$((i+1))]}; mkdir -p "$P/v/${v%%:*}"; }
     done
     [ -d "$P/c/$name" ] && { echo "Error: name in use"; exit 125; }
-    mkdir -p "$P/c/$name"; printf '%s\n' "$@" > "$P/c/$name/args"; echo created > "$P/c/$name/state"
+    mkdir -p "$P/c/$name"; printf '%s\n' "$@" > "$P/c/$name/args"; echo created > "$P/c/$name/state"; echo "$RUNTIME" > "$P/c/$name/runtime"
     f="$P/i/$(echo "$last" | tr '/:' '__')"; if [ -f "$f" ]; then cut -d' ' -f1 "$f" > "$P/c/$name/imageid"; elif [[ "$last" != */* ]]; then echo "$last" > "$P/c/$name/imageid"; else echo none > "$P/c/$name/imageid"; fi; echo id123; exit 0 ;;
   start) [ -d "$P/c/$last" ] || { echo "Error: no such container $last"; exit 125; }; [ -f "$FAKE_DIR/start-fail" ] && { echo "Error: crun: OCI runtime error"; exit 126; }
     # an image that crashes at once (for the update's rollback)
