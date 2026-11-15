@@ -120,14 +120,24 @@ echo "$PS"
 echo "$PS" | grep -q "sdh-$CID 127.0.0.1:20000->3001/tcp" && ok "runs rootless as sdh3, on 127.0.0.1:20000 only" || bad "not running as sdh3 on 127.0.0.1:20000"
 in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no containers" || bad "root has containers"
 # an app's limit as the kernel holds it: read in the node's cgroup tree, at the container's own cgroup (Fedora 45's
-# crun refuses "podman exec" in this test's container: setrlimit RLIMIT_NOFILE)
-cg() { in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman inspect --format '{{.State.CgroupPath}}' sdh-$CID 2> /dev/null); cat /sys/fs/cgroup\$p/$1 2> /dev/null || runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman exec sdh-$CID cat /sys/fs/cgroup/$1" | tr -d '\r'; }
+# crun refuses "podman exec" in this test's container: setrlimit RLIMIT_NOFILE); an app in gVisor has its limits on
+# its own slice (sentora-app-<id>.slice: runsc runs with --ignore-cgroups inside it), with 64 MB for gVisor itself
+RT=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.OCIRuntime}}' sdh-$CID" | tr -d '\r')
+case "$RT" in *runsc*) GV=1; ok "runs in gVisor ($RT)" ;; *) GV=0; bad "not in gVisor: '$RT' (new apps are)" ;; esac
+cg() { if [ "$GV" = 1 ]; then
+    in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u systemctl --user show -p ControlGroup --value sentora-app-$CID.slice); cat /sys/fs/cgroup/user.slice/user-\$u.slice/user@\$u.service\$p/$1 /sys/fs/cgroup\$p/$1 2> /dev/null | head -1" | tr -d '\r'
+  else
+    in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman inspect --format '{{.State.CgroupPath}}' sdh-$CID 2> /dev/null); cat /sys/fs/cgroup\$p/$1 2> /dev/null || runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman exec sdh-$CID cat /sys/fs/cgroup/$1" | tr -d '\r'
+  fi; }
+# what the kernel should hold: the app's memory (+64 MB for gVisor's own), its CPU, its processes
+want_mem() { echo $(( ($1 + 64 * GV) * 1048576 )); }
+WANT_PIDS=1024; [ "$GV" = 1 ] && WANT_PIDS=4096
 MEMMAX=$(cg memory.max)
-[ "$MEMMAX" = 268435456 ] && ok "memory limit held by the kernel (256 MB)" || bad "memory.max in the container: '$MEMMAX' (want 268435456)"
+[ "$MEMMAX" = "$(want_mem 256)" ] && ok "memory limit held by the kernel (256 MB)" || bad "memory.max: '$MEMMAX' (want $(want_mem 256))"
 CPUMAX=$(cg cpu.max)
 [ "$CPUMAX" = "50000 100000" ] && ok "CPU limit held by the kernel (0.5)" || bad "cpu.max in the container: '$CPUMAX' (want 50000 100000)"
 PIDS=$(cg pids.max)
-[ "$PIDS" = 1024 ] && ok "process limit held (1024)" || bad "pids.max: '$PIDS'"
+[ "$PIDS" = "$WANT_PIDS" ] && ok "process limit held ($WANT_PIDS)" || bad "pids.max: '$PIDS' (want $WANT_PIDS)"
 
 say "Caddy in front"
 code() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.test:443:127.0.0.1 $1 https://kuma.example.test/"; }
@@ -182,8 +192,8 @@ L=$(wait_for 60 panel logs "$CID")
 echo "$L" | tail -3
 [ -n "$L" ] && ok "logs reach the panel" || { bad "no logs"; diag; }
 panel limits "$CID" 75 384 2 | grep -qx ok || bad "limits refused"
-for _ in $(seq 1 20); do MEMMAX=$(cg memory.max); [ "$MEMMAX" = 402653184 ] && break; sleep 3; done
-[ "$MEMMAX" = 402653184 ] && ok "new limits applied to the running container (384 MB)" || { bad "memory.max after the change: '$MEMMAX'"; diag; }
+for _ in $(seq 1 20); do MEMMAX=$(cg memory.max); [ "$MEMMAX" = "$(want_mem 384)" ] && break; sleep 3; done
+[ "$MEMMAX" = "$(want_mem 384)" ] && ok "new limits applied to the running container (384 MB)" || { bad "memory.max after the change: '$MEMMAX'"; diag; }
 say "The app's own settings (Advanced)"
 panel env "$CID" "SENTORA_TEST=hello there" | grep -qx ok || bad "settings refused: $(panel env "$CID" "SENTORA_TEST=hello there")"
 wait_for 180 state_is "$CID" running > /dev/null && ok "running again with its new settings" || { bad "not running after the settings: $(panel state "$CID")"; diag; }
