@@ -201,7 +201,11 @@ U=$(wait_for 400 bash -c "panel() { php '$T/node_real.php' \"\$@\"; }; s=\$(pane
 
 say "An app the panel lost: found again, given back, moved to another customer and back (with its data)"
 podu() { in_box "runuser -u $1 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u $1) podman $2"; }
-podu sdh3 "exec sdh-$CID sh -c 'echo kept-$CID > /app/data/sentora-test.txt'"
+# the app's data, read and written in its data volume on the node, as its user (not through "podman exec", which
+# Fedora 45's crun refuses in this test's container; the data is where it must be: in the volume)
+vcat() { in_box "runuser -u $1 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u $1) sh -c 'cat \"\$(podman volume inspect --format {{.Mountpoint}} sdh-$CID-0)/$2\"'" | tr -d '\r'; }
+vput() { in_box "runuser -u $1 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u $1) sh -c 'echo $3 > \"\$(podman volume inspect --format {{.Mountpoint}} sdh-$CID-0)/$2\"'"; }
+vput sdh3 sentora-test.txt "kept-$CID"
 # the node's own list loses it too (state.json): it must find it by its label
 in_box "php -r '\$f = \"/var/lib/sentora-docker-node/state.json\"; \$s = json_decode(file_get_contents(\$f), true); unset(\$s[\"containers\"][\"$CID\"], \$s[\"scanned_at\"]); file_put_contents(\$f, json_encode(\$s));'"
 panel forget "$CID" > /dev/null
@@ -223,7 +227,7 @@ M=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob move | grep -E '^(done 
 sleep 2; S=$(panel state "$CID")
 [[ "$S" == running* ]] && [[ "$M" == "done moved to sdh4"* ]] && ok "moved to client2 (sdh4)" || { bad "move: $S / $M / $(panel found "$CID" fd_note_vc)"; diag; }
 podu sdh4 "ps --format '{{.Names}}'" | grep -qx "sdh-$CID" && ! podu sdh3 "ps -a --format '{{.Names}}'" | grep -qx "sdh-$CID" && ok "runs as sdh4; gone from sdh3" || bad "containers: sdh4 [$(podu sdh4 "ps -a --format '{{.Names}}'" | tr '\n' ' ')] sdh3 [$(podu sdh3 "ps -a --format '{{.Names}}'" | tr '\n' ' ')]"
-[ "$(podu sdh4 "exec sdh-$CID cat /app/data/sentora-test.txt" | tr -d '\r')" = "kept-$CID" ] && ok "with its data" || bad "its data was not moved"
+[ "$(vcat sdh4 sentora-test.txt)" = "kept-$CID" ] && ok "with its data" || bad "its data was not moved"
 podu sdh4 "inspect --format '{{range .Config.Env}}{{println .}}{{end}}' sdh-$CID" | grep -qx 'SENTORA_TEST=hello there' && ok "and its own settings" || bad "its settings were lost"
 podu sdh3 "volume ls -q" | grep -q "^sdh-$CID-" && bad "sdh3 still has its data folder" || ok "sdh3's copy of the data is gone"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
@@ -235,21 +239,21 @@ wait_for 120 bash -c "[ \"\$(php '$T/node_real.php' found $CID fd_user_vc)\" = s
 panel adopt "$CID" 3 | grep -qx ok || bad "adopt back: $(panel adopt "$CID" 3)"
 M=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob move | grep -E '^(done moved to sdh3|failed)'"); echo "  $M"
 sleep 2; S=$(panel state "$CID")
-[[ "$S" == running* ]] && [ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | tr -d '\r')" = "kept-$CID" ] && ok "moved back to client1, data kept" || { bad "back: $S / $(panel lastjob move)"; diag; }
+[[ "$S" == running* ]] && [ "$(vcat sdh3 sentora-test.txt)" = "kept-$CID" ] && ok "moved back to client1, data kept" || { bad "back: $S / $(panel lastjob move)"; diag; }
 in_box 'ls /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left in the work folders" || bad "copies left: $(in_box 'ls -la /home/sdh3/.sentora-move /home/sdh4/.sentora-move 2>&1')"
 
 say "App backups: backed up to the panel, changed, put back"
-podu sdh3 "exec sdh-$CID sh -c 'echo before-backup > /app/data/sentora-backup.txt'"
+vput sdh3 sentora-backup.txt before-backup
 panel backup "$CID" | grep -qx ok || bad "backup refused: $(panel backup "$CID")"
 B=$(wait_for 600 bash -c "php '$T/node_real.php' backupstate $CID | grep -E '^(stored|failed)'"); echo "  $B"
 [[ "$B" == stored* ]] && ok "backed up to the panel: $B" || { bad "backup: $B / $(panel state "$CID")"; diag; }
 wait_for 120 state_is "$CID" running > /dev/null && ok "the app runs again after its backup" || bad "not running after the backup: $(panel state "$CID")"
-podu sdh3 "exec sdh-$CID sh -c 'echo after-backup > /app/data/sentora-backup.txt'"
+vput sdh3 sentora-backup.txt after-backup
 panel restore "$CID" | grep -qx ok || bad "restore refused: $(panel restore "$CID")"
 R=$(wait_for 900 bash -c "php '$T/node_real.php' lastjob restore | grep -E '^(done|failed)'"); echo "  $R"
 wait_for 120 state_is "$CID" running > /dev/null
-[ "$(podu sdh3 "exec sdh-$CID cat /app/data/sentora-backup.txt" | tr -d '\r')" = before-backup ] && [[ "$R" == done* ]] && ok "put back: the app runs with the backup's data" || { bad "restore: $R / $(panel state "$CID")"; diag; }
-podu sdh3 "exec sdh-$CID cat /app/data/sentora-test.txt" | grep -qx "kept-$CID" && ok "(and the data it had then)" || bad "the restore lost data"
+[ "$(vcat sdh3 sentora-backup.txt)" = before-backup ] && [[ "$R" == done* ]] && ok "put back: the app runs with the backup's data" || { bad "restore: $R / $(panel state "$CID")"; diag; }
+vcat sdh3 sentora-test.txt | grep -qx "kept-$CID" && ok "(and the data it had then)" || bad "the restore lost data"
 in_box 'ls /home/sdh3/.sentora-move /var/lib/sentora-docker-node/transfer 2>/dev/null | grep -c tar || true' | grep -qx 0 && ok "no copies left on the node" || bad "copies left: $(in_box 'ls -laR /home/sdh3/.sentora-move /var/lib/sentora-docker-node/transfer 2>&1')"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it after the restore" || bad "after the restore: HTTP $C"
