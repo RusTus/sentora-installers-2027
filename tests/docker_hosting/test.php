@@ -1519,6 +1519,10 @@ $agentB('once');
 $sum = json_decode((string) val("SELECT dc_scan_tx FROM x_dh_containers WHERE dc_id_pk = " . $gid), true);
 check(is_array($sum) && $sum['cf'] === 2 && $sum['c'] === 3 && $sum['h'] === 1 && $sum['hf'] === 1 && count($sum['top']) === 2 && strpos(implode(' ', $sum['top']), '<') === false, 'the panel knows the counts (only plain words came along)', json_encode($sum));
 $r = req($gacc, '', array(), array('settings' => (string) $gid));
+if (getenv('DH_PAGES')) {
+    // (the page saved, to be looked at with the panel's own style sheets)
+    file_put_contents(getenv('DH_PAGES') . '/security.html', $r['html']);
+}
 check(strpos($r['html'], '2 critical holes with a fix') !== false && strpos($r['html'], 'openssl') !== false && strpos($r['html'], 'Image check (Trivy)') !== false, 'its Settings show the answer and the worst holes', '');
 check(($gacc === 1) === (strpos($r['html'], 'name="inScan"') !== false), 'the choice is there for an administrator only');
 $jb = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = " . $gid . " AND jb_state_vc IN ('queued','sent')");

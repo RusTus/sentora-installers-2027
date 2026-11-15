@@ -201,6 +201,10 @@ select.form-control.dh-guard-choice { width: auto; min-width: 104px; flex: none;
     .dh-more { padding: 12px; }
     .dh-more .form-control { max-width: none; }
     .dh-found-form select.form-control { flex: 1 1 100%; }
+    /* a guard's text uses the whole width; its switch or choice goes under it */
+    .dh-guard { flex-wrap: wrap; }
+    .dh-guard-text { flex: 1 1 100%; }
+    select.form-control.dh-guard-choice { flex: 1 1 100%; }
     .dh-foot > .btn { flex: 1 1 auto; }
     .dh-backups-act > form { flex: 1 1 auto; }
     .dh-backups-act .btn { width: 100%; }
