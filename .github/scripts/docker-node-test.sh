@@ -365,7 +365,8 @@ echo "  $U"
 wait_for 60 state_is "$CID" running > /dev/null && ok "still running" || bad "not running after the update: $(panel state "$CID")"
 panel settings certs@example.com 1 | grep -qx ok || bad "settings refused"
 wait_for 60 bash -c "docker exec $NAME grep -q 'email certs@example.com' /etc/caddy/Caddyfile && echo y" > /dev/null && ok "the node took its settings from the panel (Caddy's email)" || bad "Caddyfile: $(in_box 'cat /etc/caddy/Caddyfile')"
-in_box 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-docker-node/install.conf' && ok "and kept them for its own updates" || bad "settings not kept"
+# (install.conf is written once Caddy has reloaded: a moment later)
+wait_for 60 bash -c "docker exec $NAME sh -c 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-docker-node/install.conf' && echo y" > /dev/null && ok "and kept them for its own updates" || bad "settings not kept"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "the app is still served (setup password)" || bad "after the settings: HTTP $C"
 panel nodeact sys-security | grep -qx ok || bad "sys-security refused"
