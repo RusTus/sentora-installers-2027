@@ -253,31 +253,36 @@ for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 
 say "A private image: downloaded with a registry login, which does not stay on the node"
 # (a registry with a password on the node itself, as root, on the node's own network (no port forwarding) and with root's own
-# simple storage in a folder of its own (vfs: overlay is not possible inside the test's container, and root's own storage is not touched); the customer's user downloads from it over 127.0.0.1)
-in_box 'mkdir -p /root/regauth /etc/containers/registries.conf.d && php -r "echo \"bot:\", password_hash(\"pw-reg-123\", PASSWORD_BCRYPT), \"\\n\";" > /root/regauth/htpasswd
-  printf "[[registry]]\nlocation = \"127.0.0.1:5000\"\ninsecure = true\n" > /etc/containers/registries.conf.d/90-sentora-test.conf
+# simple storage in a folder of its own (vfs: overlay is not possible inside the test's container, and root's own storage is not touched).
+# It listens on the node's own address, as a registry on the local network would: since agent 115 the apps' users may not open
+# connections to the node's 127.0.0.1, and the local network is opened for this customer, as an administrator would)
+NIP=$(in_box "hostname -I | awk '{print \$1}'"); REG="$NIP:5000"
+in_box "REG=$REG; "'mkdir -p /root/regauth /etc/containers/registries.conf.d && php -r "echo \"bot:\", password_hash(\"pw-reg-123\", PASSWORD_BCRYPT), \"\\n\";" > /root/regauth/htpasswd
+  printf "[[registry]]\nlocation = \"$REG\"\ninsecure = true\n" > /etc/containers/registries.conf.d/90-sentora-test.conf
   RP="podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs"
-  $RP run -d --name testreg --network host -e REGISTRY_HTTP_ADDR=127.0.0.1:5000 -v /root/regauth:/auth:Z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=test -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd docker.io/library/registry:2 > /dev/null
-  $RP create --name testweb docker.io/library/busybox:1 > /dev/null && $RP commit -q --change "CMD [\"busybox\", \"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/etc\"]" testweb 127.0.0.1:5000/private/web:1 > /dev/null
-  for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:5000/v2/ && break; sleep 1; done
-  $RP push -q --tls-verify=false --creds bot:pw-reg-123 127.0.0.1:5000/private/web:1' 2>&1 | tail -3
-if in_box 'curl -s -u bot:pw-reg-123 http://127.0.0.1:5000/v2/_catalog' | grep -q private/web; then
-    ok "a registry with a login on the node holds 127.0.0.1:5000/private/web:1"
-    in_box 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/v2/_catalog' | grep -qx 401 && ok "(it refuses a download without the login)" || bad "the test registry answers without a login"
-    PA=$(panel private 127.0.0.1:5000/private/web:1 8080); [[ "$PA" =~ ^my- ]] || bad "own app refused: $PA"
-    [ "$(panel registry 127.0.0.1:5000 bot pw-reg-123)" = ok ] && ok "registry login saved in the panel" || bad "registry login refused"
+  $RP run -d --name testreg --network host -e REGISTRY_HTTP_ADDR=$REG -v /root/regauth:/auth:Z -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=test -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd docker.io/library/registry:2 > /dev/null
+  $RP create --name testweb docker.io/library/busybox:1 > /dev/null && $RP commit -q --change "CMD [\"busybox\", \"httpd\", \"-f\", \"-p\", \"8080\", \"-h\", \"/etc\"]" testweb $REG/private/web:1 > /dev/null
+  for _ in $(seq 1 20); do curl -s -o /dev/null http://$REG/v2/ && break; sleep 1; done
+  $RP push -q --tls-verify=false --creds bot:pw-reg-123 $REG/private/web:1' 2>&1 | tail -3
+if in_box "curl -s -u bot:pw-reg-123 http://$REG/v2/_catalog" | grep -q private/web; then
+    ok "a registry with a login on the local network holds $REG/private/web:1"
+    in_box "curl -s -o /dev/null -w '%{http_code}' http://$REG/v2/_catalog" | grep -qx 401 && ok "(it refuses a download without the login)" || bad "the test registry answers without a login"
+    panel lan 3 1 | grep -qx ok || bad "lan for the registry: $(panel lan 3 1)"
+    PA=$(panel private $REG/private/web:1 8080); [[ "$PA" =~ ^my- ]] || bad "own app refused: $PA"
+    [ "$(panel registry $REG bot pw-reg-123)" = ok ] && ok "registry login saved in the panel" || bad "registry login refused"
     PID=$(panel deploy "$PA" priv 1024); [[ "$PID" =~ ^[0-9]+$ ]] || bad "deploy refused: $PID"
     wait_for 600 state_is "$PID" running > /dev/null && ok "the private image was downloaded with the login and runs" || { bad "private app: $(panel state "$PID") / $(panel lastjob create)"; diag; }
     UID3=$(in_box 'id -u sdh3')
     in_box "ls /run/user/$UID3/ | grep -c sentora-pull || true" | grep -qx 0 && ok "no login file left in the user's folder" || bad "login file left: $(in_box "ls -la /run/user/$UID3/")"
     in_box "grep -rl pw-reg-123 /var/lib/sentora-docker-node /etc/sentora-docker-node /home/sdh3 2>/dev/null | head -3" | grep -q . && bad "the login is kept somewhere on the node" || ok "the login is kept nowhere on the node"
-    [ "$(panel registry 127.0.0.1:5000 -)" = ok ] || bad "registry login not removed"
+    [ "$(panel registry $REG -)" = ok ] || bad "registry login not removed"
     panel act "$PID" update > /dev/null
     U=$(wait_for 600 bash -c "php '$T/node_real.php' lastjob update | grep -E '^(done|failed)'"); echo "  $U"
     [[ "$U" == failed* ]] && [[ "$U" == *pull* ]] && ok "without the login the download is refused (Update failed)" || bad "update without the login: $U"
     wait_for 120 state_is "$PID" running > /dev/null && ok "and the app kept running" || bad "the app stopped: $(panel state "$PID")"
     panel act "$PID" delete > /dev/null
     wait_for 180 bash -c "php '$T/node_real.php' state $PID | grep -x deleted" > /dev/null || bad "private app not deleted"
+    panel lan 3 0 > /dev/null
 else
     bad "the test registry did not start: $(in_box 'podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs logs testreg 2>&1 | tail -5')"
 fi
