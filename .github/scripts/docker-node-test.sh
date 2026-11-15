@@ -124,11 +124,12 @@ in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no cont
 # its own slice (sentora-app-<id>.slice: runsc runs with --ignore-cgroups inside it), with 64 MB for gVisor itself
 RT=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.OCIRuntime}}' sdh-$CID" | tr -d '\r')
 case "$RT" in *runsc*) GV=1; ok "runs in gVisor ($RT)" ;; *) GV=0; bad "not in gVisor: '$RT' (new apps are)" ;; esac
+# (an app in gVisor: its processes inside its own slice, where its limits are; GV=0: nothing to check)
+inslice() { [ "$GV" = 1 ] || return 0; INS=$(in_box "e='env XDG_RUNTIME_DIR=/run/user/'\$(id -u sdh3); n=0; for p in \$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); do grep -q '/sentora-app-$CID.slice/' /proc/\$p/cgroup || n=\$((n+1)); done; echo \$n" | tr -d '\r'); [ "$INS" = 0 ]; }
 if [ "$GV" = 1 ]; then
-    INS=$(in_box "e='env XDG_RUNTIME_DIR=/run/user/'\$(id -u sdh3); n=0; for p in \$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); do grep -q '/sentora-app-$CID.slice/' /proc/\$p/cgroup || n=\$((n+1)); done; echo \$n" | tr -d '\r')
-    [ "$INS" = 0 ] && ok "the app's processes are inside its slice (its limits hold)" || bad "the app's processes are outside its slice: no limits hold ($INS)"
+    inslice && ok "the app's processes are inside its slice (its limits hold)" || bad "the app's processes are outside its slice: no limits hold ($INS)"
 fi
-[ "$GV" = 1 ] && in_box "u=\$(id -u sdh3); e='env XDG_RUNTIME_DIR=/run/user/'\$u' DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'\$u'/bus'; echo '  restarted with its warnings:'; cd /tmp; runuser -u sdh3 -- \$e podman restart sdh-$CID 2>&1 | tail -25 | sed 's/^/    /'; echo '  where the app is:'; find /sys/fs/cgroup -type d -name 'sentora-app-*' | sed 's/^/    /'; c=\$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); for p in \$c; do echo \"    pid \$p: \$(cat /proc/\$p/cgroup 2> /dev/null)\"; done; runuser -u sdh3 -- \$e systemctl --user show sentora-app-$CID.slice -p ActiveState -p ControlGroup -p MemoryMax -p FragmentPath -p DropInPaths | sed 's/^/    /'" 2>&1 | tr -d '\r'
+[ "$GV" = 1 ] && in_box "u=\$(id -u sdh3); e='env XDG_RUNTIME_DIR=/run/user/'\$u' DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'\$u'/bus'; echo '  where the app is:'; find /sys/fs/cgroup -type d -name 'sentora-app-*' | sed 's/^/    /'; c=\$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); for p in \$c; do echo \"    pid \$p: \$(cat /proc/\$p/cgroup 2> /dev/null)\"; done; runuser -u sdh3 -- \$e systemctl --user show sentora-app-$CID.slice -p ActiveState -p ControlGroup -p MemoryMax -p FragmentPath -p DropInPaths | sed 's/^/    /'" 2>&1 | tr -d '\r'
 cg() { if [ "$GV" = 1 ]; then
     in_box "d=\$(find /sys/fs/cgroup -type d -name sentora-app-$CID.slice 2> /dev/null | head -1); [ -n \"\$d\" ] && cat \"\$d/$1\"" | tr -d '\r'
   else
@@ -211,6 +212,12 @@ panel act "$CID" stop > /dev/null
 wait_for 120 state_is "$CID" stopped > /dev/null && ok "stopped" || bad "not stopped: $(panel state "$CID")"
 panel act "$CID" start > /dev/null
 wait_for 120 state_is "$CID" running > /dev/null && ok "started again" || bad "not started: $(panel state "$CID")"
+inslice && ok "inside its slice after the start" || bad "outside its slice after the start"
+panel act "$CID" restart > /dev/null; sleep 5
+wait_for 120 state_is "$CID" running > /dev/null && ok "restarted" || bad "not running after a restart: $(panel state "$CID")"
+inslice && ok "inside its slice after the restart" || bad "outside its slice after the restart"
+for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
+[ "$C" = 401 ] && ok "Caddy serves it after the restart" || bad "after the restart: HTTP $C"
 U=$(wait_for 400 bash -c "panel() { php '$T/node_real.php' \"\$@\"; }; s=\$(panel state $CID); u=\${s#* }; u=\${u%%MB*}; [ \"\${u:-0}\" -gt 0 ] && echo \$u")
 [ -n "$U" ] && ok "disk use measured: $U MB" || bad "no disk use measured"
 
@@ -317,6 +324,8 @@ sleep 10
 wait_for 120 panel online > /dev/null && ok "node online again after the restart" || bad "node not online after the restart"
 wait_for 180 bash -c "docker exec $NAME runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(docker exec $NAME id -u sdh3) podman ps --format '{{.Names}}' | grep -x sdh-$CID" > /dev/null \
     && ok "the container started again by itself" || bad "the container did not start after the restart"
+for _ in $(seq 1 20); do inslice && break; sleep 3; done
+inslice && ok "inside its slice after the restart of the node" || bad "outside its slice after the restart of the node"
 for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "Caddy serves it again" || bad "after the restart: HTTP $C"
 

@@ -547,14 +547,32 @@ class snode
         // (rootless Podman leaves its monitor, and so gVisor's sandbox, where it was started from), checked after,
         // started once more if it is still outside, and stopped rather than run without its limits
         $last = (string) end($args);
+        $m = array();
         $gv = in_array($args[0], array('start', 'restart'), true) && preg_match('/^sdh-(\d+)$/', $last, $m) && self::IsoOf($user, $last) === 'gvisor';
-        $in_slice = function (array $cmd) use ($user, $m) {
-            return array_merge(array('systemd-run', '--user', '--scope', '--quiet', '--collect', '--slice=' . self::Slice((int) $m[1]), 'podman'), $cmd);
+        if (!$gv) {
+            return self::AsUser($user, array_merge(array('podman'), $args), $timeout, $in, $out);
+        }
+        $in_slice = function (array $cmd) use ($user, $m, $timeout) {
+            // (gVisor's network helper can hold the app's port for a moment after a stop: a few tries)
+            for ($try = 0; ; $try++) {
+                $r = self::AsUser($user, array_merge(array('systemd-run', '--user', '--scope', '--quiet', '--collect', '--slice=' . self::Slice((int) $m[1]), 'podman'), $cmd), $timeout);
+                if ($r[0] === 0 || $try >= 5 || stripos($r[1], 'Address already in use') === false) {
+                    return $r;
+                }
+                sleep(2);
+            }
         };
-        $r = self::AsUser($user, $gv ? $in_slice($args) : array_merge(array('podman'), $args), $timeout, $in, $out);
-        if ($gv && $r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
+        if ($args[0] === 'restart') {
+            // (a restart is a stop, then a start from inside the slice)
+            $stop = $args;
+            $stop[0] = 'stop';
+            self::AsUser($user, array_merge(array('podman'), $stop), $timeout);
+            $args = array('start', $last);
+        }
+        $r = $in_slice($args);
+        if ($r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
             self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
-            $r = self::AsUser($user, $in_slice(array('--log-level=info', 'start', $last)), $timeout);
+            $r = $in_slice(array('--log-level=info', 'start', $last));
             if ($r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
                 self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
                 // (with what Podman said about where it put the app)
