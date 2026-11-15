@@ -166,18 +166,56 @@ class module_controller extends ctrl_module
         } else {
             $now = '<span class="dh-pill is-warn">' . self::t($before ? 'Off: made before it existed' : 'Off: runs on the node\'s own kernel') . '</span>';
         }
-        $out = '<form class="dh-guards" method="post" action="./?module=docker_hosting&amp;action=CtGuards">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $id . '">'
-            . '<h4>' . self::t('Security') . '</h4>'
-            . '<div class="dh-guard"><div class="dh-guard-text"><b>' . self::t('Extra isolation (gVisor)') . '</b> ' . $now
+        $admin = dh::IsAdmin(dh::Account(self::Person()));
+        $form = '<form class="dh-guard" method="post" action="./?module=docker_hosting&amp;action=CtGuards">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $id . '">';
+        $out = '<div class="dh-guards"><h4>' . self::t('Security') . '</h4>' . $form
+            . '<div class="dh-guard-text"><b>' . self::t('Extra isolation (gVisor)') . '</b> ' . $now
             . '<small>' . self::t('The app runs on a small kernel of its own (gVisor) instead of the node\'s, so an attack on the kernel stays inside it. It costs about 64 MB of memory, given on top of the app\'s own. A few apps do not run on it: then switch it off for that app.') . '</small></div>';
-        if (dh::IsAdmin(dh::Account(self::Person()))) {
+        if ($admin) {
             $out .= '<label class="sf-switch"><input type="checkbox" name="inIso" value="gvisor"' . ($want ? ' checked' : '') . ' onchange="if(!this.checked&&!confirm(this.dataset.ask)){this.checked=true;return;}this.form.submit()"'
                 . ' data-ask="' . self::t('Switch Extra isolation off for this app? It then runs on the node\'s own kernel: do this only for an app you trust. The app restarts (a few seconds).') . '" aria-label="' . self::t('Extra isolation (gVisor)') . '"><span class="sf-toggle"></span></label>'
-                . '<noscript><button class="btn btn-sm btn-default" type="submit">' . self::t('Save') . '</button></noscript>';
+                . '<input type="hidden" name="inWhich" value="iso"><noscript><button class="btn btn-sm btn-default" type="submit">' . self::t('Save') . '</button></noscript>';
         } else {
             $out .= '<small class="dh-muted">' . self::t('Changed by an administrator') . '</small>';
         }
-        return $out . '</div></form>';
+        $out .= '</form>';
+        // the image check (Trivy): its last answer, and the administrator's choice for this app
+        $scan = $g['scan'];
+        $sum = json_decode((string) ($c['dc_scan_tx'] ?? ''), true);
+        $holes = '';
+        if ($scan === 'off') {
+            $pill = '<span class="dh-pill is-warn">' . self::t('Off for this app') . '</span>';
+        } elseif (!is_array($sum)) {
+            $pill = '<span class="dh-pill">' . self::t('Not checked yet') . '</span>';
+        } elseif (isset($sum['err'])) {
+            $pill = '<span class="dh-pill is-warn">' . self::t('Could not be checked: %s', array((string) $sum['err'])) . '</span>';
+        } else {
+            $cf = (int) $sum['cf'];
+            $pill = $cf > 0 ? '<span class="dh-pill is-bad">' . self::t($cf === 1 ? '1 critical hole with a fix' : '%s critical holes with a fix', array($cf)) . '</span>'
+                : ((int) $sum['c'] + (int) $sum['h'] === 0 ? '<span class="dh-pill is-ok">' . self::t('No critical or high holes known') . '</span>'
+                : '<span class="dh-pill is-ok">' . self::t('No critical holes with a fix') . '</span>');
+            $holes = '<span class="dh-holes">' . self::t('Critical %s (%s with a fix), high %s (%s with a fix), medium %s, low %s. Checked %s.',
+                array((int) $sum['c'], $cf, (int) $sum['h'], (int) $sum['hf'], (int) $sum['m'], (int) $sum['l'], date('j M Y H:i', (int) $sum['at']))) . '</span>';
+            if (!empty($sum['top'])) {
+                $holes .= '<details class="dh-holes-list"><summary>' . self::t('The critical ones with a fix') . '</summary><ul>';
+                foreach ($sum['top'] as $t) {
+                    $holes .= '<li><code>' . self::h((string) $t) . '</code></li>';
+                }
+                $holes .= '</ul></details>';
+            }
+        }
+        $out .= $form . '<div class="dh-guard-text"><b>' . self::t('Image check (Trivy)') . '</b> ' . $pill
+            . '<small>' . self::t('The app\'s image is checked for known security holes when it is made or updated, and again every night. Warn: they are shown here. Block: a new app with critical holes that have a fix is refused, and an update only when it has more of them than the version running. The fix is a newer image from the app\'s maker: update the app when one is out.') . $holes . '</small></div>';
+        if ($admin) {
+            $out .= '<select class="form-control dh-guard-choice" name="inScan" onchange="this.form.submit()" aria-label="' . self::t('Image check (Trivy)') . '">';
+            foreach (array('warn' => 'Warn', 'block' => 'Block', 'off' => 'Off') as $k => $v) {
+                $out .= '<option value="' . $k . '"' . ($scan === $k ? ' selected' : '') . '>' . self::t($v) . '</option>';
+            }
+            $out .= '</select><input type="hidden" name="inWhich" value="scan"><noscript><button class="btn btn-sm btn-default" type="submit">' . self::t('Save') . '</button></noscript>';
+        } else {
+            $out .= '<small class="dh-muted">' . self::t('Changed by an administrator') . '</small>';
+        }
+        return $out . '</form></div>';
     }
 
     /**
@@ -195,6 +233,14 @@ class module_controller extends ctrl_module
             return;
         }
         $_GET['settings'] = (string) $id;
+        if (self::Post('inWhich') === 'scan') {
+            if (dh::SetGuards(self::Person(), $id, array('scan' => self::Post('inScan')))) {
+                self::Say('ok', 'Saved: the app\'s image is checked this way from its next update on (and every night).');
+            } else {
+                self::Say(dh::$why === 'Nothing changed.' ? 'ok' : 'error', dh::$why);
+            }
+            return;
+        }
         if (dh::SetGuards(self::Person(), $id, array('iso' => self::Post('inIso') === 'gvisor' ? 'gvisor' : 'standard'))) {
             self::Say('ok', 'Saved: the app restarts with it (a few seconds). If it does not start, it comes back as it was.');
         } else {
@@ -333,7 +379,7 @@ class module_controller extends ctrl_module
             'public' => 'Opening it to the public: the setup password is no longer asked.', 'private' => 'Closing it again: it asks for a new setup password.',
             'delete' => 'Deleting it, with its data.', 'update' => 'Updating it: the node downloads the newest version and swaps it in (a few minutes). If it does not start, the old one comes back by itself.',
             'auto-on' => 'It now updates by itself at night (02:00-05:00 on the panel\'s clock) when a newer version is out. The node looks once a day.', 'auto-off' => 'It no longer updates by itself.',
-            'remake' => 'Making it again on its node (a fresh app: its old data is gone with the node\'s old setup).');
+            'remake' => 'Making it again on its node.');
         self::Done($ok, isset($texts[$what]) ? $texts[$what] : 'Done.');
         if ($ok && $what === 'logs') {
             $_GET['logs'] = (string) $id;
@@ -1168,6 +1214,8 @@ class module_controller extends ctrl_module
                 $cls = $state === 'running' ? 'is-ok' : (in_array($state, array('error', 'missing', 'stopped', 'exited'), true) ? 'is-bad' : 'is-warn');
                 $busy = in_array($state, array('creating', 'deleting', 'updating', 'applying', 'moving', 'saving', 'restoring'), true);
                 $missing = $state === 'missing';
+                // (a new app the image check refused: tried again once an administrator allowed it)
+                $blocked = $state === 'error' && strpos((string) $c['dc_note_vc'], 'Create failed: refused by the image check') === 0;
                 $public = (int) $c['dc_public_in'] === 1;
                 $gb = rtrim(rtrim(sprintf('%.2f', $c['dc_disk_in'] / 1024), '0'), '.');
                 // the row's controls, always in the same order: nightly updates, update, stop/start, restart, logs, settings, delete
@@ -1176,6 +1224,10 @@ class module_controller extends ctrl_module
                     // the node lost it: made again (fresh) or deleted
                     $actions .= '<div class="dh-switches"></div><div class="dh-act">' . self::Button('Act', array('inId' => $id, 'inWhat' => 'remake'), 'Make it again', 'btn-primary',
                         'Make this app again on its node? It starts fresh: its old data was lost with the node\'s old setup. Its address and settings stay.', 'restart');
+                } elseif ($blocked) {
+                    $actions .= '<div class="dh-switches"></div><div class="dh-act">' . self::Button('Act', array('inId' => $id, 'inWhat' => 'remake'), 'Try again', 'btn-primary',
+                        'Try to make this app again? Its image is checked again: if its check is still set to Block, it is refused again.', 'restart')
+                        . '<a class="btn btn-sm btn-default' . ($open === $id ? ' active' : '') . '" href="./?module=docker_hosting' . ($open === $id ? '' : '&amp;settings=' . $id . '#dh-set-' . $id) . '">' . self::Icon('gear') . self::t('Settings') . '</a>';
                 } elseif (!$busy) {
                     $actions .= '<div class="dh-switches">';
                     $actions .= '<form class="dh-inline dh-night" method="post" action="./?module=docker_hosting&amp;action=Act" title="' . self::t('When a newer version of the app is out, it is installed by itself between 02:00 and 05:00. If it does not start, the old version comes back.') . '">'

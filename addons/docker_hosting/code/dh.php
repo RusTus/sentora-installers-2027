@@ -134,6 +134,8 @@ class dh
         // (136) the guards: an app's own choices (JSON; none: the defaults), what its node says it runs on, a trusted node
         self::AddColumns('x_dh_containers', array('dc_guard_tx' => "TEXT NULL", 'dc_iso_vc' => "VARCHAR(10) NOT NULL DEFAULT ''"));
         self::AddColumns('x_dh_nodes', array('nd_trusted_in' => "TINYINT NOT NULL DEFAULT 0"));
+        // (137) the image check's last answer for an app (its node's summary: counts, the worst holes)
+        self::AddColumns('x_dh_containers', array('dc_scan_tx' => "TEXT NULL"));
         // (apps made before the guards keep the standard runtime until an administrator turns Extra isolation on
         // for them: switching a running app to gVisor by itself could stop one that does not run on it)
         if (self::Get('guards_from') === '') {
@@ -2212,6 +2214,10 @@ class dh
      * An app's guards (2026-11-15, owner: every guard on by default; only an administrator may switch one off
      * for an app; a node an administrator marked "Trusted (my own apps)" starts its new apps with them off).
      * iso: 'gvisor' (Extra isolation: the app runs on gVisor's own small kernel) or 'standard'.
+     * scan: the image check (Trivy): 'warn' (the default, owner 2026-11-15: checked and shown, never refused;
+     * the stock images often have critical holes their makers have not rebuilt for yet), 'block' (a new app with
+     * critical holes that have a fix is refused, an update only when it has more of them than the version
+     * running) or 'off'.
      *
      * @param array $c an x_dh_containers row
      * @return array<string, string>
@@ -2222,7 +2228,36 @@ class dh
         $g = is_array($g) ? $g : array();
         $n = self::Node((int) $c['dc_node_fk']);
         $trusted = $n && (int) ($n['nd_trusted_in'] ?? 0) === 1;
-        return array('iso' => isset($g['iso']) && in_array($g['iso'], array('gvisor', 'standard'), true) ? $g['iso'] : ($trusted ? 'standard' : 'gvisor'));
+        return array('iso' => isset($g['iso']) && in_array($g['iso'], array('gvisor', 'standard'), true) ? $g['iso'] : ($trusted ? 'standard' : 'gvisor'),
+            'scan' => isset($g['scan']) && in_array($g['scan'], array('warn', 'block', 'off'), true) ? $g['scan'] : 'warn');
+    }
+
+    /**
+     * An image check's answer from a node, kept only as plain numbers and short plain lines.
+     *
+     * @param array $s
+     * @return array|null
+     */
+    static function ScanSummary(array $s)
+    {
+        $at = isset($s['at']) && is_int($s['at']) ? $s['at'] : 0;
+        if ($at <= 0) {
+            return null;
+        }
+        if (isset($s['err'])) {
+            return array('at' => $at, 'err' => mb_substr(preg_replace('/[^\w .,:;()\'\/+-]/u', '', (string) $s['err']), 0, 200));
+        }
+        $out = array('at' => $at, 'id' => preg_match('/^[a-f0-9]{1,64}$/', (string) ($s['id'] ?? '')) ? (string) $s['id'] : '');
+        foreach (array('c', 'cf', 'h', 'hf', 'm', 'l') as $k) {
+            $out[$k] = isset($s[$k]) && is_int($s[$k]) ? max(0, min(1000000, $s[$k])) : 0;
+        }
+        $out['top'] = array();
+        foreach (isset($s['top']) && is_array($s['top']) ? array_slice($s['top'], 0, 8) : array() as $t) {
+            if (is_string($t) && preg_match('/^[A-Za-z0-9 ._:+~,>\/-]{1,160}$/', $t)) {
+                $out['top'][] = $t;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -2255,14 +2290,29 @@ class dh
             }
             $g['iso'] = $want['iso'];
         }
+        if (isset($want['scan'])) {
+            if (!in_array($want['scan'], array('warn', 'block', 'off'), true)) {
+                self::$why = 'Not a choice.';
+                return false;
+            }
+            $g['scan'] = $want['scan'];
+        }
         $zdbh->prepare("UPDATE x_dh_containers SET dc_guard_tx = :g WHERE dc_id_pk = :c")->execute(array(':g' => json_encode($g), ':c' => (int) $id));
         $c['dc_guard_tx'] = json_encode($g);
         if (self::Guards($c) === $before) {
             self::$why = 'Nothing changed.';
             return false;
         }
-        self::Queue((int) $c['dc_node_fk'], (int) $id, 'recreate', self::CreateData($c, ''));
-        self::Log('guards', $c['dc_domain_vc'] . ': Extra isolation ' . (self::Guards($c)['iso'] === 'gvisor' ? 'on' : 'off'), (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
+        $now = self::Guards($c);
+        if ($now['iso'] !== $before['iso']) {
+            // (a new runtime: the app is made anew on its node)
+            self::Queue((int) $c['dc_node_fk'], (int) $id, 'recreate', self::CreateData($c, ''));
+            self::Log('guards', $c['dc_domain_vc'] . ': Extra isolation ' . ($now['iso'] === 'gvisor' ? 'on' : 'off'), (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
+        }
+        if ($now['scan'] !== $before['scan']) {
+            // (the image check is done when the app is made or updated, and every night: nothing to do now)
+            self::Log('guards', $c['dc_domain_vc'] . ': image check ' . array('warn' => 'warns', 'block' => 'blocks', 'off' => 'off')[$now['scan']], (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
+        }
         return true;
     }
 
@@ -2336,7 +2386,9 @@ class dh
                 break;
             case 'remake':
                 // the node lost it (set up again, restored): made again, without its old data
-                if ((string) $c['dc_state_vc'] !== 'missing') {
+                // (also an app the image check refused when it was made: tried again, e.g. after an administrator
+                // set its check to Warn)
+                if ((string) $c['dc_state_vc'] !== 'missing' && !((string) $c['dc_state_vc'] === 'error' && strpos((string) $c['dc_note_vc'], 'Create failed: refused by the image check') === 0)) {
                     return self::No('Only an app its node no longer has is made again.');
                 }
                 $setup = (int) $c['dc_public_in'] === 1 ? '' : self::SetupPassword($c);
@@ -3390,6 +3442,12 @@ class dh
             }
             $set->execute(array(':s' => $state, ':u' => isset($s['used_mb']) && is_numeric($s['used_mb']) ? max(0, (int) $s['used_mb']) : 0, ':c' => $cid));
             $bad = (string) $mine[$cid]['dc_want_vc'] === 'running' && !in_array($state, array('running', 'creating', 'starting', 'restarting', 'updating', 'applying', 'saving', 'restoring', 'moving'), true);
+            if (isset($s['scan']) && is_array($s['scan'])) {
+                $sum = self::ScanSummary($s['scan']);
+                if ($sum !== null) {
+                    $zdbh->prepare("UPDATE x_dh_containers SET dc_scan_tx = :s WHERE dc_id_pk = :c")->execute(array(':s' => json_encode($sum), ':c' => $cid));
+                }
+            }
             if (isset($s['iso']) && in_array($s['iso'], array('gvisor', 'standard'), true)) {
                 $zdbh->prepare("UPDATE x_dh_containers SET dc_iso_vc = :i WHERE dc_id_pk = :c")->execute(array(':i' => $s['iso'], ':c' => $cid));
             }

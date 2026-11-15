@@ -394,6 +394,61 @@ RUNSC_EOF
     echo "RUNSC=/usr/local/bin/runsc-sentora" >> /etc/sentora-docker-node/platform.conf
 fi
 
+ui_step "Image check for the apps (Trivy)"
+# Trivy checks an app's image for known security holes before it starts or updates, and every night (Docker
+# Hosting 137, owner 2026-11-15: warn by default). One release, pinned with its checksums: Trivy's own releases
+# were attacked in March 2026 (a poisoned 0.69.4), so a new one is taken only after it was looked at (the Trivy
+# probe workflow lists the releases and checks them). It runs as its own user (sentora-scan), never as root.
+TRIVY_VERSION=0.76.2
+TRIVY_SHA256_X86_64=bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+TRIVY_SHA256_AARCH64=ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3
+trivy_install() {
+    local arch file sum tmp free
+    case "$(uname -m)" in
+        x86_64) file=Linux-64bit; sum=$TRIVY_SHA256_X86_64 ;;
+        aarch64) file=Linux-ARM64; sum=$TRIVY_SHA256_AARCH64 ;;
+        *) note "Image check: no Trivy for $(uname -m); the apps are not checked."; return ;;
+    esac
+    if [ "$(cat /etc/sentora-docker-node/trivy.version 2> /dev/null)" = "$TRIVY_VERSION" ] && [ -x /usr/local/bin/trivy ]; then
+        note "Trivy $TRIVY_VERSION is in place."
+    else
+        # (its database takes about 2 GB on the disk)
+        free=$(df --output=avail -k /var/lib 2> /dev/null | tail -1 | tr -d ' ')
+        if [ "${free:-0}" -lt 3145728 ]; then
+            note "Image check: less than 3 GB free in /var/lib, so Trivy was not installed; the apps are not checked."
+            return
+        fi
+        tmp=$(mktemp -d)
+        if curl -fsSL --proto =https,file --proto-redir =https "${SNODE_TRIVY_URL:-https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION}/trivy_${TRIVY_VERSION}_$file.tar.gz" -o "$tmp/trivy.tar.gz" \
+            && echo "$sum  $tmp/trivy.tar.gz" | sha256sum -c - > /dev/null 2>&1 \
+            && tar -xzf "$tmp/trivy.tar.gz" -C "$tmp" trivy && "$tmp/trivy" --version > /dev/null 2>&1; then
+            install -m 755 -o root -g root "$tmp/trivy" /usr/local/bin/trivy && echo "$TRIVY_VERSION" > /etc/sentora-docker-node/trivy.version
+            command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/trivy > /dev/null 2>&1
+            note "Trivy $TRIVY_VERSION installed (checksum checked)."
+        else
+            note "Trivy could not be downloaded or did not match its checksum: the apps are not checked (see $LOG)."
+        fi
+        rm -rf "$tmp"
+    fi
+}
+trivy_install
+if [ -x /usr/local/bin/trivy ]; then
+    # its own user (no login, no rights): it reads what the customers' images contain
+    id sentora-scan > /dev/null 2>&1 || useradd --system --home-dir /var/lib/sentora-scan --no-create-home --shell "$(command -v nologin || echo /usr/sbin/nologin)" sentora-scan
+    install -d -m 750 -o sentora-scan -g sentora-scan /var/lib/sentora-scan
+    install -d -m 700 -o sentora-scan -g sentora-scan /var/lib/sentora-scan/cache
+    # (the images being checked: root's folder, which only the check's user may also read)
+    install -d -m 750 -o root -g sentora-scan /var/lib/sentora-scan/in
+    rm -f /var/lib/sentora-scan/in/*.tar
+    command -v restorecon > /dev/null 2>&1 && restorecon -R /var/lib/sentora-scan > /dev/null 2>&1
+    if runuser -u sentora-scan -- /usr/local/bin/trivy image --download-db-only --cache-dir /var/lib/sentora-scan/cache --quiet >> "$LOG" 2>&1; then
+        note "Image check ready: Trivy's database of known security holes is in place (brought up to date every night)."
+    else
+        note "Trivy's database could not be downloaded now; the agent tries again every night (see $LOG)."
+    fi
+    printf 'TRIVY=/usr/local/bin/trivy\nSCAN_USER=sentora-scan\n' >> /etc/sentora-docker-node/platform.conf
+fi
+
 ui_step "Web server (Caddy, automatic HTTPS)"
 mkdir -p $CADDY_DIR/sentora
 [ -f $CADDY_DIR/Caddyfile ] && [ ! -f $CADDY_DIR/Caddyfile.before-sentora ] && cp -p $CADDY_DIR/Caddyfile $CADDY_DIR/Caddyfile.before-sentora
@@ -543,7 +598,8 @@ if [ "${1:-}" = --purge ]; then
         loginctl disable-linger "$u" 2>/dev/null; loginctl terminate-user "$u" 2>/dev/null; sleep 1
         userdel -r "$u" 2>/dev/null && echo "removed $u"
     done
-    rm -rf /var/lib/sentora-docker-node
+    rm -rf /var/lib/sentora-docker-node /var/lib/sentora-scan
+    userdel sentora-scan 2>/dev/null
     echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl reload "$CADDY_SERVICE" 2>/dev/null
 fi
 systemctl daemon-reload

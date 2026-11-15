@@ -1,0 +1,14 @@
+#!/bin/bash
+# fake trivy: --download-db-only, or a check of --input FILE answered with the number of critical holes with a
+# fix in $FAKE_DIR/trivy-cf (none: 0), as Trivy's JSON; the user it runs as and the file it read are logged
+echo "trivy[$FAKE_USER] $*" >> "$FAKE_DIR/calls.log"
+for a in "$@"; do [ "$a" = --download-db-only ] && exit 0; done
+in=; prev=; for a in "$@"; do [ "$prev" = --input ] && in=$a; prev=$a; done
+[ -r "$in" ] || { echo "FATAL: can not read $in" >&2; exit 1; }
+[ -f "$FAKE_DIR/trivy-fail" ] && { echo "FATAL: database missing" >&2; exit 1; }
+echo "read $(cat "$in") mode=$(stat -c %a "$in")" >> "$FAKE_DIR/trivy-read.log"
+cf=$(cat "$FAKE_DIR/trivy-cf" 2> /dev/null || echo 0)
+php -r '$v = array(); for ($i = 0; $i < (int) $argv[1]; $i++) { $v[] = array("VulnerabilityID" => "CVE-2026-" . (1000 + $i), "PkgName" => "openssl<b>", "InstalledVersion" => "3.0.1", "FixedVersion" => "3.0.9", "Severity" => "CRITICAL"); }
+$v[] = array("VulnerabilityID" => "CVE-2026-9", "PkgName" => "zlib", "InstalledVersion" => "1", "FixedVersion" => "", "Severity" => "CRITICAL");
+$v[] = array("VulnerabilityID" => "CVE-2026-8", "PkgName" => "curl", "InstalledVersion" => "8", "FixedVersion" => "8.1", "Severity" => "HIGH");
+echo json_encode(array("SchemaVersion" => 2, "Results" => array(array("Target" => "x", "Type" => "debian", "Vulnerabilities" => $v))));' "$cf"

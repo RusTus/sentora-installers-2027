@@ -1377,7 +1377,7 @@ file_put_contents($nb . '/caddy/Caddyfile', "import sentora/*.caddy\n");
 file_put_contents($nb . '/fake/resolv.conf', "nameserver 192.168.1.1\n");
 $envB = 'FAKE_DIR=' . escapeshellarg($nb . '/fake') . ' SNODE_ETC=' . escapeshellarg($nb . '/etc') . ' SNODE_STATE=' . escapeshellarg($nb . '/state') . ' SNODE_CADDY=' . escapeshellarg($nb . '/caddy')
     . ' SNODE_RUN=' . escapeshellarg($nb . '/run') . ' SNODE_HOME=' . escapeshellarg($nb . '/home') . ' SNODE_SUBID=' . escapeshellarg($nb . '/sub') . ' SNODE_KEYFILE=' . escapeshellarg($nb . '/key.txt')
-    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' SNODE_PROC=' . escapeshellarg($nb . '/fake/proc') . ' ';
+    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' SNODE_PROC=' . escapeshellarg($nb . '/fake/proc') . ' SNODE_SCANDIR=' . escapeshellarg($nb . '/scan') . ' ';
 $agentB = function ($args) use ($envB, $T) {
     return (string) shell_exec($envB . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' ' . $args . ' 2>&1; echo "exit=$?"');
 };
@@ -1487,6 +1487,73 @@ check(dh::Guards($fresh)['iso'] === 'standard' && dh::Guards(dh::Container($gid)
 dh::NodeAct((int) $bid, 'trusted-off', 1);
 check(dh::Guards($fresh)['iso'] === 'gvisor', 'not trusted again: on');
 dh::SetGuards(1, $gid, array('iso' => 'standard'));
+$agentB('once');
+
+section('image check (137): Trivy');
+// (bravo gets Trivy: the installer's pinned release and its own user, sentora-scan)
+file_put_contents($nb . '/etc/platform.conf', "TRIVY=" . $T . "/fakebin/trivy\n", FILE_APPEND);
+@mkdir($gfake . '/users', 0755, true);
+file_put_contents($gfake . '/users/sentora-scan', "990\n");
+$tv = $gfake . '/trivy-cf';
+$gacc = (int) $ga['dc_acc_fk'];
+$ga = dh::Container($gid);
+check(dh::Guards($ga)['scan'] === 'warn' && dh::CreateData($ga, '')['guards']['scan'] === 'warn', 'every app is checked, Warn by default (owner: the stock images often have holes their makers have not rebuilt for)');
+check(!dh::SetGuards($gacc === 1 ? 3 : $gacc, $gid, array('scan' => 'off')) && strpos(dh::$why, 'Only an administrator') !== false, 'a customer can not change it', dh::$why);
+$img = dh::CreateData($ga, '')['image'];
+$rf = $gfake . '/registry/' . strtr($img, '/:', '__');
+@mkdir(dirname($rf), 0755, true);
+$upd = function ($id, $cf) use ($rf, $tv, $bid, $gid, $agentB, $gfake) {
+    file_put_contents($rf, $id . ' sha256:' . str_repeat(substr(md5($id), 0, 1), 64));
+    file_put_contents($tv, (string) $cf);
+    file_put_contents($gfake . '/calls.log', '');
+    dh::Queue((int) $bid, $gid, 'update', dh::CreateData(dh::Container($gid), ''));
+    return $agentB('once');
+};
+$o = $upd('id-scan-2', 2);
+check(strpos($o, 'update container ' . $gid . ': ok') !== false && trim((string) @file_get_contents($gdir . '/imageid')) === 'id-scan-2', 'Warn: a new version with 2 critical holes with a fix is updated to', $o);
+$cl = $gcalls();
+check(strpos($cl, 'trivy[sentora-scan] image --input ' . $nb . '/scan/in/image-') !== false && strpos($cl, '--skip-db-update') !== false && strpos($cl, 'trivy[root]') === false && strpos($cl, 'systemd-run --scope --quiet --collect -p MemoryMax=1536M') !== false,
+    'Trivy reads the image as its own user (never root), with a memory cap, without going online', $cl);
+check(strpos((string) @file_get_contents($gfake . '/trivy-read.log'), 'mode=640') !== false && glob($nb . '/scan/in/*') === array(), 'the image it read was readable by it only (root\'s folder), and is gone after', (string) @file_get_contents($gfake . '/trivy-read.log'));
+$agentB('once');
+$sum = json_decode((string) val("SELECT dc_scan_tx FROM x_dh_containers WHERE dc_id_pk = " . $gid), true);
+check(is_array($sum) && $sum['cf'] === 2 && $sum['c'] === 3 && $sum['h'] === 1 && $sum['hf'] === 1 && count($sum['top']) === 2 && strpos(implode(' ', $sum['top']), '<') === false, 'the panel knows the counts (only plain words came along)', json_encode($sum));
+$r = req($gacc, '', array(), array('settings' => (string) $gid));
+check(strpos($r['html'], '2 critical holes with a fix') !== false && strpos($r['html'], 'openssl') !== false && strpos($r['html'], 'Image check (Trivy)') !== false, 'its Settings show the answer and the worst holes', '');
+check(($gacc === 1) === (strpos($r['html'], 'name="inScan"') !== false), 'the choice is there for an administrator only');
+$jb = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = " . $gid . " AND jb_state_vc IN ('queued','sent')");
+check(dh::SetGuards(1, $gid, array('scan' => 'block')) && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = " . $gid . " AND jb_state_vc IN ('queued','sent')") === $jb, 'an administrator sets Block (nothing restarts for it)');
+$o = $upd('id-scan-3', 5);
+$lj = lastjob($gid);
+check(strpos((string) $lj['jb_result_tx'], 'refused by the image check: 5 critical security holes with a fix (the version running has 2)') !== false && strpos((string) $lj['jb_result_tx'], 'The version running stays') !== false
+    && trim((string) @file_get_contents($gdir . '/imageid')) === 'id-scan-2', 'Block: an update with more of them is refused, the version running stays', json_encode($lj));
+$o = $upd('id-scan-4', 1);
+check(strpos($o, 'update container ' . $gid . ': ok') !== false && trim((string) @file_get_contents($gdir . '/imageid')) === 'id-scan-4', 'Block: an update with fewer of them goes through (an update never makes it worse)', $o);
+touch($gfake . '/trivy-fail');
+$o = $upd('id-scan-5', 0);
+check(strpos((string) lastjob($gid)['jb_result_tx'], 'refused by the image check: the check did not finish') !== false && trim((string) @file_get_contents($gdir . '/imageid')) === 'id-scan-4', 'Block: an image that could not be checked is refused', json_encode(lastjob($gid)));
+unlink($gfake . '/trivy-fail');
+// every night: the database brought up to date, every app checked again (only told, never stopped)
+file_put_contents($tv, '0');
+file_put_contents($gfake . '/calls.log', '');
+$r = req(1, 'NodeAct', array('inId' => (string) $bid, 'inWhat' => 'check-updates'));
+$agentB('once');
+$agentB('once');
+$cl = $gcalls();
+check(strpos($cl, 'trivy[sentora-scan] image --download-db-only') !== false && strpos($cl, 'trivy[sentora-scan] image --input') !== false, 'every night: its database brought up to date, the app checked again', $cl);
+$sum = json_decode((string) val("SELECT dc_scan_tx FROM x_dh_containers WHERE dc_id_pk = " . $gid), true);
+check(is_array($sum) && $sum['cf'] === 0, 'the panel shows the new answer');
+// Off: not checked
+check(dh::SetGuards(1, $gid, array('scan' => 'off')), 'an administrator switches it off for the app');
+$o = $upd('id-scan-6', 9);
+check(strpos($o, 'update container ' . $gid . ': ok') !== false && strpos($gcalls(), 'trivy') === false, 'Off: not checked', $gcalls());
+// a new app the check refused: Try again
+$zdbh->prepare("UPDATE x_dh_containers SET dc_state_vc = 'error', dc_note_vc = :n WHERE dc_id_pk = :c")->execute(array(':n' => 'Create failed: refused by the image check: 2 critical security holes with a fix', ':c' => $gid));
+$r = req($gacc);
+check(strpos($r['html'], 'Try again') !== false, 'a new app the check refused has Try again');
+check(dh::Act($gacc, $gacc, $gid, 'remake') && lastjob($gid)['jb_action_vc'] === 'create', 'Try again makes it again (checked again)', dh::$why);
+$agentB('once');
+dh::SetGuards(1, $gid, array('scan' => 'warn'));
 $agentB('once');
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");

@@ -135,6 +135,15 @@ cg() { if [ "$GV" = 1 ]; then
   else
     in_box "u=\$(id -u sdh3); p=\$(runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman inspect --format '{{.State.CgroupPath}}' sdh-$CID 2> /dev/null); cat /sys/fs/cgroup\$p/$1 2> /dev/null || runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$u podman exec sdh-$CID cat /sys/fs/cgroup/$1" | tr -d '\r'
   fi; }
+# the image check (Trivy 137): installed by the node's installer (pinned, checksum checked), run as its own user;
+# the app's image checked when it was made, its answer at the panel (Warn: it runs whatever it found)
+in_box '/usr/local/bin/trivy --version 2> /dev/null | head -1; id -u sentora-scan; stat -c "%U:%G %a" /var/lib/sentora-scan/in; ls /var/lib/sentora-scan/in | wc -l' | tr -d '\r' > "$OUT/trivy.txt"
+grep -q "^Version: 0.76.2" "$OUT/trivy.txt" && ok "Trivy 0.76.2 installed (the pinned release, checksum checked)" || bad "no Trivy: $(cat "$OUT/trivy.txt")"
+grep -qx "root:sentora-scan 750" "$OUT/trivy.txt" && ok "images are checked in root's folder that only the check's user may also read" || bad "the check's folder: $(cat "$OUT/trivy.txt")"
+[ "$(tail -1 "$OUT/trivy.txt")" = 0 ] && ok "no image copy left after the check" || bad "image copies left: $(tail -1 "$OUT/trivy.txt")"
+SCAN=$(wait_for 120 bash -c "php -r 'require \"$T/root/dryden/loader.inc.php\"; echo \$zdbh->query(\"SELECT dc_scan_tx FROM x_dh_containers WHERE dc_id_pk = $CID\")->fetchColumn();' 2> /dev/null | grep '\"cf\"'")
+echo "  image check: $SCAN"
+[ -n "$SCAN" ] && ok "the app's image was checked, the panel has the answer" || { bad "no image check answer at the panel"; in_box 'journalctl -u sentora-docker-node --no-pager | grep -i "image check\|trivy" | tail -5'; }
 # what the kernel should hold: the app's memory (+64 MB for gVisor's own), its CPU, its processes
 want_mem() { echo $(( ($1 + 64 * GV) * 1048576 )); }
 WANT_PIDS=1024; [ "$GV" = 1 ] && WANT_PIDS=4096

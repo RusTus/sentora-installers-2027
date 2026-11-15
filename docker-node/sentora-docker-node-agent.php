@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '116';
+    const VERSION = '117';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -612,7 +612,8 @@ class snode
 
     static function Check(array $d, $action)
     {
-        if (isset($d['guards']) && (!is_array($d['guards']) || (isset($d['guards']['iso']) && !in_array($d['guards']['iso'], array('gvisor', 'standard'), true)))) {
+        if (isset($d['guards']) && (!is_array($d['guards']) || (isset($d['guards']['iso']) && !in_array($d['guards']['iso'], array('gvisor', 'standard'), true))
+            || (isset($d['guards']['scan']) && !in_array($d['guards']['scan'], array('warn', 'block', 'off'), true)))) {
             return 'bad guards';
         }
         if (!isset($d['cid']) || !is_int($d['cid']) || $d['cid'] <= 0 || !isset($d['user']) || !is_string($d['user']) || !preg_match('/^sdh\d{1,9}$/', $d['user'])) {
@@ -686,6 +687,137 @@ class snode
     {
         $r = self::P('RUNSC', '');
         return $r !== '' && $r[0] === '/' && is_executable($r) ? $r : '';
+    }
+
+    /**
+     * The image check (Trivy) asked for this app: 'warn' (checked, shown, never refused: the default, owner
+     * 2026-11-15), 'block' (a new app with critical holes that have a fix is refused; an update only when it has
+     * more of them than the version running), 'off'. A panel from before it sends none: 'warn'.
+     */
+    static function WantScan(array $d)
+    {
+        $g = isset($d['guards']['scan']) ? $d['guards']['scan'] : 'warn';
+        return in_array($g, array('warn', 'block', 'off'), true) ? $g : 'warn';
+    }
+
+    /** Trivy on this node (the installer's, a pinned release), or '' when this node has none. */
+    static function Trivy()
+    {
+        $t = self::P('TRIVY', '');
+        return $t !== '' && $t[0] === '/' && is_executable($t) ? $t : '';
+    }
+
+    /** The image check's folder (its database; the images being checked) and its own user. */
+    static function ScanDir()
+    {
+        return getenv('SNODE_SCANDIR') ?: '/var/lib/sentora-scan';
+    }
+
+    static function ScanUser()
+    {
+        return self::P('SCAN_USER', 'sentora-scan');
+    }
+
+    /**
+     * Trivy's database brought up to date (once a day), by its own user.
+     */
+    static function ScanDb()
+    {
+        return self::Run(array('runuser', '-u', self::ScanUser(), '--', self::Trivy(), 'image', '--download-db-only', '--cache-dir', self::ScanDir() . '/cache', '--quiet'), null, 900);
+    }
+
+    /**
+     * Check an image for known security holes. The customer's user saves the image (podman image save) into a
+     * folder of root's that only the check's own user may also read; Trivy reads it there as that user (never
+     * as root: it reads what the customer's image contains), with a memory cap of its own, and without network
+     * use (its database is brought up to date once a day). Its answer is counted here.
+     *
+     * @return array|string a summary (at, id, c, cf, h, hf, m, l, top) or why it could not be checked
+     */
+    static function ImageCheck($user, $image)
+    {
+        $t = self::Trivy();
+        if ($t === '') {
+            return 'this node has no image check';
+        }
+        $grp = self::ScanUser();
+        if (self::Uid($grp) < 0) {
+            return 'the image check\'s user is missing';
+        }
+        $in = self::ScanDir() . '/in';
+        @mkdir($in, 0750, true);
+        @chown($in, 0);
+        @chgrp($in, $grp);
+        @chmod($in, 0750);
+        $id = self::Podman($user, array('image', 'inspect', '--format', '{{.Id}}', $image), 60);
+        $f = $in . '/image-' . bin2hex(random_bytes(8)) . '.tar';
+        $sv = self::AsUser($user, array('podman', 'image', 'save', $image), 1800, null, $f);
+        if ($sv[0] !== 0 || !is_file($f)) {
+            @unlink($f);
+            return 'the image could not be read (' . self::Tail($sv[1]) . ')';
+        }
+        @chgrp($f, $grp);
+        @chmod($f, 0640);
+        $res = self::RootTemp('scan');
+        $r = self::Run(array('systemd-run', '--scope', '--quiet', '--collect', '-p', 'MemoryMax=1536M', '-p', 'MemorySwapMax=0', '-p', 'CPUQuota=100%',
+            'runuser', '-u', self::ScanUser(), '--', $t, 'image', '--input', $f, '--cache-dir', self::ScanDir() . '/cache', '--skip-db-update', '--skip-java-db-update',
+            '--scanners', 'vuln', '--format', 'json', '--quiet', '--timeout', '10m'), null, 900, null, $res);
+        @unlink($f);
+        $json = is_file($res) && filesize($res) < 64 * 1048576 ? (string) file_get_contents($res) : '';
+        @unlink($res);
+        $j = json_decode($json, true);
+        if ($r[0] !== 0 || !is_array($j)) {
+            return 'the check did not finish (' . self::Tail($r[1]) . ')';
+        }
+        $sum = array('at' => time(), 'id' => substr(preg_replace('/^sha256:/', '', trim($id[1])), 0, 12), 'c' => 0, 'cf' => 0, 'h' => 0, 'hf' => 0, 'm' => 0, 'l' => 0, 'top' => array());
+        foreach (isset($j['Results']) && is_array($j['Results']) ? $j['Results'] : array() as $res1) {
+            foreach (isset($res1['Vulnerabilities']) && is_array($res1['Vulnerabilities']) ? $res1['Vulnerabilities'] : array() as $v) {
+                $sev = isset($v['Severity']) ? (string) $v['Severity'] : '';
+                $fix = isset($v['FixedVersion']) && (string) $v['FixedVersion'] !== '';
+                if ($sev === 'CRITICAL') {
+                    $sum['c']++;
+                    if ($fix) {
+                        $sum['cf']++;
+                        if (count($sum['top']) < 8) {
+                            // (only plain words go to the panel: package, versions, the hole's name)
+                            $sum['top'][] = substr(preg_replace('/[^A-Za-z0-9 ._:+~,>\/-]/', '', (string) ($v['PkgName'] ?? '') . ' ' . (string) ($v['InstalledVersion'] ?? '')
+                                . ' > ' . (string) $v['FixedVersion'] . ' ' . (string) ($v['VulnerabilityID'] ?? '')), 0, 160);
+                        }
+                    }
+                } elseif ($sev === 'HIGH') {
+                    $sum['h']++;
+                    $sum['hf'] += $fix ? 1 : 0;
+                } elseif ($sev === 'MEDIUM') {
+                    $sum['m']++;
+                } elseif ($sev === 'LOW') {
+                    $sum['l']++;
+                }
+            }
+        }
+        return $sum;
+    }
+
+    /**
+     * The image check before an app is made or updated: [ok, why, summary]. Not ok only when the app's
+     * check is 'block' (a new app: critical holes with a fix; an update: more of them than the version
+     * running, $now). 'warn': never refused, also when the check could not be done.
+     */
+    static function Gate(array $d, $image, $now = null)
+    {
+        $mode = self::WantScan($d);
+        if ($mode === 'off' || self::Trivy() === '') {
+            return array(true, '', null);
+        }
+        $sum = self::ImageCheck($d['user'], $image);
+        if (!is_array($sum)) {
+            return $mode === 'block' ? array(false, 'refused by the image check: ' . $sum, null) : array(true, '', array('at' => time(), 'err' => $sum));
+        }
+        if ($mode === 'block' && ($now === null ? $sum['cf'] > 0 : $sum['cf'] > (int) $now)) {
+            return array(false, 'refused by the image check: ' . $sum['cf'] . ' critical security hole' . ($sum['cf'] === 1 ? '' : 's') . ' with a fix'
+                . ($now === null ? '' : ' (the version running has ' . (int) $now . ')') . ($sum['top'] ? ': ' . implode('; ', array_slice($sum['top'], 0, 3)) : '')
+                . '. An administrator can set the app\'s image check to Warn to allow it.', $sum);
+        }
+        return array(true, '', $sum);
     }
 
     /** The slice of the user's own that holds an app's limits when it runs on gVisor. */
@@ -763,6 +895,20 @@ class snode
                 $s['updates'][(string) $d['cid']] = false;
                 return array(true, 'already the newest version');
             }
+            // the new version's image check (block: refused when it has more critical holes with a fix than
+            // the one running, which is checked too when its last check is not of this version)
+            $now = null;
+            if (self::WantScan($d) === 'block' && self::Trivy() !== '') {
+                $k = (string) $d['cid'];
+                $was = isset($s['scan'][$k]['cf'], $s['scan'][$k]['id']) && $s['scan'][$k]['id'] === substr(preg_replace('/^sha256:/', '', trim($cur[1])), 0, 12) ? $s['scan'][$k] : self::ImageCheck($u, trim($cur[1]));
+                $now = is_array($was) && isset($was['cf']) ? (int) $was['cf'] : 0;
+            }
+            $g = self::Gate($d, $d['image'], $now === null ? 0 : $now);
+            if (!$g[0]) {
+                self::Podman($u, array('image', 'prune', '--force'), 300);
+                return array(false, $g[1] . ' The version running stays.');
+            }
+            $checked = $g[2];
         } else {
             // (new settings, the same version: the image the container runs now, by its ID)
             $id = trim($cur[1]);
@@ -805,6 +951,9 @@ class snode
         }
         self::Podman($u, array('image', 'prune', '--force'), 300);
         $s['updates'][(string) $d['cid']] = false;
+        if (isset($checked) && $checked !== null) {
+            $s['scan'][(string) $d['cid']] = $checked;
+        }
         return array(true, 'updated to the newest version');
     }
 
@@ -847,6 +996,25 @@ class snode
             $s['updates'][(string) $cid] = !$found;
         }
         self::SaveState($s);
+        // the image check: its database brought up to date, then every app's image checked again (new holes
+        // are found in old images every day; this only tells, it never stops an app)
+        if (self::Trivy() !== '') {
+            $db = self::ScanDb();
+            if ($db[0] !== 0) {
+                self::Out('image check: the database could not be brought up to date: ' . self::Tail($db[1]));
+            }
+            foreach ($s['containers'] as $cid => $c) {
+                if (self::Uid($c['user']) < 0 || (isset($c['scan']) && $c['scan'] === 'off')) {
+                    continue;
+                }
+                $img = self::Podman($c['user'], array('container', 'inspect', '--format', '{{.Image}}', self::Name($cid)), 60);
+                if ($img[0] === 0 && preg_match('/^(sha256:)?[A-Za-z0-9._-]{3,128}$/', trim($img[1]))) {
+                    $sum = self::ImageCheck($c['user'], trim($img[1]));
+                    $s['scan'][(string) $cid] = is_array($sum) ? $sum : array('at' => time(), 'err' => $sum);
+                }
+            }
+            self::SaveState($s);
+        }
     }
 
     /**
@@ -971,13 +1139,21 @@ class snode
                     if ($pull[0] !== 0) {
                         return array(false, 'pull: ' . self::Tail($pull[1]));
                     }
+                    $g = self::Gate($d, $d['image']);
+                    if (!$g[0]) {
+                        self::Podman($d['user'], array('image', 'prune', '--all', '--force'), 300);
+                        return array(false, $g[1]);
+                    }
+                    if ($g[2] !== null) {
+                        $s['scan'][$key] = $g[2];
+                    }
                     $cr = self::Podman($d['user'], self::CreateArgs($d, $name));
                     if ($cr[0] !== 0) {
                         return array(false, 'create: ' . self::Tail($cr[1]));
                     }
                 }
                 $s['containers'][$key] = array('user' => $d['user'], 'domain' => $d['domain'], 'hostport' => $d['hostport'], 'public' => (int) $d['public'],
-                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $d['image']);
+                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $d['image'], 'scan' => self::WantScan($d));
                 self::SaveState($s);
                 $st = self::Podman($d['user'], array('start', $name));
                 if ($st[0] !== 0) {
@@ -992,6 +1168,7 @@ class snode
                 if ((int) $s['containers'][$key]['hostport'] !== $d['hostport'] || $s['containers'][$key]['domain'] !== $d['domain']) {
                     return array(false, 'refused: the address or port of an app does not change with an update');
                 }
+                $s['containers'][$key]['scan'] = self::WantScan($d);
                 $res = self::Update($d, $s);
                 $s['containers'][$key]['image'] = $d['image'];
                 return $res;
@@ -1004,6 +1181,7 @@ class snode
                 if ((int) $s['containers'][$key]['hostport'] !== $d['hostport'] || $s['containers'][$key]['domain'] !== $d['domain']) {
                     return array(false, 'refused: the address or port of an app does not change with its settings');
                 }
+                $s['containers'][$key]['scan'] = self::WantScan($d);
                 return self::Update($d, $s, false);
             case 'start':
             case 'stop':
@@ -1074,7 +1252,7 @@ class snode
                     // (113) the images no container of this user uses any more
                     self::Podman($d['user'], array('image', 'prune', '--all', '--force'), 300);
                 }
-                unset($s['containers'][$key]);
+                unset($s['containers'][$key], $s['scan'][$key]);
                 $px = self::Proxy($s);
                 return $px === '' ? array(true, 'deleted') : array(false, $px);
         }
@@ -1216,7 +1394,7 @@ class snode
                     self::$iso[$cid] = self::IsoOf($user, self::Name((int) $cid));
                 }
                 $out[$cid] = array('state' => $st, 'iso' => isset(self::$iso[$cid]) ? self::$iso[$cid] : '', 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
-                    'update' => !empty($s['updates'][$cid]) ? 1 : 0,
+                    'update' => !empty($s['updates'][$cid]) ? 1 : 0, 'scan' => isset($s['scan'][$cid]) && is_array($s['scan'][$cid]) ? $s['scan'][$cid] : null,
                     // (what the panel needs to show an app it does not know, and to take it back)
                     'image' => isset($c['image']) ? (string) $c['image'] : '', 'domain' => (string) $c['domain'], 'hostport' => (int) $c['hostport'],
                     'volumes' => (int) $c['volumes'], 'public' => (int) $c['public']);

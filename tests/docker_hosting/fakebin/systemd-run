@@ -1,5 +1,10 @@
 #!/bin/bash
 echo "systemd-run $*" >> "$FAKE_DIR/calls.log"
-# (--scope: the command runs here and now, as systemd-run does)
-for a in "$@"; do [ "$a" = --scope ] && { while [ "${1#-}" != "$1" ]; do shift; done; exec "$@"; }; done
+# (--scope: the command runs here and now, as systemd-run does; options before it, -p with its value)
+for a in "$@"; do
+    if [ "$a" = --scope ]; then
+        while [ "${1#-}" != "$1" ]; do case "$1" in -p|--property|--unit|--slice|--uid) shift 2 ;; *) shift ;; esac; done
+        exec "$@"
+    fi
+done
 exit 0
