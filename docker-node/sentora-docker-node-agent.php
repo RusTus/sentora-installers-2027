@@ -550,10 +550,12 @@ class snode
         if ($r[0] === 0 && in_array($args[0], array('start', 'restart'), true) && preg_match('/^sdh-(\d+)$/', $last, $m)
             && self::IsoOf($user, $last) === 'gvisor' && !self::InSlice($user, $last, (int) $m[1])) {
             self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
-            $r = self::AsUser($user, array('podman', 'start', $last), $timeout);
+            $r = self::AsUser($user, array('podman', '--log-level=info', 'start', $last), $timeout);
             if ($r[0] === 0 && !self::InSlice($user, $last, (int) $m[1])) {
                 self::AsUser($user, array('podman', 'stop', '--time', '10', $last), 120);
-                $r = array(1, 'the app did not start inside its limits (gVisor), so it was stopped');
+                // (with what Podman said about where it put the app)
+                preg_match_all('/^.*(conmon|cgroup|scope|slice|level=(warn|error)).*$/mi', (string) $r[1], $why);
+                $r = array(1, 'the app did not start inside its limits (gVisor), so it was stopped. Podman: ' . substr(implode(' | ', $why[0]), 0, 1500));
             }
         }
         return $r;

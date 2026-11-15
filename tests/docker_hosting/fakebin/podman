@@ -7,6 +7,7 @@ echo "podman[${FAKE_USER:-root}] $*" >> "$FAKE_DIR/calls.log"
 P=$FAKE_DIR/podman/$FAKE_USER; mkdir -p "$P/c" "$P/v"
 # (a runtime of its own: podman --runtime X create ...; kept with the container, as Podman does)
 RUNTIME=crun; if [ "$1" = --runtime ]; then RUNTIME=$2; shift 2; fi
+case "$1" in --log-level=*) shift ;; esac
 last=${!#}
 reg() { local f="$FAKE_DIR/registry/$(echo "$1" | tr '/:' '__')"; if [ -f "$f" ]; then cat "$f"; else echo "id-$(echo "$1" | tr '/:' '__')-1 sha256:$(printf '1%.0s' $(seq 1 64))"; fi; }
 mkdir -p "$P/i"
