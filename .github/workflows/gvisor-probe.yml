@@ -10,5 +10,5 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - run: sudo apt-get -qq update && sudo apt-get -qq install -y podman passt uidmap > /dev/null
+      - run: sudo apt-get -qq update && sudo apt-get -qq install -y podman passt uidmap zstd > /dev/null
       - run: sudo bash .github/scripts/gvisor-probe.sh
