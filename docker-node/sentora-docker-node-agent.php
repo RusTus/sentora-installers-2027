@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '114';
+    const VERSION = '115';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -343,16 +343,33 @@ class snode
     /**
      * Run a command (no shell). Returns [exit code, output (stdout and stderr together)].
      */
-    static function Run(array $argv, $cwd = null, $timeout = 600)
+    /**
+     * Run a command (an argument list, no shell). $in: a file for its standard input; $out: a file its
+     * standard output goes to (then only its errors are returned as the text). Both are opened here, by
+     * root, in root's own folders: that is how data goes in and out of a customer's Podman without root
+     * ever touching a path in the customer's home (2026-11-15: a customer's own symlink there could
+     * otherwise turn a root chown or rename into root on the node).
+     */
+    static function Run(array $argv, $cwd = null, $timeout = 600, $in = null, $out = null)
     {
         // (a command this system does not have, such as getenforce without SELinux: said, not warned about)
         if (strpos((string) $argv[0], '/') === false && self::Which($argv[0]) === '') {
             return array(127, $argv[0] . ': not on this system');
         }
-        $p = proc_open($argv, array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('redirect', 1)), $pipes, $cwd);
+        $io = array(0 => array('file', $in !== null ? $in : '/dev/null', 'r'));
+        if ($out !== null) {
+            @unlink($out);
+            $io[1] = array('file', $out, 'w');
+            $io[2] = array('pipe', 'w');
+        } else {
+            $io[1] = array('pipe', 'w');
+            $io[2] = array('redirect', 1);
+        }
+        $p = proc_open($argv, $io, $all, $cwd);
         if (!is_resource($p)) {
             return array(127, 'could not run ' . $argv[0]);
         }
+        $pipes = array(1 => $all[$out !== null ? 2 : 1]);
         stream_set_blocking($pipes[1], false);
         $out = '';
         $end = time() + $timeout;
@@ -469,12 +486,12 @@ class snode
     /**
      * Run a command as the customer's user (in its own session's environment).
      */
-    static function AsUser($user, array $argv, $timeout = 600)
+    static function AsUser($user, array $argv, $timeout = 600, $in = null, $out = null)
     {
         $uid = self::Uid($user);
         $env = array('env', 'HOME=' . self::$home . '/' . $user, 'XDG_RUNTIME_DIR=' . self::$run . '/' . $uid, 'DBUS_SESSION_BUS_ADDRESS=unix:path=' . self::$run . '/' . $uid . '/bus',
             'PATH=' . (getenv('SNODE_USERPATH') ?: '/usr/local/bin:/usr/bin:/bin'));
-        return self::Run(array_merge(array('runuser', '-u', $user, '--'), $env, $argv), self::$home . '/' . $user, $timeout);
+        return self::Run(array_merge(array('runuser', '-u', $user, '--'), $env, $argv), self::$home . '/' . $user, $timeout, $in, $out);
     }
 
     /**
@@ -493,30 +510,41 @@ class snode
             if ($e !== '') {
                 return array(125, $e);
             }
+            // (written by the user itself into its own runtime folder, from a file of root's on its input:
+            // root writes nothing in a folder the user owns)
             $auth = self::$run . '/' . self::Uid($user) . '/sentora-pull-' . bin2hex(random_bytes(8)) . '.json';
+            $src = self::RootTemp('auth');
             $old = umask(077);
-            $ok = file_put_contents($auth, json_encode(array('auths' => array($r['host'] => array('auth' => base64_encode($r['user'] . ':' . $r['secret']))))));
+            $ok = file_put_contents($src, json_encode(array('auths' => array($r['host'] => array('auth' => base64_encode($r['user'] . ':' . $r['secret']))))));
             umask($old);
-            if ($ok === false) {
+            $w = $ok === false ? array(1, '') : self::AsUser($user, array('sh', '-c', 'umask 077; cat > "$1"', 'sh', $auth), 60, $src);
+            @unlink($src);
+            if ($w[0] !== 0) {
                 return array(125, 'the registry login could not be written for the download');
             }
-            @chown($auth, $user);
-            @chmod($auth, 0600);
         }
         $p = self::Podman($user, array_merge(array('pull', '--quiet'), $auth !== '' ? array('--authfile', $auth) : array(), array($image)), 1800);
         if ($auth !== '') {
-            @unlink($auth);
+            self::AsUser($user, array('rm', '-f', '--', $auth), 60);
         }
         return $p;
     }
 
-    static function Podman($user, array $args, $timeout = 600)
+    static function Podman($user, array $args, $timeout = 600, $in = null, $out = null)
     {
         $e = self::Session($user);
         if ($e !== '') {
             return array(125, $e);
         }
-        return self::AsUser($user, array_merge(array('podman'), $args), $timeout);
+        return self::AsUser($user, array_merge(array('podman'), $args), $timeout, $in, $out);
+    }
+
+    /** A file of root's own for one piece of data on its way (root's transfer folder: customers can not reach it). */
+    static function RootTemp($what)
+    {
+        @mkdir(self::$state . '/transfer', 0700, true);
+        @chmod(self::$state . '/transfer', 0700);
+        return self::$state . '/transfer/' . $what . '-' . bin2hex(random_bytes(8));
     }
 
     // ----- checking a job -----
@@ -691,7 +719,8 @@ class snode
                 $s['containers'][$cid]['image'] = $c['image'] = trim($in[1]);
             }
             $local = self::Podman($c['user'], array('image', 'inspect', '--format', '{{json .RepoDigests}}', $c['image']), 60);
-            $remote = self::Run(array('skopeo', 'inspect', '--no-tags', '--format', '{{.Digest}}', 'docker://' . $c['image']), null, 120);
+            // (asked as the app's own user, inside its fence: the registry is the customer's choice)
+            $remote = self::AsUser($c['user'], array('skopeo', 'inspect', '--no-tags', '--format', '{{.Digest}}', 'docker://' . $c['image']), 120);
             $digests = json_decode(trim($local[1]), true);
             if ($local[0] !== 0 || $remote[0] !== 0 || !is_array($digests) || !preg_match('/^sha256:[a-f0-9]{64}$/', trim($remote[1]))) {
                 continue;
@@ -1343,37 +1372,16 @@ class snode
         if (!preg_match('/^(sha256:)?[A-Za-z0-9._-]{3,128}$/', $id)) {
             return array(false, 'the version the app runs could not be read');
         }
-        // work folders in the two users' homes (each user reads only its own)
-        $dir = function ($user) {
-            $p = self::$home . '/' . $user . '/.sentora-move';
-            if (!is_dir($p)) {
-                @mkdir($p, 0700, true);
-            }
-            @chown($p, $user);
-            @chmod($p, 0700);
-            return $p;
-        };
-        $from_dir = $dir($fu);
-        $to_dir = $dir($u);
-        $hand = function ($file) use ($to_dir, $u) {
-            $to = $to_dir . '/' . basename($file);
-            if (!@rename($file, $to)) {
-                return '';
-            }
-            @chown($to, $u);
-            @chmod($to, 0600);
-            return $to;
-        };
+        // the version and the data go from one user to the other through files of root's own (Podman writes
+        // them to its output and reads them from its input): root never works in either user's home
+        $temps = array();
         $made = array();
-        $clean = function () use (&$made, $u, $from_dir, $to_dir) {
+        $clean = function () use (&$made, &$temps, $u) {
             foreach ($made as $m) {
                 self::Podman($u, $m[0] === 'c' ? array('rm', '--force', '--ignore', $m[1]) : array('volume', 'rm', '--force', $m[1]));
             }
-            foreach (array($from_dir, $to_dir) as $p) {
-                foreach ((array) glob($p . '/*.tar') as $f) {
-                    @unlink($f);
-                }
-                @rmdir($p);
+            foreach ($temps as $f) {
+                @unlink($f);
             }
         };
         $back = function ($why) use ($clean, $fu, $old) {
@@ -1384,25 +1392,19 @@ class snode
         self::Podman($fu, array('stop', '--time', '20', $old), 120);
         if ($fu !== $u) {
             // the same version for the new owner (not downloaded again: it may be newer by now)
-            @unlink($from_dir . '/image.tar');
-            @unlink($to_dir . '/image.tar');
-            $r = self::Podman($fu, array('image', 'save', '--output', $from_dir . '/image.tar', $id), 1800);
-            $f = $r[0] === 0 ? $hand($from_dir . '/image.tar') : '';
-            $r = $f !== '' ? self::Podman($u, array('image', 'load', '--input', $f), 1800) : $r;
-            if ($f !== '') {
-                @unlink($f);
-            }
-            if ($f === '' || $r[0] !== 0) {
+            $f = $temps[] = self::RootTemp('move-image');
+            $r = self::Podman($fu, array('image', 'save', $id), 1800, null, $f);
+            $ok = $r[0] === 0;
+            $r = $ok ? self::Podman($u, array('image', 'load'), 1800, $f) : $r;
+            @unlink($f);
+            if (!$ok || $r[0] !== 0) {
                 return $back('the app\'s version could not be handed over (' . self::Tail($r[1]) . ')');
             }
         }
         for ($i = 0; $i < count($d['volumes']); $i++) {
-            $tar = $from_dir . '/v' . $i . '.tar';
-            @unlink($tar);
-            @unlink($to_dir . '/v' . $i . '.tar');
-            $r = self::Podman($fu, array('volume', 'export', '--output', $tar, $old . '-' . $i), 3600);
-            $f = $r[0] === 0 ? $hand($tar) : '';
-            if ($f === '') {
+            $f = $temps[] = self::RootTemp('move-v' . $i);
+            $r = self::Podman($fu, array('volume', 'export', $old . '-' . $i), 3600, null, $f);
+            if ($r[0] !== 0) {
                 return $back('data folder ' . $i . ' could not be read (' . self::Tail($r[1]) . ')');
             }
             $r = self::Podman($u, array('volume', 'create', $name . '-' . $i));
@@ -1410,7 +1412,7 @@ class snode
                 return $back('data folder ' . $i . ' could not be made (' . self::Tail($r[1]) . ')');
             }
             $made[] = array('v', $name . '-' . $i);
-            $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, $f), 3600);
+            $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, '-'), 3600, $f);
             @unlink($f);
             if ($r[0] !== 0) {
                 return $back('data folder ' . $i . ' could not be copied (' . self::Tail($r[1]) . ')');
@@ -1443,11 +1445,8 @@ class snode
                 self::Podman($fu, array('volume', 'rm', '--force', $old . '-' . $i));
             }
         }
-        foreach (array($from_dir, $to_dir) as $p) {
-            foreach ((array) glob($p . '/*.tar') as $f) {
-                @unlink($f);
-            }
-            @rmdir($p);
+        foreach ($temps as $f) {
+            @unlink($f);
         }
         $px = self::Proxy($s);
         return $px === '' ? array(true, 'moved to ' . $u . ' as ' . $name . ', with its data') : array(false, $px);
@@ -1476,18 +1475,6 @@ class snode
         @chmod(self::$state . '/transfer', 0700);
         $p = self::$state . '/transfer/' . $token;
         @mkdir($p, 0700, true);
-        return $p;
-    }
-
-    /** The user's own work folder (it reads and writes only its own). */
-    static function UserDir($user)
-    {
-        $p = self::$home . '/' . $user . '/.sentora-move';
-        if (!is_dir($p)) {
-            @mkdir($p, 0700, true);
-        }
-        @chown($p, $user);
-        @chmod($p, 0700);
         return $p;
     }
 
@@ -1643,7 +1630,6 @@ class snode
         $name = self::Name($d['cid']);
         $n = (int) $s['containers'][$key]['volumes'];
         $dir = self::TransferDir($d['token']);
-        $ud = self::UserDir($u);
         $st = self::Podman($u, array('container', 'inspect', '--format', '{{.State.Status}}', $name));
         if ($st[0] !== 0) {
             return array(false, 'no such container here');
@@ -1666,17 +1652,15 @@ class snode
         $files = array();
         $err = '';
         for ($i = 0; $i < $n; $i++) {
-            $tmp = $ud . '/b-' . $d['token'] . '-' . $i . '.tar';
-            @unlink($tmp);
-            $r = self::Podman($u, array('volume', 'export', '--output', $tmp, $name . '-' . $i), 3600);
+            // (straight from Podman's output into root's own folder: nothing in the user's home)
             $to = $dir . '/v' . $i . '.tar';
+            $r = self::Podman($u, array('volume', 'export', $name . '-' . $i), 3600, null, $to);
             clearstatcache();
-            if ($r[0] !== 0 || is_link($tmp) || !is_file($tmp) || !@rename($tmp, $to)) {
-                @unlink($tmp);
+            if ($r[0] !== 0 || is_link($to) || !is_file($to)) {
+                @unlink($to);
                 $err = 'data folder ' . $i . ' could not be read (' . self::Tail($r[1]) . ')';
                 break;
             }
-            @chown($to, 0);
             $g = self::Run(array('gzip', '-1', '-f', $to), null, 3600);
             if ($g[0] !== 0 || !is_file($to . '.gz')) {
                 $err = 'data folder ' . $i . ' could not be packed (' . self::Tail($g[1]) . ')';
@@ -1753,7 +1737,6 @@ class snode
             }
         }
         $dir = self::TransferDir($d['token']);
-        $ud = self::UserDir($u);
         $tars = array();
         $clean = function () use ($dir, &$tars) {
             foreach ($tars as $t) {
@@ -1769,16 +1752,12 @@ class snode
                 $g = self::Run(array('gzip', '-d', '-f', $p), null, 3600);
                 $e = $g[0] === 0 && is_file($dir . '/v' . $i . '.tar') ? '' : 'the copy could not be unpacked (' . self::Tail($g[1]) . ')';
             }
-            $t = $ud . '/r-' . $d['token'] . '-' . $i . '.tar';
-            if ($e === '' && !@rename($dir . '/v' . $i . '.tar', $t)) {
-                $e = 'no room to unpack the copy';
-            }
+            // (it stays in root's own folder: Podman reads it on its input when the data folder is made)
+            $t = $dir . '/v' . $i . '.tar';
             if ($e !== '') {
                 $clean();
                 return array(false, $e);
             }
-            @chown($t, $u);
-            @chmod($t, 0600);
             $tars[] = $t;
         }
         // 2. the version: the one the app runs (here), or the same one again (a move)
@@ -1810,9 +1789,8 @@ class snode
         if ($here) {
             self::Podman($u, array('stop', '--time', '20', $name), 120);
             for ($i = 0; $i < $n; $i++) {
-                $t = $ud . '/s-' . $d['token'] . '-' . $i . '.tar';
-                @unlink($t);
-                $r = self::Podman($u, array('volume', 'export', '--output', $t, $name . '-' . $i), 3600);
+                $t = $dir . '/s' . $i . '.tar';
+                $r = self::Podman($u, array('volume', 'export', $name . '-' . $i), 3600, null, $t);
                 if ($r[0] !== 0) {
                     $clean();
                     if ($was === 'running') {
@@ -1831,7 +1809,7 @@ class snode
                 self::Podman($u, array('volume', 'rm', '--force', $name . '-' . $i));
                 $r = self::Podman($u, array('volume', 'create', $name . '-' . $i));
                 if ($r[0] === 0) {
-                    $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, $from[$i]), 3600);
+                    $r = self::Podman($u, array('volume', 'import', $name . '-' . $i, '-'), 3600, $from[$i]);
                 }
                 if ($r[0] !== 0) {
                     return 'data folder ' . $i . ' could not be put back (' . self::Tail($r[1]) . ')';
@@ -2130,6 +2108,10 @@ class snode
                 }
             }
         }
+        // (nor this node's own loopback: Caddy's admin interface and the other customers' apps listen there;
+        // only new connections: the replies of an app's own port, which Caddy connects to, go out as its user)
+        $t .= "\t\tmeta skuid @apps ip daddr 127.0.0.0/8 ct state new reject\n"
+            . "\t\tmeta skuid @apps ip6 daddr ::1 ct state new reject\n";
         $t .= "\t\tmeta skuid @apps ip daddr 169.254.0.0/16 reject\n"
             . "\t\tmeta skuid @apps ip6 daddr { fe80::/10, fd00:ec2::254/128 } reject\n";
         // (the customers the panel allows the local network skip these two)

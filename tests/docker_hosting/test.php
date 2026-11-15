@@ -1319,7 +1319,10 @@ check($b && $b['bk_state_vc'] === 'stored' && (int) $b['bk_size_bi'] > 0 && dh::
 $bf = getenv('DH_BACKUP_DIR') . '/' . $pid . '/' . ($b ? $b['bk_token_vc'] : 'x') . '/v0.tar.gz';
 check(is_file($bf) && strpos((string) shell_exec('tar -xzOf ' . escapeshellarg($bf) . ' ./data.txt 2>&1'), 'night one') !== false, 'the copy on the panel holds the app\'s data');
 $cl = calls();
-check(strpos($cl, 'stop --time 20 sdh-' . $pid) !== false && strpos($cl, 'volume export --output') !== false, 'the app was stopped while its data was read');
+check(strpos($cl, 'stop --time 20 sdh-' . $pid) !== false && strpos($cl, 'volume export sdh-' . $pid . '-0') !== false, 'the app was stopped while its data was read');
+// (2026-11-15: root never works in a customer's home, where the customer's own symlink could turn a root
+// chown or rename into root on the node: Podman writes the data to its output, into root's own folder)
+check(strpos($cl, '.sentora-move') === false && strpos($cl, 'export --output') === false, 'the data went straight to root\'s own folder, not through the customer\'s home');
 check(count(glob(getenv('SNODE_STATE') . '/transfer/*')) === 0 && count(glob(getenv('SNODE_HOME') . '/sdh1/.sentora-move/*')) === 0, 'nothing is left on the node');
 $r = req(1, '', array(), array('settings' => (string) $pid));
 check(strpos($r['html'], 'Backed up ' . date('Y-m-d')) !== false && strpos($r['html'], 'Put this backup back') !== false, 'the row says when; the settings offer to put it back');
@@ -1332,7 +1335,7 @@ $r = req(1, 'Restore', array('inId' => (string) $pid));
 check(strpos($r['text'], 'ok: Putting its backup back') !== false, 'Put this backup back: queued', $r['text']);
 $o = agent('once');
 check(file_get_contents($vol . '/data.txt') === 'night one' && dh::Container($pid)['dc_state_vc'] === 'running' && dh_backup::Newest($pid)['bk_state_vc'] === 'stored', 'the node fetched it, checked it, and the app runs with the backup\'s data', $o);
-check(strpos(calls(), 'volume export --output ' . getenv('SNODE_HOME') . '/sdh1/.sentora-move/s-') !== false, 'today\'s data was kept aside first');
+check(substr_count(calls(), 'volume export sdh-' . $pid . '-0') >= 2 && strpos(calls(), 'volume import sdh-' . $pid . '-0 -') !== false && strpos(calls(), '.sentora-move') === false, 'today\'s data was kept aside first, and the copy put back through Podman\'s input');
 // a copy damaged on the panel: refused, nothing changes
 file_put_contents($vol . '/data.txt', 'today');
 $fh = fopen($bf, 'r+'); fseek($fh, 20); fwrite($fh, 'XXXX'); fclose($fh);

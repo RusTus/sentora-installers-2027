@@ -542,6 +542,7 @@ case "${1:---check}" in
         kind=${1#--}
         put "{\"running\": \"$kind\"}"
         L=/var/log/sentora-docker-node-sysupdate.log
+        touch $L; chmod 600 $L   # (root's only: it lists the node's packages)
         if [ "$PKG" = apt ]; then
             apt-get -q update >> $L 2>&1
             if [ "$kind" = security ]; then unattended-upgrade -v >> $L 2>&1; else apt-get -y -o Dpkg::Options::=--force-confold upgrade >> $L 2>&1; fi

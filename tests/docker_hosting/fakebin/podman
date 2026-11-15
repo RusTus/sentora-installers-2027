@@ -33,6 +33,9 @@ case "$1" in
       *Config.Env*) echo '["PATH=/usr/bin"]'; exit 0 ;;
       "image save --output "*) [ -f "$FAKE_DIR/save-fail" ] && { echo "Error: save failed"; exit 125; }; echo "$last" > "$4"; exit 0 ;;
       "image load --input "*) [ -f "$4" ] || exit 125; echo "Loaded image: $(cat "$4")"; exit 0 ;;
+      # (the agent's way since 115: to its output, from its input)
+      "image save "*) [ -f "$FAKE_DIR/save-fail" ] && { echo "Error: save failed" >&2; exit 125; }; echo "$last"; exit 0 ;;
+      "image load") l=$(cat); [ -n "$l" ] || exit 125; echo "Loaded image: $l"; exit 0 ;;
       *prune*) exit 0 ;;
       *RepoDigests*) [ -f "$f" ] || exit 125; echo "[\"${last%%:*}@$(cut -d' ' -f2 "$f")\"]"; exit 0 ;;
       *Id*) [ -f "$f" ] || exit 125; cut -d' ' -f1 "$f"; exit 0 ;;
@@ -64,8 +67,8 @@ case "$1" in
       inspect) [ -d "$P/v/$last" ] || { echo "Error: no such volume"; exit 125; }; echo "$P/v/$last"; exit 0 ;;
       rm) rm -rf "$P/v/$last"; exit 0 ;;
       create) mkdir -p "$P/v/$last"; echo "$last"; exit 0 ;;
-      export) [ -d "$P/v/$last" ] || exit 125; tar -C "$P/v/$last" -cf "$4" . ; exit $? ;;
-      import) [ -d "$P/v/$3" ] && [ -f "$4" ] || exit 125; tar -C "$P/v/$3" -xf "$4"; exit $? ;;
+      export) [ -d "$P/v/$last" ] || exit 125; if [ "$3" = --output ]; then tar -C "$P/v/$last" -cf "$4" . ; else tar -C "$P/v/$last" -cf - . ; fi; exit $? ;;
+      import) [ -d "$P/v/$3" ] || exit 125; if [ "$4" = - ]; then tar -C "$P/v/$3" -xf -; else [ -f "$4" ] || exit 125; tar -C "$P/v/$3" -xf "$4"; fi; exit $? ;;
     esac ;;
   ps)
     out='['; sep=''
