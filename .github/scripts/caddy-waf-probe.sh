@@ -31,7 +31,7 @@ say "The stock apps"
 docker run -d --name kuma -p 127.0.0.1:3001:3001 docker.io/louislam/uptime-kuma:1 > /dev/null
 docker run -d --name gitea -p 127.0.0.1:3000:3000 -e GITEA__security__INSTALL_LOCK=true -e GITEA__database__DB_TYPE=sqlite3 \
     -e GITEA__server__ROOT_URL=http://127.0.0.1:18081/ -e GITEA__service__DISABLE_REGISTRATION=false docker.io/gitea/gitea:1 > /dev/null
-docker run -d --name vw -p 127.0.0.1:8000:80 -p 127.0.0.1:8001:8080 -e SIGNUPS_ALLOWED=true -e DOMAIN=http://127.0.0.1:18082 docker.io/vaultwarden/server:latest > /dev/null
+docker run -d --name vw -v vwdata:/data -p 127.0.0.1:8000:80 -p 127.0.0.1:8001:8080 -e SIGNUPS_ALLOWED=true -e DOMAIN=http://127.0.0.1:18082 docker.io/vaultwarden/server:latest > /dev/null
 docker run -d --name nc -p 127.0.0.1:8080:80 -e SQLITE_DATABASE=nc -e NEXTCLOUD_ADMIN_USER=admin -e NEXTCLOUD_ADMIN_PASSWORD=Probe-pass-1234 \
     -e NEXTCLOUD_TRUSTED_DOMAINS="127.0.0.1 127.0.0.1:18083" docker.io/library/nextcloud:stable-apache > /dev/null
 docker run -d --name echo -p 127.0.0.1:5678:5678 docker.io/hashicorp/http-echo -text=hello > /dev/null
