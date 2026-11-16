@@ -450,6 +450,60 @@ if [ -x /usr/local/bin/trivy ]; then
     printf 'TRIVY=/usr/local/bin/trivy\nSCAN_USER=sentora-scan\n' >> /etc/sentora-docker-node/platform.conf
 fi
 
+ui_step "Web firewall for the apps (Caddy with Coraza)"
+# Caddy built with the Coraza web firewall and the OWASP Core Rule Set (Docker Hosting 138, owner 2026-11-16):
+# built by the "Caddy with Coraza" workflow, one file per processor, its SHA-256 pinned here (a file changed on
+# the release is refused). It runs as the system's caddy service, under the same user and SELinux label
+# (httpd_t) as the system's own Caddy, which stays installed and comes back when this one is not there.
+CADDY_WAF_TAG=caddy-waf-2.11.9-coraza-2.6.2
+CADDY_WAF_SHA256_X86_64=PENDING
+CADDY_WAF_SHA256_AARCH64=PENDING
+caddy_waf_install() {
+    local file sum tmp
+    case "$(uname -m)" in
+        x86_64) file=caddy-sentora-amd64; sum=$CADDY_WAF_SHA256_X86_64 ;;
+        aarch64) file=caddy-sentora-arm64; sum=$CADDY_WAF_SHA256_AARCH64 ;;
+        *) note "Web firewall: no build for $(uname -m); the system's own Caddy serves the apps."; return 1 ;;
+    esac
+    if [ -x /usr/local/bin/caddy-sentora ] && echo "$sum  /usr/local/bin/caddy-sentora" | sha256sum -c - > /dev/null 2>&1; then
+        note "Caddy with Coraza is in place ($(/usr/local/bin/caddy-sentora version 2> /dev/null | cut -d' ' -f1))."
+        return 0
+    fi
+    tmp=$(mktemp -d)
+    if curl -fsSL --proto =https,file --proto-redir =https "${SNODE_CADDY_WAF_URL:-https://github.com/RusTus/sentora-installers-2027/releases/download/$CADDY_WAF_TAG}/$file" -o "$tmp/caddy" \
+        && echo "$sum  $tmp/caddy" | sha256sum -c - > /dev/null 2>&1 && chmod 755 "$tmp/caddy" && "$tmp/caddy" list-modules 2> /dev/null | grep -qx http.handlers.waf; then
+        install -m 755 -o root -g root "$tmp/caddy" /usr/local/bin/caddy-sentora
+        note "Caddy with Coraza installed: $(/usr/local/bin/caddy-sentora version 2> /dev/null | cut -d' ' -f1) (checksum checked)."
+        rm -rf "$tmp"; return 0
+    fi
+    rm -rf "$tmp"
+    note "Caddy with Coraza could not be downloaded or did not match its checksum: the system's own Caddy serves the apps, without the web firewall (see $LOG)."
+    return 1
+}
+mkdir -p /etc/systemd/system/$CADDY_SERVICE.service.d
+if caddy_waf_install; then
+    if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
+        # (the same label as the system's Caddy: it runs confined as the web server, httpd_t)
+        run semanage fcontext -a -t httpd_exec_t '/usr/local/bin/caddy-sentora' || run semanage fcontext -m -t httpd_exec_t '/usr/local/bin/caddy-sentora'
+        restorecon /usr/local/bin/caddy-sentora > /dev/null 2>&1
+    fi
+    cat > /etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf <<WAF_EOF
+# Sentora Docker Node: the caddy service runs Caddy with the Coraza web firewall (/usr/local/bin/caddy-sentora);
+# removing this file brings the system's own Caddy back (the apps' sites then have to be written without it).
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/caddy-sentora run --environ --config $CADDY_DIR/Caddyfile
+ExecReload=
+ExecReload=/usr/local/bin/caddy-sentora reload --config $CADDY_DIR/Caddyfile --force
+WAF_EOF
+    CADDY_BIN=/usr/local/bin/caddy-sentora
+    sed -i "s#^CADDY_BIN=.*#CADDY_BIN=$CADDY_BIN#" /etc/sentora-docker-node/platform.conf
+    echo "CADDY_WAF=1" >> /etc/sentora-docker-node/platform.conf
+else
+    rm -f /etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf
+fi
+systemctl daemon-reload
+
 ui_step "Web server (Caddy, automatic HTTPS)"
 mkdir -p $CADDY_DIR/sentora
 [ -f $CADDY_DIR/Caddyfile ] && [ ! -f $CADDY_DIR/Caddyfile.before-sentora ] && cp -p $CADDY_DIR/Caddyfile $CADDY_DIR/Caddyfile.before-sentora
@@ -601,7 +655,9 @@ if [ "${1:-}" = --purge ]; then
     done
     rm -rf /var/lib/sentora-docker-node /var/lib/sentora-scan
     userdel sentora-scan 2>/dev/null
-    echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl reload "$CADDY_SERVICE" 2>/dev/null
+    # (the system's own Caddy back: the sites file below no longer uses the web firewall)
+    rm -f "/etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf" /usr/local/bin/caddy-sentora
+    echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl daemon-reload; systemctl restart "$CADDY_SERVICE" 2>/dev/null
 fi
 systemctl daemon-reload
 rm -f /usr/local/sbin/sentora-docker-node-uninstall
