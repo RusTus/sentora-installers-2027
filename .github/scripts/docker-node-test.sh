@@ -18,14 +18,29 @@ case "$SYS" in
     fedora45) IMAGE=quay.io/fedora/fedora:45; PKGS=dnf ;;
     debian13) IMAGE=docker.io/library/debian:13; PKGS=apt ;;
     ubuntu26.04) IMAGE=docker.io/library/ubuntu:26.04; PKGS=apt ;;
+    # (a real machine under KVM, with SELinux enforcing as on a server: the containers above share the runner's
+    # Ubuntu kernel, where SELinux is not there at all; every SELinux refusal fails the test)
+    alma10-vm) IMAGE=https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-latest.x86_64.qcow2; PKGS=dnf; VMBOX=1 ;;
     *) echo "unknown system $SYS"; exit 2 ;;
 esac
+VMBOX=${VMBOX:-}
 NAME=sentora-docker-node-test
 FAILS=0
 say() { printf '\n=== %s  (%s)\n' "$1" "$(date '+%H:%M:%S')"; }
 ok() { echo "  ok   $1"; }
 bad() { echo "  FAIL $1"; FAILS=$((FAILS + 1)); echo "::error::$1"; }
-in_box() { docker exec "$NAME" bash -c "$1"; }
+if [ -n "$VMBOX" ]; then
+    KEY=$(mktemp -u)
+    SSHO=(-i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
+    in_box() { ssh "${SSHO[@]}" -p 2222 root@127.0.0.1 "$1"; }
+    box_cp() { scp "${SSHO[@]}" -P 2222 -q "$1" "root@127.0.0.1:$2"; }
+    wait_ssh() { for _ in $(seq 1 "${1:-150}"); do in_box true 2> /dev/null && return 0; sleep 2; done; return 1; }
+    box_restart() { in_box 'systemctl reboot' > /dev/null 2>&1; sleep 15; wait_ssh 150; }
+else
+    in_box() { docker exec "$NAME" bash -c "$1"; }
+    box_cp() { docker cp "$1" "$NAME:$2"; }
+    box_restart() { docker restart "$NAME" > /dev/null; }
+fi
 panel() { php "$T/node_real.php" "$@"; }
 wait_for() { # wait_for <seconds> <command...>: until the command prints something other than ""/0
     local end=$(( $(date +%s) + $1 )); shift
@@ -41,17 +56,20 @@ rm -rf "$T/root/modules"; mkdir -p "$T/root/modules"; cp -r "$MOD" "$T/root/modu
 export DH_DB="$W/panel.sqlite"
 # (app backups need a Sentora backup node for the off-server backup: the stand-in says it has one)
 export DH_BACKUP_DIR="$W/dhbackups" DH_OFFSITE_STATE="$W/offsite.json"; echo '{"gate":1}' > "$W/offsite.json"
-GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
-php -d display_errors=stderr -d error_reporting=-1 -S "$GW:18092" -t "$T/root" > "$OUT/panel-web.log" 2>&1 &
+# (the panel's address as the node sees it: the containers' bridge, or QEMU's address for this machine)
+if [ -n "$VMBOX" ]; then LGW=127.0.0.1; GW=10.0.2.2; else GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}'); LGW=$GW; fi
+php -d display_errors=stderr -d error_reporting=-1 -S "$LGW:18092" -t "$T/root" > "$OUT/panel-web.log" 2>&1 &
 WEB=$!
 cleanup() {
     kill $WEB 2> /dev/null
     panel log > "$OUT/panel-log.txt" 2>&1
-    docker exec "$NAME" journalctl -u sentora-docker-node --no-pager > "$OUT/agent.log" 2>&1
-    docker exec "$NAME" journalctl -u caddy --no-pager > "$OUT/caddy.log" 2>&1
-    docker exec "$NAME" cat /var/log/sentora2027-docker-node.log > "$OUT/node-install.log" 2>&1
-    docker exec "$NAME" cat /etc/caddy/sentora/sites.caddy > "$OUT/sites.caddy" 2>&1
-    [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }
+    in_box 'journalctl -u sentora-docker-node --no-pager' > "$OUT/agent.log" 2>&1
+    in_box 'journalctl -u caddy --no-pager' > "$OUT/caddy.log" 2>&1
+    in_box 'cat /var/log/sentora2027-docker-node.log' > "$OUT/node-install.log" 2>&1
+    in_box 'cat /etc/caddy/sentora/sites.caddy' > "$OUT/sites.caddy" 2>&1
+    [ -n "$VMBOX" ] && in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null' > "$OUT/selinux-refusals.txt" 2>&1
+    if [ -n "$VMBOX" ]; then [ -f "$W/qemu.pid" ] && kill "$(cat "$W/qemu.pid")" 2> /dev/null; [ -n "${TEST_KEEP:-}" ] || rm -rf "$W" "$T/root/modules"
+    else [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }; fi
 }
 trap cleanup EXIT
 sleep 1
@@ -59,6 +77,25 @@ FP=$(panel init)
 [[ "$FP" =~ ^[A-Z2-9]{4}-[A-Z2-9]{4}$ ]] || { echo "::error::the stand-in panel did not start ($FP)"; exit 1; }
 ok "panel ready (its code: $FP)"
 
+if [ -n "$VMBOX" ]; then
+say "A fresh machine: $IMAGE (SELinux enforcing)"
+for try in 1 2 3; do curl -fsSL --retry 3 -o "$W/base.img" "$IMAGE" && break; sleep $(( try * 15 )); done
+[ -s "$W/base.img" ] || { echo "::error::the cloud image did not download"; exit 1; }
+qemu-img create -q -f qcow2 -F qcow2 -b "$W/base.img" "$W/disk.qcow2" 40G
+ssh-keygen -q -t ed25519 -N '' -f "$KEY"
+printf '#cloud-config\nhostname: node1\nfqdn: node1.example.test\nprefer_fqdn_over_hostname: true\nmanage_etc_hosts: true\ndisable_root: false\nssh_pwauth: false\nusers:\n  - name: root\n    ssh_authorized_keys: ["%s"]\ngrowpart: {mode: auto, devices: [/]}\n' "$(cat "$KEY.pub")" > "$W/user-data"
+printf 'instance-id: sentora-node-vm-test\nlocal-hostname: node1\n' > "$W/meta-data"
+if command -v cloud-localds > /dev/null; then cloud-localds "$W/seed.iso" "$W/user-data" "$W/meta-data"
+else genisoimage -quiet -output "$W/seed.iso" -volid cidata -joliet -rock "$W/user-data" "$W/meta-data"; fi
+MEM=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 - 3072 )); [ $MEM -gt 10240 ] && MEM=10240
+qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m "$MEM" -smp "$(nproc)" \
+    -drive file="$W/disk.qcow2",if=virtio,cache=unsafe,discard=unmap -drive file="$W/seed.iso",if=virtio,format=raw,readonly=on \
+    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=n0 -device virtio-rng-pci \
+    -display none -serial file:"$OUT/console.log" -daemonize -pidfile "$W/qemu.pid" || { echo "::error::QEMU did not start"; exit 1; }
+wait_ssh 150 || { tail -40 "$OUT/console.log"; echo "::error::the machine did not answer on SSH"; exit 1; }
+in_box 'cloud-init status --wait > /dev/null 2>&1; hostname -f; grep PRETTY /etc/os-release; getenforce'
+[ "$(in_box getenforce)" = Enforcing ] || { echo "::error::SELinux is not enforcing on this machine"; exit 1; }
+else
 say "A fresh $IMAGE with systemd"
 # (container images may mask systemd-logind; a server never does)
 if [ "$PKGS" = apt ]; then
@@ -74,9 +111,11 @@ docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys
     --tmpfs /run --tmpfs /run/lock -h node1.example.test sentora-docker-node-test > /dev/null
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 
+fi
+
 say "Installing the node"
-docker cp "$REPO/docker-node/sentora2027-docker-node" "$NAME:/root/sentora2027-docker-node"
-docker cp "$REPO/docker-node/sentora-docker-node-agent.php" "$NAME:/root/sentora-docker-node-agent.php"
+box_cp "$REPO/docker-node/sentora2027-docker-node" /root/sentora2027-docker-node
+box_cp "$REPO/docker-node/sentora-docker-node-agent.php" /root/sentora-docker-node-agent.php
 START=$(date +%s)
 # (the node makes its own key; the panel's code is given as the person installing would confirm it)
 in_box "cd /root && SNODE_TEST_LOCAL_CERTS=1 bash sentora2027-docker-node --panel http://$GW:18092 --panel-code $FP --agent /root/sentora-docker-node-agent.php" 2>&1 | tee "$OUT/node-install-screen.txt"
@@ -343,11 +382,11 @@ fi
 in_box 'podman --root /var/lib/sentora-test-registry --runroot /run/sentora-test-registry --storage-driver vfs rm -f testreg testweb > /dev/null 2>&1; rm -rf /var/lib/sentora-test-registry; rm -f /etc/containers/registries.conf.d/90-sentora-test.conf' || true
 
 say "Restarting the node"
-docker restart "$NAME" > /dev/null
+box_restart
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 sleep 10
 wait_for 120 panel online > /dev/null && ok "node online again after the restart" || bad "node not online after the restart"
-wait_for 180 bash -c "docker exec $NAME runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(docker exec $NAME id -u sdh3) podman ps --format '{{.Names}}' | grep -x sdh-$CID" > /dev/null \
+wait_for 180 in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman ps --format '{{.Names}}' | grep -x sdh-$CID" > /dev/null \
     && ok "the container started again by itself" || bad "the container did not start after the restart"
 for _ in $(seq 1 20); do inslice && break; sleep 3; done
 inslice && ok "inside its slice after the restart of the node" || bad "outside its slice after the restart of the node"
@@ -356,8 +395,8 @@ for _ in $(seq 1 30); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 
 say "Updating the node (sentora-docker-node-update)"
 in_box 'rm -rf /root/src && mkdir /root/src'
-docker cp "$REPO/docker-node/sentora2027-docker-node" "$NAME:/root/src/sentora2027-docker-node"
-docker cp "$REPO/docker-node/sentora-docker-node-agent.php" "$NAME:/root/src/sentora-docker-node-agent.php"
+box_cp "$REPO/docker-node/sentora2027-docker-node" /root/src/sentora2027-docker-node
+box_cp "$REPO/docker-node/sentora-docker-node-agent.php" /root/src/sentora-docker-node-agent.php
 # (a "newer" agent: the copy says version 999)
 in_box "sed -i \"s/^    const VERSION = '[^']*';/    const VERSION = '999';/\" /root/src/sentora-docker-node-agent.php"
 C1=$(in_box 'SNODE_RAW_BASE=file:///root/src sentora-docker-node-update --check' 2>&1); echo "$C1"
@@ -389,9 +428,9 @@ echo "  $U"
 [[ "$U" == "done already the newest version"* ]] && ok "Update: nothing to do for the newest version" || bad "update: $U"
 wait_for 60 state_is "$CID" running > /dev/null && ok "still running" || bad "not running after the update: $(panel state "$CID")"
 panel settings certs@example.com 1 | grep -qx ok || bad "settings refused"
-wait_for 60 bash -c "docker exec $NAME grep -q 'email certs@example.com' /etc/caddy/Caddyfile && echo y" > /dev/null && ok "the node took its settings from the panel (Caddy's email)" || bad "Caddyfile: $(in_box 'cat /etc/caddy/Caddyfile')"
+wait_for 60 in_box "grep -q 'email certs@example.com' /etc/caddy/Caddyfile && echo y" > /dev/null && ok "the node took its settings from the panel (Caddy's email)" || bad "Caddyfile: $(in_box 'cat /etc/caddy/Caddyfile')"
 # (install.conf is written once Caddy has reloaded: a moment later)
-wait_for 60 bash -c "docker exec $NAME sh -c 'grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-docker-node/install.conf' && echo y" > /dev/null && ok "and kept them for its own updates" || bad "settings not kept"
+wait_for 60 in_box "grep -q local_certs /etc/caddy/Caddyfile && grep -q skip_install_trust /etc/caddy/Caddyfile && grep -q EMAIL=certs@example.com /etc/sentora-docker-node/install.conf && echo y" > /dev/null && ok "and kept them for its own updates" || bad "settings not kept"
 for _ in $(seq 1 20); do C=$(code ''); [ "$C" = 401 ] && break; sleep 3; done
 [ "$C" = 401 ] && ok "the app is still served (setup password)" || bad "after the settings: HTTP $C"
 panel nodeact sys-security | grep -qx ok || bad "sys-security refused"
@@ -415,5 +454,11 @@ grep -q "PHP \(Warning\|Notice\|Deprecated\|Fatal\)" "$OUT/panel-web.log" && bad
 in_box 'journalctl --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecated\)"' && bad "the agent logged PHP problems" || ok "no PHP problems in the agent"
 
 echo
+if [ -n "$VMBOX" ]; then
+    say "SELinux: what it refused during all of this"
+    AV=$(in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null | grep -E "^type=(AVC|USER_AVC|SELINUX_ERR)"')
+    if [ -z "$AV" ]; then ok "SELinux (enforcing) refused nothing: gVisor, Trivy, Caddy with Coraza, Podman and the agent all worked confined"
+    else bad "SELinux refused $(echo "$AV" | wc -l) thing(s)"; echo "$AV" | sed -E 's/.*(denied|granted) +\{ ([^}]*) \} for +pid=[0-9]+ +comm=([^ ]*).* scontext=([^ ]*) tcontext=([^ ]*) tclass=([^ ]*).*/  \1 \2 by \3: \4 -> \5 (\6)/' | sort | uniq -c | sort -rn | head -30; fi
+fi
 [ $FAILS -eq 0 ] && echo "NODE TEST PASSED" || echo "NODE TEST: $FAILS FAILED"
 exit $(( FAILS > 0 ))

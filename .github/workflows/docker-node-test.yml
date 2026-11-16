@@ -1,5 +1,6 @@
-# Docker Hosting node test: a real AlmaLinux 10, Rocky Linux 10, Fedora 45, Debian 13 and Ubuntu 26.04 in a container
-# with systemd is made a node with docker-node/sentora2027-docker-node and linked to a stand-in panel running the add-on
+# Docker Hosting node test: a real AlmaLinux 10, Rocky Linux 10, Fedora 45, Debian 13 and Ubuntu 26.04 in a container,
+# and a real AlmaLinux 10 machine under KVM with SELinux enforcing (alma10-vm: every SELinux refusal fails it),
+# each made a node with docker-node/sentora2027-docker-node and linked to a stand-in panel running the add-on
 # (sentora-repo/docker_hosting.zpp); it must then really run an app (rootless Podman as the customer's
 # user, limits held, Caddy with the setup password, public, restart, delete). Also runs the add-on's
 # own tests (tests/docker_hosting/run.sh). Results kept 14 days.
@@ -23,13 +24,20 @@ permissions:
 jobs:
   node:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        system: [alma10, rocky10, fedora45, debian13, ubuntu26.04]
+        system: [alma10, rocky10, fedora45, debian13, ubuntu26.04, alma10-vm]
     steps:
       - uses: actions/checkout@v5
+      - name: KVM and QEMU (the machine with SELinux enforcing)
+        if: matrix.system == 'alma10-vm'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
+          ls -l /dev/kvm
       - name: PHP for the stand-in panel
         uses: shivammathur/setup-php@v2
         with:
