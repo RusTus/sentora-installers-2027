@@ -387,8 +387,29 @@ if [ -x /usr/local/bin/runsc ]; then
 # Its network is the app's own namespace (Podman's pasta), used through the namespace's stack. Changes to the
 # app's own files go to Podman's layer, as without gVisor (kept over a restart; gVisor's in-memory overlay would
 # leave a scratch file behind after a hard stop, and the app would then not start again).
-exec /usr/local/bin/runsc --ignore-cgroups --network=host --overlay2=none "$@"
+# With SELinux: runsc takes no SELinux label itself, so the label Podman gave the container (container_t with its
+# own categories) is taken out of its settings and gVisor's sandbox is started under it: the app keeps both,
+# gVisor's own kernel and SELinux's confinement (never run without a label).
+RUNSC="/usr/local/bin/runsc --ignore-cgroups --network=host --overlay2=none"
+bundle=; prev=; create=
+for a in "$@"; do
+    case "$prev" in --bundle|-b) bundle=$a ;; esac
+    case "$a" in --bundle=*) bundle=${a#--bundle=} ;; create) create=1 ;; esac
+    prev=$a
+done
+if [ -n "$create" ] && [ -n "$bundle" ] && [ -f "$bundle/config.json" ]; then
+    label=$(@PHP_BIN@ -r '$f = $argv[1]; $j = json_decode((string) file_get_contents($f));
+        $l = is_object($j) && isset($j->process->selinuxLabel) ? (string) $j->process->selinuxLabel : "";
+        if ($l !== "") { unset($j->process->selinuxLabel); file_put_contents($f, json_encode($j, JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION)); }
+        echo $l;' "$bundle/config.json") || exit 1
+    if [ -n "$label" ]; then
+        case "$label" in *[!a-z0-9_:,.-]*) echo "runsc-sentora: not a label: $label" >&2; exit 1 ;; esac
+        exec runcon "$label" $RUNSC "$@"
+    fi
+fi
+exec $RUNSC "$@"
 RUNSC_EOF
+    sed -i "s#@PHP_BIN@#$PHP_BIN#" /usr/local/bin/runsc-sentora.new
     install -m 755 -o root -g root /usr/local/bin/runsc-sentora.new /usr/local/bin/runsc-sentora; rm -f /usr/local/bin/runsc-sentora.new
     command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/runsc-sentora > /dev/null 2>&1
     echo "RUNSC=/usr/local/bin/runsc-sentora" >> /etc/sentora-docker-node/platform.conf

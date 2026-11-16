@@ -130,7 +130,8 @@ panel addkey node1 "$NODEKEY" | grep -qx ok && ok "added in the panel with its k
 wait_for 60 panel online > /dev/null && ok "node online in the panel" || bad "node not online"
 in_box '[ ! -e /root/sentora-docker-node-key.txt ]' && ok "the key file is gone once linked" || bad "the key file is still there"
 in_box 'stat -c %a /etc/sentora-docker-node/node.json' | grep -qx 600 && ok "node keys readable by root only" || bad "node keys not 0600"
-in_box 'systemctl is-active caddy' | grep -qx active && ok "Caddy runs" || bad "Caddy does not run"
+# (the agent may be reloading it just now)
+wait_for 30 in_box 'systemctl is-active caddy | grep -x active' > /dev/null && ok "Caddy runs" || bad "Caddy does not run"
 in_box 'systemctl is-active --quiet firewalld && echo firewalld; ufw status 2> /dev/null | grep -q "^Status: active" && echo ufw' > "$OUT/firewall.txt"
 [ -s "$OUT/firewall.txt" ] && ok "the firewall is on ($(head -1 "$OUT/firewall.txt"))" || { bad "no firewall"; in_box 'journalctl -u firewalld --no-pager | tail -8; ufw status verbose'; }
 PF=$(in_box 'cat /etc/sentora-docker-node/platform.conf' 2>&1)
@@ -167,6 +168,12 @@ case "$RT" in *runsc*) GV=1; ok "runs in gVisor ($RT)" ;; *) GV=0; bad "not in g
 inslice() { [ "$GV" = 1 ] || return 0; INS=$(in_box "e='env XDG_RUNTIME_DIR=/run/user/'\$(id -u sdh3); n=0; for p in \$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); do grep -q '/sentora-app-$CID.slice/' /proc/\$p/cgroup || n=\$((n+1)); done; echo \$n" | tr -d '\r'); [ "$INS" = 0 ]; }
 if [ "$GV" = 1 ]; then
     inslice && ok "the app's processes are inside its slice (its limits hold)" || bad "the app's processes are outside its slice: no limits hold ($INS)"
+    # (with SELinux enforcing: gVisor's sandbox runs under the label Podman gave the container, not unconfined)
+    if [ "$(in_box 'getenforce 2> /dev/null')" = Enforcing ]; then
+        CTX=$(in_box "ps -eo label,args | grep -E '[r]unsc.*(boot|gofer)' | awk '{print \$1}' | sort -u" | tr -d '\r')
+        echo "  gVisor's processes run as: $CTX"
+        [ -n "$CTX" ] && ! echo "$CTX" | grep -qv ':container_t:' && ok "gVisor's sandbox runs confined by SELinux (container_t, the container's own categories)" || bad "gVisor's sandbox is not confined by SELinux: $CTX"
+    fi
 fi
 [ "$GV" = 1 ] && in_box "u=\$(id -u sdh3); e='env XDG_RUNTIME_DIR=/run/user/'\$u' DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'\$u'/bus'; echo '  where the app is:'; find /sys/fs/cgroup -type d -name 'sentora-app-*' | sed 's/^/    /'; c=\$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); for p in \$c; do echo \"    pid \$p: \$(cat /proc/\$p/cgroup 2> /dev/null)\"; done; runuser -u sdh3 -- \$e systemctl --user show sentora-app-$CID.slice -p ActiveState -p ControlGroup -p MemoryMax -p FragmentPath -p DropInPaths | sed 's/^/    /'" 2>&1 | tr -d '\r'
 cg() { if [ "$GV" = 1 ]; then
