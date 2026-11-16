@@ -490,7 +490,11 @@ if caddy_waf_install; then
     cat > /etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf <<WAF_EOF
 # Sentora Docker Node: the caddy service runs Caddy with the Coraza web firewall (/usr/local/bin/caddy-sentora);
 # removing this file brings the system's own Caddy back (the apps' sites then have to be written without it).
+# (also the check before it starts: the system's own unit may check the settings with its own Caddy, which does
+# not know the firewall: AlmaLinux, Rocky, RHEL, Fedora)
 [Service]
+ExecStartPre=
+ExecStartPre=/usr/local/bin/caddy-sentora validate --config $CADDY_DIR/Caddyfile
 ExecStart=
 ExecStart=/usr/local/bin/caddy-sentora run --environ --config $CADDY_DIR/Caddyfile
 ExecReload=

@@ -166,9 +166,11 @@ C=$(code "-u setup:wrong-password")
 [ "$C" = 401 ] && ok "a wrong password is refused" || bad "wrong password: HTTP $C"
 # the web firewall (Caddy with Coraza, 138): the caddy service runs the installer's build, as confined as the
 # system's own Caddy; a new app is behind it (On): attacks refused, normal requests through
-WF=$(in_box 'systemctl show -p ExecStart caddy | grep -o "/usr/local/bin/caddy-sentora[^ ]*" | head -1; pgrep -fa "^/usr/local/bin/caddy-sentora run" | head -1 | cut -c1-60; /usr/local/bin/caddy-sentora list-modules 2> /dev/null | grep -x http.handlers.waf; command -v getenforce > /dev/null && ps -eZ | grep caddy-sentora | grep -o "httpd_t" | head -1' | tr -d '\r')
+WF=$(in_box 'systemctl show -p ExecStart caddy | grep -o "/usr/local/bin/caddy-sentora[^ ]*" | head -1; pgrep -fa "^/usr/local/bin/caddy-sentora run" | head -1 | cut -c1-60; /usr/local/bin/caddy-sentora list-modules 2> /dev/null | grep -x http.handlers.waf; [ "$(getenforce 2> /dev/null)" = Enforcing ] && ps -eZ | grep caddy-sentora | grep -o "httpd_t" | head -1; [ "$(getenforce 2> /dev/null)" = Enforcing ] && echo enforcing' | tr -d '\r')
 echo "$WF" | grep -q "^/usr/local/bin/caddy-sentora$" && echo "$WF" | grep -q "http.handlers.waf" && ok "the caddy service runs Caddy with Coraza (the installer's build, checksum checked)" || bad "Caddy with Coraza: $WF"
-case "$SYS" in alma*|rocky*|fedora*) echo "$WF" | grep -qx httpd_t && ok "it runs confined as the web server (SELinux httpd_t), as the system's Caddy did" || bad "not confined as httpd_t: $WF" ;; esac
+# (SELinux is only enforced where the kernel has it: in the VM test; these nodes run in containers on Ubuntu)
+if echo "$WF" | grep -qx enforcing; then echo "$WF" | grep -qx httpd_t && ok "it runs confined as the web server (SELinux httpd_t), as the system's Caddy did" || bad "not confined as httpd_t: $WF"; fi
+in_box 'grep -q "^ExecStartPre=/usr/local/bin/caddy-sentora validate" /etc/systemd/system/caddy.service.d/sentora-waf.conf' && ok "the service's own check before starting uses it too" || bad "the check before starting would use the system's Caddy"
 grep -q "import sentora_waf_on" <(in_box 'cat /etc/caddy/sentora/sites.caddy') && ok "the new app is behind the web firewall (On, the default)" || bad "the app's site has no firewall: $(in_box 'cat /etc/caddy/sentora/sites.caddy')"
 atk() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.test:443:127.0.0.1 -u setup:$PW $1"; }
 C=$(atk "'https://kuma.example.test/?id=1%27%20OR%20%271%27%3D%271'")
