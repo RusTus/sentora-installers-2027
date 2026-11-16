@@ -179,6 +179,29 @@ class module_controller extends ctrl_module
             $out .= '<small class="dh-muted">' . self::t('Changed by an administrator') . '</small>';
         }
         $out .= '</form>';
+        // the web firewall (Coraza): what its node has in force, and the administrator's choice for this app
+        $wf = $g['waf'];
+        $wis = (string) ($c['dc_waf_vc'] ?? '');
+        $words = array('on' => 'On: attacks are refused', 'watch' => 'Watch: what it would refuse is only written down', 'off' => 'Off for this app');
+        if ($wis === 'none') {
+            $pill = '<span class="dh-pill is-warn">' . self::t('Its node has no web firewall yet (it comes with the node\'s next update)') . '</span>';
+        } elseif ($wis === $wf) {
+            $pill = '<span class="dh-pill ' . ($wf === 'on' ? 'is-ok' : 'is-warn') . '">' . self::t($words[$wf]) . '</span>';
+        } else {
+            $pill = '<span class="dh-pill">' . self::t('%s (its node confirms it at its next call)', array(self::t($words[$wf]))) . '</span>';
+        }
+        $out .= $form . '<div class="dh-guard-text"><b>' . self::t('Web firewall (Coraza)') . '</b> ' . $pill
+            . '<small>' . self::t('Requests to the app pass the OWASP Core Rule Set first (the same rules as ModSecurity on the panel): SQL and script injection, path tricks, shell commands, known attack tools and the like are refused before they reach it. Watch only writes them down (in the node\'s Caddy log), for an app that seems to be refused something it needs.') . '</small></div>';
+        if ($admin) {
+            $out .= '<select class="form-control dh-guard-choice" name="inWaf" onchange="this.form.submit()" aria-label="' . self::t('Web firewall (Coraza)') . '">';
+            foreach (array('on' => 'On', 'watch' => 'Watch', 'off' => 'Off') as $k => $v) {
+                $out .= '<option value="' . $k . '"' . ($wf === $k ? ' selected' : '') . '>' . self::t($v) . '</option>';
+            }
+            $out .= '</select><input type="hidden" name="inWhich" value="waf"><noscript><button class="btn btn-sm btn-default" type="submit">' . self::t('Save') . '</button></noscript>';
+        } else {
+            $out .= '<small class="dh-muted">' . self::t('Changed by an administrator') . '</small>';
+        }
+        $out .= '</form>';
         // the image check (Trivy): its last answer, and the administrator's choice for this app
         $scan = $g['scan'];
         $sum = json_decode((string) ($c['dc_scan_tx'] ?? ''), true);
@@ -233,6 +256,14 @@ class module_controller extends ctrl_module
             return;
         }
         $_GET['settings'] = (string) $id;
+        if (self::Post('inWhich') === 'waf') {
+            if (dh::SetGuards(self::Person(), $id, array('waf' => self::Post('inWaf')))) {
+                self::Say('ok', 'Saved: its node changes the app\'s web firewall in a moment (the app keeps running).');
+            } else {
+                self::Say(dh::$why === 'Nothing changed.' ? 'ok' : 'error', dh::$why);
+            }
+            return;
+        }
         if (self::Post('inWhich') === 'scan') {
             if (dh::SetGuards(self::Person(), $id, array('scan' => self::Post('inScan')))) {
                 self::Say('ok', 'Saved: the app\'s image is checked this way from its next update on (and every night).');

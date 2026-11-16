@@ -1560,6 +1560,49 @@ $agentB('once');
 dh::SetGuards(1, $gid, array('scan' => 'warn'));
 $agentB('once');
 
+section('web firewall (138): Coraza');
+$sitesB = function () use ($nb) { return (string) @file_get_contents($nb . '/caddy/sentora/sites.caddy'); };
+$ga = dh::Container($gid);
+check(dh::Guards($ga)['waf'] === 'on' && dh::CreateData($ga, '')['guards']['waf'] === 'on', 'a new app: the web firewall On by default');
+$agentB('once');
+check(val("SELECT dc_waf_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'none' && strpos($sitesB(), 'coraza') === false, 'a node without it says so; its sites as before');
+// the node gets Caddy with Coraza (the installer's)
+file_put_contents($nb . '/etc/platform.conf', "CADDY_WAF=1\n", FILE_APPEND);
+file_put_contents($gfake . '/calls.log', '');
+$agentB('once');
+$agentB('once');
+$agentB('once');
+$sb = $sitesB();
+check(strpos($sb, "(sentora_waf_on) {\n\tcoraza_waf {\n\t\tload_owasp_crs") !== false && strpos($sb, 'SecRuleEngine On') !== false && strpos($sb, 'SecRuleEngine DetectionOnly') !== false
+    && strpos($sb, 'SecRequestBodyLimitAction ProcessPartial') !== false, 'the node has the rules (On and Watch), uploads over the limit checked in part, not refused', $sb);
+check(preg_match('/' . preg_quote((string) $ga['dc_domain_vc'], '/') . " \{\n\tencode zstd gzip\n(\tbasic_auth \{\n[^}]*\}\n)?\troute \{\n\t\timport sentora_waf_on\n\t\treverse_proxy 127\.0\.0\.1:\d+\n\t\}\n\}/", $sb) === 1,
+    'its node was told by itself (the app had no mode there yet): the app\'s site passes the firewall, after the setup password, before the app', $sb);
+check(val("SELECT dc_waf_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'on', 'the node reports it in force');
+check(strpos($gcalls(), 'podman[' . $gu . '] stop') === false && strpos($gcalls(), 'podman[' . $gu . '] start') === false, 'the app kept running', $gcalls());
+check(!dh::SetGuards($gacc === 1 ? 3 : $gacc, $gid, array('waf' => 'off')) && strpos(dh::$why, 'Only an administrator') !== false, 'a customer can not change it');
+check(dh::SetGuards(1, $gid, array('waf' => 'watch')) && lastjob($gid)['jb_action_vc'] === 'proxy', 'an administrator sets Watch: only its site changes', json_encode(lastjob($gid)));
+$agentB('once');
+$agentB('once');
+check(strpos($sitesB(), "\t\timport sentora_waf_watch\n") !== false && val("SELECT dc_waf_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'watch', 'Watch: what it would refuse is only written down', $sitesB());
+$r = req($gacc, '', array(), array('settings' => (string) $gid));
+check(strpos($r['html'], 'Web firewall (Coraza)') !== false && strpos($r['html'], 'Watch: what it would refuse is only written down') !== false
+    && ($gacc === 1) === (strpos($r['html'], 'name="inWaf"') !== false), 'its Settings show it (the choice for administrators only)');
+if (getenv('DH_PAGES')) {
+    file_put_contents(getenv('DH_PAGES') . '/security.html', $r['html']);
+}
+check(dh::SetGuards(1, $gid, array('waf' => 'off')), 'an administrator switches it off');
+$agentB('once');
+$agentB('once');
+check(strpos($sitesB(), 'import sentora_waf') === false && val("SELECT dc_waf_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'off', 'Off: the app\'s site without it');
+// apps made before it: Watch (a running app is never refused anything overnight)
+dh::Set('waf_from', '');
+$zdbh->prepare("UPDATE x_dh_containers SET dc_guard_tx = :g WHERE dc_id_pk = :c")->execute(array(':g' => '{"iso":"standard"}', ':c' => $gid));
+req(1);
+check(dh::Guards(dh::Container($gid))['waf'] === 'watch' && dh::Get('waf_from') !== '', 'apps made before it start with Watch', (string) val("SELECT dc_guard_tx FROM x_dh_containers WHERE dc_id_pk = " . $gid));
+dh::SetGuards(1, $gid, array('waf' => 'on'));
+$agentB('once');
+$agentB('once');
+
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
 check((string) dh::Get('sign_sk') !== $before && strpos((string) $out, 'sentora-docker-node-relink') !== false && (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')") === 0,

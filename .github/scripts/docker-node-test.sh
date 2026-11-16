@@ -164,6 +164,19 @@ for _ in $(seq 1 40); do C=$(code "-u setup:$PW"); case "$C" in 200|302) break ;
 case "$C" in 200|302) ok "with the setup password: the app answers ($C)" ;; *) bad "with the setup password: HTTP $C" ;; esac
 C=$(code "-u setup:wrong-password")
 [ "$C" = 401 ] && ok "a wrong password is refused" || bad "wrong password: HTTP $C"
+# the web firewall (Caddy with Coraza, 138): the caddy service runs the installer's build, as confined as the
+# system's own Caddy; a new app is behind it (On): attacks refused, normal requests through
+WF=$(in_box 'systemctl show -p ExecStart caddy | grep -o "/usr/local/bin/caddy-sentora[^ ]*" | head -1; pgrep -fa "^/usr/local/bin/caddy-sentora run" | head -1 | cut -c1-60; /usr/local/bin/caddy-sentora list-modules 2> /dev/null | grep -x http.handlers.waf; command -v getenforce > /dev/null && ps -eZ | grep caddy-sentora | grep -o "httpd_t" | head -1' | tr -d '\r')
+echo "$WF" | grep -q "^/usr/local/bin/caddy-sentora$" && echo "$WF" | grep -q "http.handlers.waf" && ok "the caddy service runs Caddy with Coraza (the installer's build, checksum checked)" || bad "Caddy with Coraza: $WF"
+case "$SYS" in alma*|rocky*|fedora*) echo "$WF" | grep -qx httpd_t && ok "it runs confined as the web server (SELinux httpd_t), as the system's Caddy did" || bad "not confined as httpd_t: $WF" ;; esac
+grep -q "import sentora_waf_on" <(in_box 'cat /etc/caddy/sentora/sites.caddy') && ok "the new app is behind the web firewall (On, the default)" || bad "the app's site has no firewall: $(in_box 'cat /etc/caddy/sentora/sites.caddy')"
+atk() { in_box "curl -sk -o /dev/null -w '%{http_code}' --resolve kuma.example.test:443:127.0.0.1 -u setup:$PW $1"; }
+C=$(atk "'https://kuma.example.test/?id=1%27%20OR%20%271%27%3D%271'")
+[ "$C" = 403 ] && ok "an SQL injection is refused before the app (403)" || bad "SQL injection: HTTP $C (want 403)"
+C=$(atk "-A 'sqlmap/1.8' https://kuma.example.test/")
+[ "$C" = 403 ] && ok "an attack tool is refused (403)" || bad "attack tool: HTTP $C (want 403)"
+C=$(atk "'https://kuma.example.test/?q=hello%20world'")
+case "$C" in 200|302) ok "a normal request goes through ($C)" ;; *) bad "normal request: HTTP $C" ;; esac
 C=$(in_box "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://\$(hostname -I | awk '{print \$1}'):20000/" 2> /dev/null)
 [ "$C" = 000 ] && ok "the container's port is not reachable from outside 127.0.0.1" || bad "port 20000 answers on the public address ($C)"
 # another container (any customer's) must not reach the node's 127.0.0.1: the app behind the setup

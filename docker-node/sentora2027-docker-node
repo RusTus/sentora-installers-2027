@@ -456,8 +456,8 @@ ui_step "Web firewall for the apps (Caddy with Coraza)"
 # the release is refused). It runs as the system's caddy service, under the same user and SELinux label
 # (httpd_t) as the system's own Caddy, which stays installed and comes back when this one is not there.
 CADDY_WAF_TAG=caddy-waf-2.11.9-coraza-2.6.2
-CADDY_WAF_SHA256_X86_64=PENDING
-CADDY_WAF_SHA256_AARCH64=PENDING
+CADDY_WAF_SHA256_X86_64=2f568a9e2b52ddf282c09f609e49f199aa55297832c9eb0522e621db014e4487
+CADDY_WAF_SHA256_AARCH64=ed6ce39c53dfe5ab35df6a106e1539f2063040aa1c2ac370c93cc5a373ed1998
 caddy_waf_install() {
     local file sum tmp
     case "$(uname -m)" in

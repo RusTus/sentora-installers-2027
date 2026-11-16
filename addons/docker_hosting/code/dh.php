@@ -136,6 +136,21 @@ class dh
         self::AddColumns('x_dh_nodes', array('nd_trusted_in' => "TINYINT NOT NULL DEFAULT 0"));
         // (137) the image check's last answer for an app (its node's summary: counts, the worst holes)
         self::AddColumns('x_dh_containers', array('dc_scan_tx' => "TEXT NULL"));
+        // (138) the web firewall: what its node says is in force ('on', 'watch', 'off'; 'none': no firewall there)
+        self::AddColumns('x_dh_containers', array('dc_waf_vc' => "VARCHAR(10) NOT NULL DEFAULT ''"));
+        // (apps made before it get Watch: what it would refuse is only written down, so a running customer app
+        // is never refused anything overnight; an administrator turns it On)
+        if (self::Get('waf_from') === '') {
+            foreach ($zdbh->query("SELECT dc_id_pk, dc_guard_tx FROM x_dh_containers WHERE dc_deleted_in IS NULL")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $g = json_decode((string) $r['dc_guard_tx'], true);
+                $g = is_array($g) ? $g : array();
+                if (!isset($g['waf'])) {
+                    $g['waf'] = 'watch';
+                    $zdbh->prepare("UPDATE x_dh_containers SET dc_guard_tx = :g WHERE dc_id_pk = :c")->execute(array(':g' => json_encode($g), ':c' => (int) $r['dc_id_pk']));
+                }
+            }
+            self::Set('waf_from', (string) time());
+        }
         // (apps made before the guards keep the standard runtime until an administrator turns Extra isolation on
         // for them: switching a running app to gVisor by itself could stop one that does not run on it)
         if (self::Get('guards_from') === '') {
@@ -2218,6 +2233,10 @@ class dh
      * the stock images often have critical holes their makers have not rebuilt for yet), 'block' (a new app with
      * critical holes that have a fix is refused, an update only when it has more of them than the version
      * running) or 'off'.
+     * waf: the web firewall (Coraza with the OWASP Core Rule Set, in Caddy in front of the app): 'on' (attacks are
+     * refused: the default, owner 2026-11-16; the stock apps were used behind it with nothing refused), 'watch'
+     * (only written to the node's Caddy log) or 'off'. It guards the app from the internet, so a trusted node
+     * keeps it on too.
      *
      * @param array $c an x_dh_containers row
      * @return array<string, string>
@@ -2229,7 +2248,25 @@ class dh
         $n = self::Node((int) $c['dc_node_fk']);
         $trusted = $n && (int) ($n['nd_trusted_in'] ?? 0) === 1;
         return array('iso' => isset($g['iso']) && in_array($g['iso'], array('gvisor', 'standard'), true) ? $g['iso'] : ($trusted ? 'standard' : 'gvisor'),
-            'scan' => isset($g['scan']) && in_array($g['scan'], array('warn', 'block', 'off'), true) ? $g['scan'] : 'warn');
+            'scan' => isset($g['scan']) && in_array($g['scan'], array('warn', 'block', 'off'), true) ? $g['scan'] : 'warn',
+            'waf' => isset($g['waf']) && in_array($g['waf'], array('on', 'watch', 'off'), true) ? $g['waf'] : 'on');
+    }
+
+    /**
+     * Tell an app's node its web firewall's mode (its site is written again; the app keeps running).
+     *
+     * @param array $c
+     * @return void
+     */
+    static function WafJob(array $c)
+    {
+        $pub = (int) $c['dc_public_in'] === 1;
+        $pw = $pub ? '' : self::SetupPassword($c);
+        if (!$pub && $pw === '') {
+            return;
+        }
+        self::Queue((int) $c['dc_node_fk'], (int) $c['dc_id_pk'], 'proxy', self::Who($c) + array('domain' => (string) $c['dc_domain_vc'], 'hostport' => (int) $c['dc_port_in'],
+            'public' => $pub ? 1 : 0, 'auth' => $pub ? '' : password_hash($pw, PASSWORD_BCRYPT), 'guards' => self::Guards($c)));
     }
 
     /**
@@ -2297,6 +2334,13 @@ class dh
             }
             $g['scan'] = $want['scan'];
         }
+        if (isset($want['waf'])) {
+            if (!in_array($want['waf'], array('on', 'watch', 'off'), true)) {
+                self::$why = 'Not a choice.';
+                return false;
+            }
+            $g['waf'] = $want['waf'];
+        }
         $zdbh->prepare("UPDATE x_dh_containers SET dc_guard_tx = :g WHERE dc_id_pk = :c")->execute(array(':g' => json_encode($g), ':c' => (int) $id));
         $c['dc_guard_tx'] = json_encode($g);
         if (self::Guards($c) === $before) {
@@ -2308,6 +2352,11 @@ class dh
             // (a new runtime: the app is made anew on its node)
             self::Queue((int) $c['dc_node_fk'], (int) $id, 'recreate', self::CreateData($c, ''));
             self::Log('guards', $c['dc_domain_vc'] . ': Extra isolation ' . ($now['iso'] === 'gvisor' ? 'on' : 'off'), (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
+        }
+        if ($now['waf'] !== $before['waf']) {
+            // (only its site changes on the node: the app keeps running)
+            self::WafJob($c);
+            self::Log('guards', $c['dc_domain_vc'] . ': web firewall ' . array('on' => 'on', 'watch' => 'watching only', 'off' => 'off')[$now['waf']], (int) $by, (int) $c['dc_acc_fk'], (int) $id, (int) $c['dc_node_fk']);
         }
         if ($now['scan'] !== $before['scan']) {
             // (the image check is done when the app is made or updated, and every night: nothing to do now)
@@ -3446,6 +3495,18 @@ class dh
                 $sum = self::ScanSummary($s['scan']);
                 if ($sum !== null) {
                     $zdbh->prepare("UPDATE x_dh_containers SET dc_scan_tx = :s WHERE dc_id_pk = :c")->execute(array(':s' => json_encode($sum), ':c' => $cid));
+                }
+            }
+            if (isset($s['waf']) && in_array($s['waf'], array('on', 'watch', 'off', 'none'), true)) {
+                $zdbh->prepare("UPDATE x_dh_containers SET dc_waf_vc = :w WHERE dc_id_pk = :c")->execute(array(':w' => $s['waf'], ':c' => $cid));
+                // (a node with the firewall that has another mode for the app than asked, e.g. after the node's
+                // update: told again, once nothing else is waiting for the app)
+                if ($s['waf'] !== 'none' && $s['waf'] !== self::Guards($mine[$cid])['waf'] && (string) $mine[$cid]['dc_state_vc'] === 'running') {
+                    $w = $zdbh->prepare("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_ct_fk = :c AND jb_state_vc IN ('queued','sent')");
+                    $w->execute(array(':c' => $cid));
+                    if ((int) $w->fetchColumn() === 0) {
+                        self::WafJob($mine[$cid]);
+                    }
                 }
             }
             if (isset($s['iso']) && in_array($s['iso'], array('gvisor', 'standard'), true)) {

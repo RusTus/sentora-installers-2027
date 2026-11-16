@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '117';
+    const VERSION = '118';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -613,7 +613,8 @@ class snode
     static function Check(array $d, $action)
     {
         if (isset($d['guards']) && (!is_array($d['guards']) || (isset($d['guards']['iso']) && !in_array($d['guards']['iso'], array('gvisor', 'standard'), true))
-            || (isset($d['guards']['scan']) && !in_array($d['guards']['scan'], array('warn', 'block', 'off'), true)))) {
+            || (isset($d['guards']['scan']) && !in_array($d['guards']['scan'], array('warn', 'block', 'off'), true))
+            || (isset($d['guards']['waf']) && !in_array($d['guards']['waf'], array('on', 'watch', 'off'), true)))) {
             return 'bad guards';
         }
         if (!isset($d['cid']) || !is_int($d['cid']) || $d['cid'] <= 0 || !isset($d['user']) || !is_string($d['user']) || !preg_match('/^sdh\d{1,9}$/', $d['user'])) {
@@ -698,6 +699,23 @@ class snode
     {
         $g = isset($d['guards']['scan']) ? $d['guards']['scan'] : 'warn';
         return in_array($g, array('warn', 'block', 'off'), true) ? $g : 'warn';
+    }
+
+    /**
+     * The web firewall asked for this app (Coraza with the OWASP Core Rule Set, in front of it in Caddy): 'on'
+     * (attacks are refused: the default, owner 2026-11-16), 'watch' (only written to Caddy's log) or 'off'.
+     * A panel from before it sends none: 'off', as before.
+     */
+    static function WantWaf(array $d)
+    {
+        $g = isset($d['guards']['waf']) ? $d['guards']['waf'] : 'off';
+        return in_array($g, array('on', 'watch', 'off'), true) ? $g : 'off';
+    }
+
+    /** Whether this node's Caddy has the web firewall (the installer's Caddy with Coraza). */
+    static function Waf()
+    {
+        return self::P('CADDY_WAF', '') === '1';
     }
 
     /** Trivy on this node (the installer's, a pinned release), or '' when this node has none. */
@@ -1154,7 +1172,7 @@ class snode
                     }
                 }
                 $s['containers'][$key] = array('user' => $d['user'], 'domain' => $d['domain'], 'hostport' => $d['hostport'], 'public' => (int) $d['public'],
-                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $d['image'], 'scan' => self::WantScan($d));
+                    'auth' => (string) $d['auth'], 'volumes' => count($d['volumes']), 'image' => $d['image'], 'scan' => self::WantScan($d), 'waf' => self::WantWaf($d));
                 self::SaveState($s);
                 $st = self::Podman($d['user'], array('start', $name));
                 if ($st[0] !== 0) {
@@ -1170,9 +1188,12 @@ class snode
                     return array(false, 'refused: the address or port of an app does not change with an update');
                 }
                 $s['containers'][$key]['scan'] = self::WantScan($d);
+                $s['containers'][$key]['waf'] = self::WantWaf($d);
                 $res = self::Update($d, $s);
                 $s['containers'][$key]['image'] = $d['image'];
-                return $res;
+                // (its site again: the web firewall's mode may have changed)
+                $px = self::Proxy($s);
+                return $res[0] && $px !== '' ? array(false, $px) : $res;
             case 'recreate':
                 // the app's settings changed (its owner's): made again from the same version, with the
                 // same data; when it does not start with them, the old one runs again
@@ -1183,7 +1204,10 @@ class snode
                     return array(false, 'refused: the address or port of an app does not change with its settings');
                 }
                 $s['containers'][$key]['scan'] = self::WantScan($d);
-                return self::Update($d, $s, false);
+                $s['containers'][$key]['waf'] = self::WantWaf($d);
+                $res = self::Update($d, $s, false);
+                $px = self::Proxy($s);
+                return $res[0] && $px !== '' ? array(false, $px) : $res;
             case 'start':
             case 'stop':
             case 'restart':
@@ -1224,6 +1248,10 @@ class snode
                 $s['containers'][$key]['auth'] = (int) $d['public'] ? '' : (string) $d['auth'];
                 if (!(int) $d['public'] && $s['containers'][$key]['auth'] === '') {
                     return array(false, 'refused: no setup password');
+                }
+                if (isset($d['guards'])) {
+                    // (the web firewall's mode changes with the site only: the app keeps running)
+                    $s['containers'][$key]['waf'] = self::WantWaf($d);
                 }
                 $px = self::Proxy($s);
                 return $px === '' ? array(true, 'proxy: done') : array(false, $px);
@@ -1273,6 +1301,16 @@ class snode
     {
         $file = self::$caddy . '/sentora/sites.caddy';
         $t = "# Written by Sentora Docker Node (sentora-docker-node-agent) from the panel's containers: do not change by hand.\n";
+        $waf = self::Waf();
+        if ($waf) {
+            // the web firewall (Coraza, OWASP Core Rule Set at its first paranoia level): refusing (on) or only
+            // writing to Caddy's log (watch). Uploads larger than its limit are checked in their first part
+            // and let through (not refused); the apps' answers are not read (speed, streaming).
+            foreach (array('on' => 'On', 'watch' => 'DetectionOnly') as $k => $mode) {
+                $t .= "\n(sentora_waf_" . $k . ") {\n\tcoraza_waf {\n\t\tload_owasp_crs\n\t\tdirectives `\n\t\t\tInclude @coraza.conf-recommended\n\t\t\tInclude @crs-setup.conf.example\n"
+                    . "\t\t\tInclude @owasp_crs/*.conf\n\t\t\tSecRuleEngine " . $mode . "\n\t\t\tSecRequestBodyLimitAction ProcessPartial\n\t\t\tSecResponseBodyAccess Off\n\t\t\tSecAuditEngine Off\n\t\t`\n\t}\n}\n";
+            }
+        }
         ksort($s['containers']);
         foreach ($s['containers'] as $cid => $c) {
             $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
@@ -1280,7 +1318,13 @@ class snode
                 // (Caddy before 2.8 wants the hash base64-encoded, under its older name)
                 $t .= self::CaddyOld() ? "\tbasicauth {\n\t\tsetup " . base64_encode($c['auth']) . "\n\t}\n" : "\tbasic_auth {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
             }
-            $t .= "\treverse_proxy 127.0.0.1:" . (int) $c['hostport'] . "\n}\n";
+            $w = isset($c['waf']) ? (string) $c['waf'] : 'off';
+            if ($waf && ($w === 'on' || $w === 'watch')) {
+                // (after the setup password, before the app)
+                $t .= "\troute {\n\t\timport sentora_waf_" . $w . "\n\t\treverse_proxy 127.0.0.1:" . (int) $c['hostport'] . "\n\t}\n}\n";
+            } else {
+                $t .= "\treverse_proxy 127.0.0.1:" . (int) $c['hostport'] . "\n}\n";
+            }
         }
         $old = is_file($file) ? (string) file_get_contents($file) : null;
         if ($old === $t) {
@@ -1396,6 +1440,7 @@ class snode
                 }
                 $out[$cid] = array('state' => $st, 'iso' => isset(self::$iso[$cid]) ? self::$iso[$cid] : '', 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
                     'update' => !empty($s['updates'][$cid]) ? 1 : 0, 'scan' => isset($s['scan'][$cid]) && is_array($s['scan'][$cid]) ? $s['scan'][$cid] : null,
+                    'waf' => self::Waf() ? (isset($c['waf']) ? (string) $c['waf'] : 'off') : 'none',
                     // (what the panel needs to show an app it does not know, and to take it back)
                     'image' => isset($c['image']) ? (string) $c['image'] : '', 'domain' => (string) $c['domain'], 'hostport' => (int) $c['hostport'],
                     'volumes' => (int) $c['volumes'], 'public' => (int) $c['public']);
@@ -2455,6 +2500,17 @@ class snode
                 self::Out($line);
             }
             self::SaveState($s);
+        }
+        // the apps' sites written again once each time the agent starts, after it looked for apps missing from its
+        // list (e.g. after the node's update brought the web firewall: the apps it already has are put behind it;
+        // Caddy is reloaded only when something changed)
+        static $sites = false;
+        if (!$sites) {
+            $sites = true;
+            $px = self::Proxy($s);
+            if ($px !== '') {
+                self::Out($px);
+            }
         }
         self::CheckUpdates($s);
         for ($round = 0; $round < 20; $round++) {
