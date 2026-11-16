@@ -1,2 +1,3 @@
 #!/bin/bash
-echo Enforcing
+# (what the test sets in $FAKE_DIR/getenforce; Enforcing when it sets nothing)
+cat "$FAKE_DIR/getenforce" 2> /dev/null || echo Enforcing

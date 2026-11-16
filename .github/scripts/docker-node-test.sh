@@ -163,17 +163,15 @@ in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no cont
 # crun refuses "podman exec" in this test's container: setrlimit RLIMIT_NOFILE); an app in gVisor has its limits on
 # its own slice (sentora-app-<id>.slice: runsc runs with --ignore-cgroups inside it), with 64 MB for gVisor itself
 RT=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.OCIRuntime}}' sdh-$CID" | tr -d '\r')
-case "$RT" in *runsc*) GV=1; ok "runs in gVisor ($RT)" ;; *) GV=0; bad "not in gVisor: '$RT' (new apps are)" ;; esac
+ENF=$(in_box 'getenforce 2> /dev/null' | tr -d '\r')
+case "$RT" in
+    *runsc*) GV=1; [ "$ENF" = Enforcing ] && bad "in gVisor although SELinux is enforcing ($RT)" || ok "runs in gVisor ($RT)" ;;
+    *) GV=0; [ "$ENF" = Enforcing ] && ok "SELinux enforcing: the standard runtime ($RT), confined by SELinux (gVisor is not used here: runsc takes no SELinux label)" || bad "not in gVisor: '$RT' (new apps are)" ;;
+esac
 # (an app in gVisor: its processes inside its own slice, where its limits are; GV=0: nothing to check)
 inslice() { [ "$GV" = 1 ] || return 0; INS=$(in_box "e='env XDG_RUNTIME_DIR=/run/user/'\$(id -u sdh3); n=0; for p in \$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); do grep -q '/sentora-app-$CID.slice/' /proc/\$p/cgroup || n=\$((n+1)); done; echo \$n" | tr -d '\r'); [ "$INS" = 0 ]; }
 if [ "$GV" = 1 ]; then
     inslice && ok "the app's processes are inside its slice (its limits hold)" || bad "the app's processes are outside its slice: no limits hold ($INS)"
-    # (with SELinux enforcing: gVisor's sandbox runs under the label Podman gave the container, not unconfined)
-    if [ "$(in_box 'getenforce 2> /dev/null')" = Enforcing ]; then
-        CTX=$(in_box "ps -eo label,args | grep -E '[r]unsc.*(boot|gofer)' | awk '{print \$1}' | sort -u" | tr -d '\r')
-        echo "  gVisor's processes run as: $CTX"
-        [ -n "$CTX" ] && ! echo "$CTX" | grep -qv ':container_t:' && ok "gVisor's sandbox runs confined by SELinux (container_t, the container's own categories)" || bad "gVisor's sandbox is not confined by SELinux: $CTX"
-    fi
 fi
 [ "$GV" = 1 ] && in_box "u=\$(id -u sdh3); e='env XDG_RUNTIME_DIR=/run/user/'\$u' DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'\$u'/bus'; echo '  where the app is:'; find /sys/fs/cgroup -type d -name 'sentora-app-*' | sed 's/^/    /'; c=\$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); for p in \$c; do echo \"    pid \$p: \$(cat /proc/\$p/cgroup 2> /dev/null)\"; done; runuser -u sdh3 -- \$e systemctl --user show sentora-app-$CID.slice -p ActiveState -p ControlGroup -p MemoryMax -p FragmentPath -p DropInPaths | sed 's/^/    /'" 2>&1 | tr -d '\r'
 cg() { if [ "$GV" = 1 ]; then

@@ -1439,7 +1439,8 @@ check(!dh::SetGuards((int) $ga['dc_acc_fk'] === 1 ? 3 : (int) $ga['dc_acc_fk'], 
 // this node has no gVisor yet: the app runs as before, and the panel says so
 $agentB('once');
 check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'standard', 'a node without gVisor reports the standard runtime (the panel shows "asked for, not in force")');
-// gVisor on the node (the installer's runsc-sentora)
+// gVisor on the node (the installer's runsc-sentora); with SELinux enforcing it is not used (runsc takes no label)
+file_put_contents($gfake . '/getenforce', "Disabled\n");
 $runsc = $gfake . '/runsc-sentora';
 file_put_contents($runsc, "#!/bin/sh\nexit 0\n");
 chmod($runsc, 0755);
@@ -1449,6 +1450,14 @@ check($okg && lastjob($gid)['jb_action_vc'] === 'recreate', 'an administrator sw
 $agentB('once');
 check(trim((string) @file_get_contents($gdir . '/runtime')) === 'crun', 'off: the standard runtime');
 check(dh::SetGuards(1, $gid, array('iso' => 'gvisor')), 'and on again');
+// (with SELinux enforcing: the standard runtime, confined by SELinux; the panel shows it is not in force)
+file_put_contents($gfake . '/getenforce', "Enforcing\n");
+$agentB('once');
+check(trim((string) @file_get_contents($gdir . '/runtime')) === 'crun', 'with SELinux enforcing gVisor is not used: the standard runtime, confined by SELinux');
+$agentB('once');
+check(val("SELECT dc_iso_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'standard', 'and the panel is told (asked for, not in force)');
+file_put_contents($gfake . '/getenforce', "Disabled\n");
+check(dh::SetGuards(1, $gid, array('iso' => 'standard')) && dh::SetGuards(1, $gid, array('iso' => 'gvisor')), 'off and on again (SELinux off on this node)');
 file_put_contents($gfake . '/calls.log', '');
 $agentB('once');
 $args = (string) @file_get_contents($gdir . '/args');

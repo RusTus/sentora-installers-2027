@@ -687,7 +687,18 @@ class snode
     static function Runsc()
     {
         $r = self::P('RUNSC', '');
-        return $r !== '' && $r[0] === '/' && is_executable($r) ? $r : '';
+        if ($r === '' || $r[0] !== '/' || !is_executable($r)) {
+            return '';
+        }
+        // (not with SELinux enforcing, for now: runsc takes no SELinux label, and started under the container's
+        // label it can not set itself up (found on a real AlmaLinux 10, 2026-11-16). The app runs on the
+        // standard runtime there, confined by SELinux as before; the panel shows "asked for, not in force".)
+        static $enforcing = null;
+        if ($enforcing === null) {
+            $e = self::Run(array('getenforce'), null, 10);
+            $enforcing = $e[0] === 0 && trim($e[1]) === 'Enforcing';
+        }
+        return $enforcing ? '' : $r;
     }
 
     /**
