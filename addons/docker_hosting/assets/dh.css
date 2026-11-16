@@ -162,7 +162,7 @@
 .dh-guard { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .dh-guard-text { min-width: 0; }
 .dh-guard + .dh-guard { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--dh-line); }
-.dh-guard-text .dh-pill { margin-left: 6px; }
+.dh-guard-text .dh-pill { margin-left: 6px; white-space: normal; max-width: 100%; }
 .dh-guard-text small { display: block; margin-top: 6px; color: var(--dh-muted); line-height: 1.5; }
 .dh-guard-text .dh-holes { display: block; margin-top: 6px; color: var(--dh-ink); }
 .dh-holes-list { margin-top: 6px; }
