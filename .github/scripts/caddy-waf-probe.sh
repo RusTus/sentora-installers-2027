@@ -31,13 +31,21 @@ say "The stock apps"
 docker run -d --name kuma -p 127.0.0.1:3001:3001 docker.io/louislam/uptime-kuma:1 > /dev/null
 docker run -d --name gitea -p 127.0.0.1:3000:3000 -e GITEA__security__INSTALL_LOCK=true -e GITEA__database__DB_TYPE=sqlite3 \
     -e GITEA__server__ROOT_URL=http://127.0.0.1:18081/ -e GITEA__service__DISABLE_REGISTRATION=false docker.io/gitea/gitea:1 > /dev/null
-docker run -d --name vw -p 127.0.0.1:8000:80 -e SIGNUPS_ALLOWED=true -e DOMAIN=http://127.0.0.1:18082 docker.io/vaultwarden/server:latest > /dev/null
+docker run -d --name vw -p 127.0.0.1:8000:80 -p 127.0.0.1:8001:8080 -e SIGNUPS_ALLOWED=true -e DOMAIN=http://127.0.0.1:18082 docker.io/vaultwarden/server:latest > /dev/null
 docker run -d --name nc -p 127.0.0.1:8080:80 -e SQLITE_DATABASE=nc -e NEXTCLOUD_ADMIN_USER=admin -e NEXTCLOUD_ADMIN_PASSWORD=Probe-pass-1234 \
     -e NEXTCLOUD_TRUSTED_DOMAINS="127.0.0.1 127.0.0.1:18083" docker.io/library/nextcloud:stable-apache > /dev/null
 docker run -d --name echo -p 127.0.0.1:5678:5678 docker.io/hashicorp/http-echo -text=hello > /dev/null
+# (which port Vaultwarden listens on: the catalog says 80)
+VWP=
+for _ in $(seq 1 40); do
+    for p in 8000 8001; do curl -fs -o /dev/null "http://127.0.0.1:$p/alive" && { VWP=$p; break 2; }; done; sleep 3
+done
+echo "  Vaultwarden answers on $([ "$VWP" = 8001 ] && echo "port 8080 (NOT the catalog's 80)" || { [ "$VWP" = 8000 ] && echo "port 80 (the catalog's)" || echo "neither port"; })"
+docker logs vw 2>&1 | tail -5 | sed 's/^/    vw: /'
+VWP=${VWP:-8000}
 {
     echo "{"; echo "	order coraza_waf first"; echo "	admin off"; echo "}"
-    for s in "kuma 18080 3001" "gitea 18081 3000" "vw 18082 8000" "nc 18083 8080"; do
+    for s in "kuma 18080 3001" "gitea 18081 3000" "vw 18082 $VWP" "nc 18083 8080"; do
         set -- $s; echo "http://127.0.0.1:$2 {"; waf DetectionOnly "$1"; echo "	reverse_proxy 127.0.0.1:$3"; echo "}"
     done
     echo "http://127.0.0.1:18090 {"; waf On on; echo "	reverse_proxy 127.0.0.1:5678"; echo "}"
