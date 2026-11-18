@@ -464,7 +464,7 @@ echo
 if [ -n "$VMBOX" ]; then
     say "SELinux: what it refused during all of this"
     AV=$(in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null | grep -E "^type=(AVC|USER_AVC|SELINUX_ERR)"')
-    if [ -z "$AV" ]; then ok "SELinux (enforcing) refused nothing: gVisor, Trivy, Caddy with Coraza, Podman and the agent all worked confined"
+    if [ -z "$AV" ]; then ok "SELinux (enforcing) refused nothing: Trivy, Caddy with Coraza, Podman and the agent all worked confined"
     else bad "SELinux refused $(echo "$AV" | wc -l) thing(s)"; echo "$AV" | sed -E 's/.*(denied|granted) +\{ ([^}]*) \} for +pid=[0-9]+ +comm=([^ ]*).* scontext=([^ ]*) tcontext=([^ ]*) tclass=([^ ]*).*/  \1 \2 by \3: \4 -> \5 (\6)/' | sort | uniq -c | sort -rn | head -30; fi
 fi
 [ $FAILS -eq 0 ] && echo "NODE TEST PASSED" || echo "NODE TEST: $FAILS FAILED"
