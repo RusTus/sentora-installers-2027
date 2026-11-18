@@ -32,7 +32,9 @@ bad() { echo "  FAIL $1"; FAILS=$((FAILS + 1)); echo "::error::$1"; }
 if [ -n "$VMBOX" ]; then
     KEY=$(mktemp -u)
     SSHO=(-i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -o ServerAliveInterval=20 -o ServerAliveCountMax=30)
-    in_box() { ssh "${SSHO[@]}" -p 2222 root@127.0.0.1 "$1"; }
+    # (in /, as docker exec is: the customers' users may not enter root's home)
+    in_box() { ssh "${SSHO[@]}" -p 2222 root@127.0.0.1 "cd / && { $1
+}"; }
     box_cp() { scp "${SSHO[@]}" -P 2222 -q "$1" "root@127.0.0.1:$2"; }
     wait_ssh() { for _ in $(seq 1 "${1:-150}"); do in_box true 2> /dev/null && return 0; sleep 2; done; return 1; }
     box_restart() { in_box 'systemctl reboot' > /dev/null 2>&1; sleep 15; wait_ssh 150; }
