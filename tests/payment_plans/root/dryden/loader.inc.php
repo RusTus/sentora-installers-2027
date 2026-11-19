@@ -1,5 +1,5 @@
 <?php
-// Stand-in panel for testing Payment Plans: SQLite in place of MySQL, small stand-ins for the core classes.
+// Stand-in panel for testing Payment Plans: SQLite in place of MySQL (or a real MySQL/MariaDB: env PP_MYSQL), small stand-ins for the core classes.
 // Database file: env PP_DB. Logged-in account: env PP_ME or $GLOBALS['PP_ME'].
 
 class TestPDO extends PDO
@@ -46,6 +46,22 @@ class TestPDO extends PDO
     }
 }
 
+if (getenv('PP_MYSQL')) {
+    // a real MySQL or MariaDB (PP_MYSQL = "host;port;user;password;database"): the module's SQL as it is, the
+    // panel's own tables as the panel has them
+    list($h, $p, $u, $pw, $db) = explode(';', getenv('PP_MYSQL'));
+    $zdbh = new PDO("mysql:host=$h;port=$p;dbname=$db;charset=utf8mb4", $u, $pw);
+    $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, ac_user_vc varchar(50), ac_email_vc varchar(200), ac_reseller_fk int(6),
+        ac_package_fk int(6), ac_group_fk int(6), ac_enabled_in int(1) DEFAULT 1, ac_created_ts int(30), ac_deleted_ts int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_packages (pk_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, pk_name_vc varchar(30), pk_reseller_fk int(6), pk_deleted_ts int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_quotas (qt_id_pk int(6) unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY, qt_package_fk int(6), qt_domains_in int(6) DEFAULT 0, qt_subdomains_in int(6) DEFAULT 0,
+        qt_parkeddomains_in int(6) DEFAULT 0, qt_mailboxes_in int(6) DEFAULT 0, qt_fowarders_in int(6) DEFAULT 0, qt_distlists_in int(6) DEFAULT 0, qt_ftpaccounts_in int(6) DEFAULT 0,
+        qt_mysql_in int(6) DEFAULT 0, qt_diskspace_bi bigint(20) DEFAULT 0, qt_bandwidth_bi bigint(20) DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_profiles (ud_user_fk int(6), ud_fullname_vc varchar(100)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS x_account_suspend (as_acc_fk int(6) PRIMARY KEY, as_reason_vc varchar(255), as_by_fk int(6), as_time_in int(30)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+    $zdbh->exec("CREATE TABLE IF NOT EXISTS t_events (ev text) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+} else {
 $zdbh = new TestPDO('sqlite:' . getenv('PP_DB'));
 $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $zdbh->exec('PRAGMA journal_mode=WAL');
@@ -57,6 +73,7 @@ $zdbh->exec("CREATE TABLE IF NOT EXISTS x_quotas (qt_id_pk INTEGER PRIMARY KEY A
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_profiles (ud_user_fk INT, ud_fullname_vc TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_account_suspend (as_acc_fk INT PRIMARY KEY, as_reason_vc TEXT, as_by_fk INT, as_time_in INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS t_events (ev TEXT)");
+}
 
 function test_event($e)
 {

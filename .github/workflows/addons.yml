@@ -49,3 +49,16 @@ jobs:
         run: php -m | grep -qi sodium && php -m | grep -qi pdo_sqlite || sudo apt-get install -y php-cli php-sqlite3 php-curl
       - name: Tests of ${{ matrix.addon }}
         run: bash tests/${{ matrix.addon }}/run.sh "$PWD/addons/${{ matrix.addon }}"
+      - name: Payment Plans on MySQL 8.4, MariaDB 10.11 and 11.8 (the panel's databases)
+        if: matrix.addon == 'payment_plans'
+        run: |
+          php -m | grep -qi pdo_mysql || sudo apt-get install -y php-mysql
+          for db in mysql:8.4 mariadb:10.11 mariadb:11.8; do
+            echo "::group::$db"
+            docker run -d --name testdb -e MYSQL_ROOT_PASSWORD=t -e MARIADB_ROOT_PASSWORD=t -p 127.0.0.1:13306:3306 docker.io/library/$db > /dev/null
+            for _ in $(seq 1 60); do php -r 'new PDO("mysql:host=127.0.0.1;port=13306", "root", "t");' 2> /dev/null && break; sleep 2; done
+            PP_MYSQL="127.0.0.1;13306;root;t;pptest" bash tests/payment_plans/run.sh "$PWD/addons/payment_plans" || fail=1
+            docker rm -f testdb > /dev/null
+            echo "::endgroup::"
+          done
+          exit ${fail:-0}

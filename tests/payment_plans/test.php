@@ -94,7 +94,17 @@ function query_of($url)
 section('Upgrade from version 101: PayPal keys move, nothing else changes');
 $db = dirname(getenv('PP_DB')) . '/upgrade.sqlite';
 @unlink($db);
-$old = json_decode(shell_exec('PP_DB=' . escapeshellarg($db) . ' php ' . escapeshellarg($T . '/old_setup.php') . ' 2>&1'), true);
+// (its own database: a file, or on MySQL/MariaDB a database of its own, made empty)
+$updb = 'PP_DB=' . escapeshellarg($db);
+if (getenv('PP_MYSQL')) {
+    $mq = explode(';', getenv('PP_MYSQL'));
+    $mq[4] .= '_up';
+    $x = new PDO('mysql:host=' . $mq[0] . ';port=' . $mq[1], $mq[2], $mq[3]);
+    $x->exec('DROP DATABASE IF EXISTS `' . $mq[4] . '`');
+    $x->exec('CREATE DATABASE `' . $mq[4] . '` CHARACTER SET utf8mb4');
+    $updb .= ' PP_MYSQL=' . escapeshellarg(implode(';', $mq));
+}
+$old = json_decode(shell_exec($updb . ' php ' . escapeshellarg($T . '/old_setup.php') . ' 2>&1'), true);
 check(is_array($old) && $old['ps_clientid_vc'] === 'LIVECLIENT01' && strpos($old['ps_secret_tx'], 'enc1:') === 0, 'version 101 stored its PayPal keys (encrypted)', json_encode($old));
 $code = '
 chdir("' . $T . '/root"); require "' . $T . '/root/dryden/loader.inc.php"; require "' . $T . '/root/modules/payment_plans/code/pp.php";
@@ -102,7 +112,7 @@ pp::Ensure();
 $s = $zdbh->query("SELECT * FROM x_pp_sellers")->fetch(PDO::FETCH_ASSOC);
 $i = $zdbh->query("SELECT * FROM x_pp_invoices")->fetch(PDO::FETCH_ASSOC);
 echo json_encode(array("s" => $s, "i" => $i, "live" => pp_pay::Keys(5, "paypal", "live"), "sb" => pp_pay::Keys(5, "paypal", "sandbox"), "ready" => pp_pay::Ready(pp::Seller(5))));';
-$up = json_decode(shell_exec('PP_DB=' . escapeshellarg($db) . ' php -r ' . escapeshellarg($code) . ' 2>&1'), true);
+$up = json_decode(shell_exec($updb . ' php -r ' . escapeshellarg($code) . ' 2>&1'), true);
 check(is_array($up), 'the upgrade ran', json_encode($up));
 check($up['s']['ps_proc_vc'] === 'paypal', 'the seller keeps PayPal as its processor');
 check($up['live'] === array('clientid' => 'LIVECLIENT01', 'secret' => 'LIVESECRET01'), 'live keys moved and still decrypt', json_encode($up['live']));
@@ -112,7 +122,7 @@ check($up['ready'] === true, 'live PayPal is ready after the upgrade');
 check($up['i']['in_proc_vc'] === 'paypal' && $up['i']['in_order_vc'] === 'OLDORDER123', 'an open PayPal order is still known as PayPal\'s');
 check((int) $up['s']['ps_on_in'] === 1, 'a seller that was billing before the switch existed stays on');
 check((int) $up['s']['ps_auto_in'] === 1 && (int) $up['s']['ps_autofrom_in'] > time() - 60, 'automatic plans start from the upgrade (existing clients are not billed by surprise)');
-$again = shell_exec('PP_DB=' . escapeshellarg($db) . ' php -r ' . escapeshellarg($code) . ' 2>&1');
+$again = shell_exec($updb . ' php -r ' . escapeshellarg($code) . ' 2>&1');
 check(json_decode($again, true)['live'] === $up['live'], 'running the upgrade again changes nothing');
 
 // ---------------------------------------------------------------- the stand-in panel

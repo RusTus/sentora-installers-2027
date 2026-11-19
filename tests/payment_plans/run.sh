@@ -3,6 +3,7 @@
 # in a stand-in panel (SQLite, small stand-ins for the core classes), against fake PayPal and Stripe
 # services, with the pay link served by PHP's own web server. Needs php (pdo_sqlite, curl, sodium), unzip, git.
 #   tests/payment_plans/run.sh [module-folder]
+#   PP_MYSQL="host;port;user;password;database" tests/payment_plans/run.sh   (on a real MySQL or MariaDB)
 set -u
 T=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$T/../.." && pwd)
@@ -14,6 +15,10 @@ else unzip -q "$REPO/sentora-repo/payment_plans.zpp" -d "$T/root/modules/payment
 git -C "$REPO" show ff1c05dc:sentora-repo/payment_plans.zpp > "$W/101.zpp" && unzip -q "$W/101.zpp" -d "$W/101"
 export PP_OLD_DIR="$W/101" PP_DB="$W/test.sqlite" FAKE_STATE="$W/fake.json"
 export PP_FAKE=http://127.0.0.1:18081 FAKE_BASE=http://127.0.0.1:18081 PP_WEB=http://127.0.0.1:18082
+if [ -n "${PP_MYSQL:-}" ]; then
+    php -r 'list($h, $p, $u, $w, $d) = explode(";", getenv("PP_MYSQL")); $x = new PDO("mysql:host=$h;port=$p", $u, $w);
+        $x->exec("DROP DATABASE IF EXISTS `$d`"); $x->exec("CREATE DATABASE `$d` CHARACTER SET utf8mb4"); echo "database: ", $x->query("SELECT VERSION()")->fetchColumn(), "\n";' || exit 1
+fi
 php -S 127.0.0.1:18081 "$T/fake.php" >"$W/fake.log" 2>&1 &
 F=$!
 php -S 127.0.0.1:18082 -t "$T/root" >"$W/web.log" 2>&1 &
