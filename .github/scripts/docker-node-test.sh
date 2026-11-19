@@ -467,6 +467,8 @@ wait_for 900 bash -c "v=\$(php '$T/node_real.php' info sys_last_at); [ \"\${v:-0
 
 # (the web firewall's refusals reach the panel: the SQL injection and the attack tool from above, read from Caddy's
 # journal every 10 minutes; and only its findings are in the journal, not its notes on every request)
+# (a fresh one now: a node whose journal is kept in memory only, as these test boxes, lost the earlier ones at its restart)
+PW=$(panel setup "$CID"); atk "-A 'sqlmap/1.8' https://kuma.example.test/" > /dev/null
 WS=$(wait_for 700 bash -c "php '$T/node_real.php' field $CID dc_wafstat_tx | grep -E '\"n\":[1-9]'")
 echo "  web firewall: $WS" | cut -c1-300
 echo "$WS" | grep -q '"why":"Found User-Agent associated with security scanner"\|"why":"SQL Injection' && ok "the panel shows what the web firewall refused for the app, with the rule" || bad "no web firewall count at the panel: $(panel field $CID dc_wafstat_tx)"
