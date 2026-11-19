@@ -550,12 +550,23 @@ sslverify=1
 REPO_EOF
     fi
     rm -rf "$tmp"
-    # (local only before the package's first start: it does not contact CrowdSec's servers even once)
+    # (local only before the package's first start: it does not contact CrowdSec's servers even once; a stand-in
+    # registration file keeps its install script from registering, which it would refuse to do and so fail)
+    local fresh=
     if [ ! -f /etc/crowdsec/config.yaml.local ]; then
+        fresh=1
         install -d -m 755 /etc/crowdsec
         printf "# Written by Sentora Docker Node: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n" > /etc/crowdsec/config.yaml.local
+        [ -e /etc/crowdsec/online_api_credentials.yaml ] || printf "# Sentora Docker Node: not registered (local only)\n" > /etc/crowdsec/online_api_credentials.yaml
     fi
-    run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables || return 1
+    if ! run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables; then
+        # (its install script still wanted to register: let it, once, as the package does by itself; the
+        # registration is removed and local only set again right after)
+        [ -n "$fresh" ] && [ "$PKG" = apt ] || return 1
+        rm -f /etc/crowdsec/config.yaml.local /etc/crowdsec/online_api_credentials.yaml
+        run dpkg --configure -a || return 1
+        note "CrowdSec's package registered with its servers once while installing (no attack data); that registration is removed now."
+    fi
     command -v cscli > /dev/null 2>&1
 }
 if crowdsec_install; then
