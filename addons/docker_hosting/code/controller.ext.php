@@ -1221,19 +1221,66 @@ class module_controller extends ctrl_module
      */
     static function ShareTiles(array $g, $acc)
     {
+        // a tile: what is free, in large; a bar of how much is used; the numbers behind it
+        $tile = function ($label, $free, $total, $used, $gave, $fmt, $unit = '') {
+            $pct = $total > 0 ? max(0, min(100, (int) round(($total - $free) * 100 / $total))) : 0;
+            return '<div class="dh-limit"><span>' . self::t($label) . '</span><b>' . self::h($fmt($free)) . $unit . ' ' . self::t('free') . '</b>'
+                . '<span class="dh-bar' . ($pct >= 90 ? ' is-full' : '') . '" role="img" aria-label="' . self::t('%s percent used', array($pct)) . '"><i style="width:' . $pct . '%"></i></span>'
+                . '<span>' . ($gave !== null && (int) $gave > 0 ? self::t('of %s; you use %s, gave %s', array($fmt($total), $fmt($used), $fmt($gave))) : self::t('of %s; you use %s', array($fmt($total), $fmt($used)))) . '</span></div>';
+        };
+        $gb = function ($v) { return rtrim(rtrim(sprintf('%.1f', $v / 1024), '0'), '.'); };
+        $n = function ($v) { return (string) $v; };
+        $cpu = function ($v) { return dh::Cpu($v); };
         if ($g['unlimited']) {
-            return '<p class="dh-muted">' . self::t('As an administrator you have no limit: only the room on the nodes counts.') . '</p>';
+            // (an administrator has no limit: what counts is the room on the nodes that take new apps)
+            $free = $total = array('cpu' => 0, 'mem' => 0, 'disk' => 0);
+            $count = 0;
+            foreach (dh::Nodes() as $nd) {
+                if (!dh::Online($nd) || (int) $nd['nd_accepting_in'] !== 1) {
+                    continue;
+                }
+                $count++;
+                $r = dh::Room($nd);
+                $i = dh::Info($nd);
+                $all = array('cpu' => (int) $i['cpus'] * 100 * dh::CPU_OVER, 'mem' => intdiv((int) $i['mem_mb'] * dh::MEM_SHARE, 100), 'disk' => intdiv((int) $i['disk_total_mb'] * dh::DISK_SHARE, 100));
+                foreach ($free as $k => $v) {
+                    $free[$k] += max(0, $r[$k]);
+                    $total[$k] += $all[$k];
+                }
+            }
+            if ($count === 0) {
+                return '<p class="dh-muted">' . self::t('As an administrator you have no limit: only the room on the nodes counts, and no node takes new apps now.') . '</p>';
+            }
+            return '<p class="dh-muted">' . self::t($count === 1 ? 'An administrator has no limit of their own: this is what is left on the node that takes new apps.' : 'An administrator has no limit of their own: this is what is left on the %s nodes that take new apps.', array($count)) . '</p>'
+                . '<div class="dh-limits">' . $tile('CPU', $free['cpu'], $total['cpu'], $total['cpu'] - $free['cpu'], null, $cpu)
+                . $tile('Memory', $free['mem'], $total['mem'], $total['mem'] - $free['mem'], null, $gb, ' GB')
+                . $tile('Disk', $free['disk'], $total['disk'], $total['disk'] - $free['disk'], null, $gb, ' GB') . '</div>';
         }
         $u = dh::Used($acc);
         $gv = dh::Given($acc);
         $f = dh::Free($acc);
-        $row = function ($label, $k, $fmt) use ($g, $u, $gv, $f) {
-            return '<div class="dh-limit"><span>' . self::t($label) . '</span><b>' . self::h($fmt($f[$k])) . ' ' . self::t('free') . '</b><span>'
-                . self::t('of %s; you use %s, gave %s', array($fmt($g[$k]), $fmt($u[$k]), $fmt($gv[$k]))) . '</span></div>';
-        };
-        $n = function ($v) { return (string) $v; };
-        return '<div class="dh-limits">' . $row('Containers', 'count', $n) . $row('CPU', 'cpu', function ($v) { return dh::Cpu($v); })
-            . $row('Memory (MB)', 'mem', $n) . $row('Disk (GB)', 'disk', function ($v) { return rtrim(rtrim(sprintf('%.2f', $v / 1024), '0'), '.'); }) . '</div>';
+        return '<div class="dh-limits">' . $tile('Containers', $f['count'], $g['count'], $u['count'], $gv['count'], $n)
+            . $tile('CPU', $f['cpu'], $g['cpu'], $u['cpu'], $gv['cpu'], $cpu)
+            . $tile('Memory (MB)', $f['mem'], $g['mem'], $u['mem'], $gv['mem'], $n)
+            . $tile('Disk (GB)', $f['disk'], $g['disk'], $u['disk'], $gv['disk'], $gb) . '</div>';
+    }
+
+    /**
+     * A card that folds: its heading always shows, with a line of what is inside; the rest opens with a click
+     * (the Nodes and apps tab keeps the parts used now and then folded, so what needs a look stays at the top).
+     *
+     * @param string $card a card: <div class="dh-card" ...><h3>...</h3>...</div>
+     * @param string $hint shown next to the heading while it is folded (already escaped)
+     * @param bool $open
+     * @return string
+     */
+    static function Fold($card, $hint, $open)
+    {
+        if (!preg_match('#^<div class="dh-card"( id="[A-Za-z0-9_-]+")?><h3>(.*?)</h3>#s', $card, $m) || substr($card, -6) !== '</div>') {
+            return $card;
+        }
+        return '<details class="dh-card dh-fold"' . $m[1] . ($open ? ' open' : '') . '><summary><h3>' . $m[2] . '</h3><span class="dh-fold-hint">' . $hint . '</span></summary>'
+            . substr($card, strlen($m[0]), -6) . '</details>';
     }
 
     /**
@@ -1248,7 +1295,7 @@ class module_controller extends ctrl_module
         if (!$g) {
             return '<div class="dh-card dh-intro"><p>' . self::t('Docker Hosting is not part of your account: ask your provider if you would like to run apps (like Gitea, Nextcloud or Uptime Kuma) here.') . '</p></div>';
         }
-        $out = '<div class="dh-card"><h3>' . self::t('Your share') . '</h3>' . self::ShareTiles($g, $me) . '</div>';
+        $out = '<div class="dh-card"><h3>' . self::t($g['unlimited'] ? 'Room on the nodes' : 'Your share') . '</h3>' . self::ShareTiles($g, $me) . '</div>';
         $list = dh::Containers($me);
         $out .= '<div class="dh-card"><h3>' . self::t('Your apps') . '</h3>';
         if (!$list) {
@@ -1328,9 +1375,13 @@ class module_controller extends ctrl_module
                     . self::BackupLine($c);
                 $out .= '<div class="dh-item ' . $cls . '" id="dh-set-' . $id . '"><span class="dh-avatar" aria-hidden="true">' . self::h(strtoupper(substr($name, 0, 1))) . '</span>'
                     . '<div class="dh-main"><div class="dh-name"><b>' . self::h($name) . '</b>' . ((string) $c['dc_label_vc'] !== '' ? '<span class="dh-muted">' . self::h($c['dc_label_vc']) . '</span>' : '') . $status . '</div>'
-                    . '<div class="dh-sub">' . $sub . '</div>'
-                    . ((string) $c['dc_note_vc'] !== '' ? '<div class="dh-note">' . self::h($c['dc_note_vc']) . '</div>' : '') . $dns . $setup . '</div>'
+                    . '<div class="dh-sub">' . $sub . '</div></div>'
                     . $actions;
+                // (what to know about it: under the row, the row's whole width)
+                $notes = ((string) $c['dc_note_vc'] !== '' ? '<div class="dh-note">' . self::h($c['dc_note_vc']) . '</div>' : '') . $dns . $setup;
+                if ($notes !== '') {
+                    $out .= '<div class="dh-notes">' . $notes . '</div>';
+                }
                 // its settings, opened under its row
                 if ($open === $id && !$busy && !$missing) {
                     $out .= '<div class="dh-more dh-settings"><form method="post" action="./?module=docker_hosting&amp;action=CtSettings" data-public="' . ($public ? '1' : '0') . '"'
@@ -1820,7 +1871,7 @@ class module_controller extends ctrl_module
         $out .= self::LanHtml();
         // adding a node: the node makes its key, the administrator pastes it
         $fp = dh::Fingerprint();
-        $out .= '<div class="dh-card"><h3>' . self::t('Add a Docker node') . '</h3><ol class="dh-small">'
+        $add = '<div class="dh-card" id="dh-addnode"><h3>' . self::t('Add a Docker node') . '</h3><ol class="dh-small">'
             . '<li>' . self::t('On the new server (Ubuntu 26.04, Debian 13, AlmaLinux, Rocky Linux or Red Hat Enterprise Linux 10, or Fedora 45; fresh, nothing else on it, not this panel\'s server), log in, become root and run:') . '<code class="dh-cmd">curl -fsSL ' . self::h(dh::NODE_INSTALLER) . ' -o sentora2027-docker-node &amp;&amp; sudo bash sentora2027-docker-node</code></li>'
             . '<li>' . self::t('It asks where your Sentora panel is: type this panel\'s address as that server reaches it (on a home or office network usually its IP address, like 172.16.1.250).') . '</li>'
             . '<li>' . self::t('It shows a code the panel answered with. This panel\'s code is %s: answer y only when the two are the same (otherwise something is pretending to be your panel).', array($fp)) . '</li>'
@@ -1838,13 +1889,21 @@ class module_controller extends ctrl_module
             . '<label class="dh-field"><span>' . self::t('This panel\'s address, as the node reaches it') . '</span><input type="text" class="form-control" name="inUrl" value="' . self::h(dh::Get('panel_url')) . '" placeholder="' . self::h('https://' . ctrl_options::GetSystemOption('sentora_domain')) . '">'
             . '<small>' . self::t('The node calls the panel at this address. Empty: %s. If the node can not look that name up, type this panel\'s IP address instead, for example https://172.16.1.250.', array('https://' . ctrl_options::GetSystemOption('sentora_domain'))) . '</small></label>'
             . '</div><div class="dh-foot"><span class="dh-muted">' . self::t('You get a command to run on the new server, within the hour.') . '</span><button class="btn btn-default" type="submit">' . self::t('Add and show its install command') . '</button></div></form></details></div>';
+        $action = isset($_GET['action']) && is_string($_GET['action']) ? $_GET['action'] : '';
+        // (open while there is no node yet, or when it was just used)
+        $out .= self::Fold($add, self::t('Run the installer on a new server, then paste the key it shows.'), !dh::Nodes() || $action === 'AddNode');
         $enabled = dh::EnabledApps();
         $checks = '';
         foreach (dh_catalog::Apps() as $id => $a) {
             $checks .= '<label><input type="checkbox" name="inApps[]" value="' . self::h($id) . '"' . (in_array($id, $enabled, true) ? ' checked' : '') . '> ' . self::h($a['name']) . ' <span class="dh-muted">' . self::h($a['image']) . '</span>' . (!empty($a['custom']) ? ' <span class="dh-pill">' . self::t('your own') . '</span>' : '') . '</label>';
         }
-        $out .= self::OwnAppsHtml();
-        $out .= self::RegistriesHtml();
+        $own = dh_catalog::Custom();
+        $out .= self::Fold(self::OwnAppsHtml(), $own ? self::t(count($own) === 1 ? '1 app of your own: %s.' : '%s apps of your own.', array(count($own) === 1 ? (string) reset($own)['name'] : count($own)))
+            : self::t('Offer any container image you trust, besides the apps that come with Docker Hosting.'),
+            isset($_GET['app']) || self::$appForm !== null || in_array($action, array('App', 'AppRemove'), true));
+        $regs = dh::Registries();
+        $out .= self::Fold(self::RegistriesHtml(), $regs ? self::t(count($regs) === 1 ? '1 login saved.' : '%s logins saved.', array(count($regs)))
+            : self::t('For private images, and Docker Hub\'s higher download limit.'), in_array($action, array('Registry', 'RegistryRemove'), true));
         $out .= '<div class="dh-card"><h3>' . self::t('Settings') . '</h3><form method="post" action="./?module=docker_hosting&amp;tab=nodes&amp;action=Settings">' . runtime_csfr::Token()
             . '<div class="dh-field"><span>' . self::t('Apps offered') . '</span><div class="dh-apps">' . $checks . '</div><small>' . self::t('The apps resellers and clients may choose from (they only see the ones their share allows). Unticking an app stops new ones being started; apps already running keep running.') . '</small></div>'
             . '<div class="dh-foot"><span></span><button class="btn btn-primary" type="submit">' . self::t('Save') . '</button></div></form></div>';

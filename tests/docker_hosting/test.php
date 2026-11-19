@@ -442,6 +442,11 @@ check(strpos($a2, '--cpus 0.75 --memory 512m') !== false && strpos($a2, '--publi
 agent('once');
 $cu = row("SELECT * FROM x_dh_containers WHERE dc_id_pk = :c", array(':c' => $c1['dc_id_pk']));
 check((int) $cu['dc_update_in'] === 0 && $cu['dc_state_vc'] === 'running', 'the panel: running, no update waiting');
+if (getenv('DH_PAGES')) {
+    // (the customer's pages while it has apps running)
+    file_put_contents(getenv('DH_PAGES') . '/client-apps.html', req(3)['html']);
+    file_put_contents(getenv('DH_PAGES') . '/client-settings.html', req(3, '', array(), array('settings' => (string) $c1['dc_id_pk']))['html']);
+}
 // the next version crashes at once: the old one comes back
 file_put_contents($imgFile, 'id-kuma-3 sha256:' . str_repeat('3', 64));
 file_put_contents(getenv('FAKE_DIR') . '/crash-id', 'id-kuma-3');
@@ -1686,6 +1691,15 @@ dh::CsUnblock((int) $bid, '198.18.0.0/16');
 $agentB('once');
 check(strpos($gcalls(), 'cscli decisions delete --range 198.18.0.0/16') !== false, 'a blocked range is unblocked as a range', $gcalls());
 @unlink($gfake . '/cs-decisions.json');
+
+if (getenv('DH_PAGES')) {
+    // (every main page, saved to be looked at with the panel's own style sheets)
+    foreach (array('admin-apps' => array(1, array()), 'admin-nodes' => array(1, array('tab' => 'nodes')), 'admin-node' => array(1, array('tab' => 'nodes', 'manage' => (string) $bid)),
+        'admin-shares' => array(1, array('tab' => 'shares')), 'admin-log' => array(1, array('tab' => 'log'))) as $name => $q) {
+        $r = req($q[0], '', array(), $q[1]);
+        file_put_contents(getenv('DH_PAGES') . '/' . $name . '.html', $r['html']);
+    }
+}
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
