@@ -69,6 +69,7 @@ cleanup() {
     in_box 'journalctl -u caddy --no-pager' > "$OUT/caddy.log" 2>&1
     in_box 'cat /var/log/sentora2027-docker-node.log' > "$OUT/node-install.log" 2>&1
     in_box 'cat /etc/caddy/sentora/sites.caddy' > "$OUT/sites.caddy" 2>&1
+    in_box 'journalctl -u crowdsec -u crowdsec-firewall-bouncer --no-pager; cat /var/log/crowdsec.log /var/log/crowdsec-firewall-bouncer.log 2> /dev/null | tail -80' > "$OUT/crowdsec.log" 2>&1
     [ -n "$VMBOX" ] && in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null' > "$OUT/selinux-refusals.txt" 2>&1
     if [ -n "$VMBOX" ]; then [ -f "$W/qemu.pid" ] && kill "$(cat "$W/qemu.pid")" 2> /dev/null; [ -n "${TEST_KEEP:-}" ] || rm -rf "$W" "$T/root/modules"
     else [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }; fi
@@ -230,7 +231,7 @@ case "$C" in 200|302) ok "a normal request goes through ($C)" ;; *) bad "normal 
 # and the panel, and Unblock in the panel takes it away
 CS=$(in_box 'systemctl is-active crowdsec crowdsec-firewall-bouncer | tr "\n" " "; echo; cscli version 2> /dev/null | sed -n "s/^version: //p"; [ -e /etc/crowdsec/online_api_credentials.yaml ] && echo registered || echo not-registered; grep -c "online_client: null" /etc/crowdsec/config.yaml.local; cscli collections list -o raw 2> /dev/null | cut -d, -f1 | grep -cE "^crowdsecurity/(caddy|sshd|linux)$"' | tr -d '\r')
 echo "$CS" | sed 's/^/  crowdsec: /'
-echo "$CS" | head -1 | grep -qx "active active " && ok "CrowdSec and its firewall blocker run ($(echo "$CS" | sed -n 2p))" || bad "CrowdSec: $(echo "$CS" | head -1)"
+echo "$CS" | head -1 | grep -qx "active active " && ok "CrowdSec and its firewall blocker run ($(echo "$CS" | sed -n 2p))" || { bad "CrowdSec: $(echo "$CS" | head -1)"; in_box 'systemctl status crowdsec --no-pager | head -12; tail -25 /var/log/crowdsec.log 2> /dev/null; journalctl -u crowdsec --no-pager | tail -15'; }
 echo "$CS" | grep -qx not-registered && [ "$(echo "$CS" | sed -n 4p)" = 1 ] && ok "local only: not registered with CrowdSec's servers, its central API off" || bad "not local only: $CS"
 [ "$(echo "$CS" | sed -n 5p)" = 3 ] && ok "it reads the system, SSH and the apps' access log (Caddy)" || bad "collections: $CS"
 wait_for 60 in_box "grep -c '\"$GW\"' /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml" > /dev/null && ok "the panel's address ($GW) is on its safe list (never blocked)" || bad "the panel's address is not on the safe list: $(in_box 'cat /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml')"
