@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '119';
+    const VERSION = '120';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -729,6 +729,56 @@ class snode
         return self::P('CADDY_WAF', '') === '1';
     }
 
+    /** @var int when WafStats last read the journal */
+    static $wafAt = 0;
+    /** @var array per site: n (refused in the last 24 hours) and last (up to 5: at, path, why) */
+    static $waf = array();
+
+    /**
+     * What the web firewall refused per app in the last 24 hours (read from Caddy's journal at most every 10
+     * minutes): how many, and the last few with the path (never the query, which can hold secrets, nor the
+     * visitor's address) and the rule that caught it. Only On refuses: Watch only writes its rules down.
+     */
+    static function WafStats()
+    {
+        if (!self::Waf() || time() - self::$wafAt < 600) {
+            return self::$waf;
+        }
+        self::$wafAt = time();
+        $r = self::Run(array('journalctl', '-u', self::P('CADDY_SERVICE', 'caddy'), '--since', '-24h', '-o', 'cat', '--no-pager', '-g', 'http.handlers.waf'), null, 60);
+        if ($r[0] !== 0 && stripos($r[1], 'pattern') !== false) {
+            // (a journalctl without pattern matching: all of Caddy's lines, sorted out below)
+            $r = self::Run(array('journalctl', '-u', self::P('CADDY_SERVICE', 'caddy'), '--since', '-24h', '-o', 'cat', '--no-pager'), null, 60);
+        }
+        $hosts = $why = array();
+        foreach (explode("\n", substr($r[1], -8 * 1048576)) as $l) {
+            $j = json_decode(trim($l), true);
+            if (!is_array($j) || ($j['logger'] ?? '') !== 'http.handlers.waf') {
+                continue;
+            }
+            $msg = (string) ($j['msg'] ?? '');
+            if ($msg === 'WAF rule violation detected' && isset($j['hostname'], $j['unique_id'])) {
+                $hosts[(string) $j['unique_id']] = array('host' => strtolower((string) $j['hostname']), 'at' => (int) ($j['ts'] ?? 0),
+                    'path' => substr((string) parse_url('http://x' . (string) ($j['uri'] ?? ''), PHP_URL_PATH), 0, 120));
+            } elseif (preg_match('/\[id "(\d+)"\].*?\[msg "([^"]{1,160})"\].*\[unique_id "([A-Za-z0-9]+)"\]/', $msg, $m) && !preg_match('/^(949|959|980)/', $m[1])) {
+                // (the rule that caught it, not the score that added up)
+                $why[$m[3]] = isset($why[$m[3]]) ? $why[$m[3]] : $m[2];
+            }
+        }
+        $out = array();
+        foreach ($hosts as $id => $h) {
+            if (!isset($out[$h['host']])) {
+                $out[$h['host']] = array('n' => 0, 'last' => array());
+            }
+            $out[$h['host']]['n']++;
+            array_unshift($out[$h['host']]['last'], array('at' => $h['at'], 'path' => preg_replace('/[^A-Za-z0-9._~\/%+-]/', '', $h['path']),
+                'why' => preg_replace('/[^A-Za-z0-9 ._:,()\/-]/', '', isset($why[$id]) ? $why[$id] : '')));
+            $out[$h['host']]['last'] = array_slice($out[$h['host']]['last'], 0, 5);
+        }
+        self::$waf = $out;
+        return $out;
+    }
+
     // ----- blocking repeat attackers (CrowdSec, Docker Hosting 139, owner 2026-11-19: local by default) -----
 
     /** Whether this node has CrowdSec (the installer's, with its nftables blocker). */
@@ -1272,7 +1322,10 @@ class snode
         $file = self::$caddy . '/Caddyfile';
         $t = "# Written by the Sentora Docker Node installer. The containers' sites are in sentora/ (the agent writes them).\n{\n"
             . ($email !== '' ? "\temail " . $email . "\n" : '') . ($local ? "\tlocal_certs\n" : '')
-            . "\tskip_install_trust\n\tadmin localhost:2019\n}\n\nimport /etc/caddy/sentora/*.caddy\n";
+            . "\tskip_install_trust\n\tadmin localhost:2019\n"
+            // (with the web firewall: only what it finds goes to the journal, not the many notes it writes on every request)
+            . (self::Waf() ? "\tlog {\n\t\texclude http.handlers.waf\n\t}\n\tlog sentora-waf {\n\t\tinclude http.handlers.waf\n\t\tlevel ERROR\n\t}\n" : '')
+            . "}\n\nimport /etc/caddy/sentora/*.caddy\n";
         $old = is_file($file) ? (string) file_get_contents($file) : '';
         if ($old !== $t) {
             self::WriteFile($file, $t, 0644);
@@ -1629,6 +1682,7 @@ class snode
                 $out[$cid] = array('state' => $st, 'iso' => isset(self::$iso[$cid]) ? self::$iso[$cid] : '', 'used_mb' => isset(self::$disk[$cid]) ? self::$disk[$cid] : 0, 'user' => $user,
                     'update' => !empty($s['updates'][$cid]) ? 1 : 0, 'scan' => isset($s['scan'][$cid]) && is_array($s['scan'][$cid]) ? $s['scan'][$cid] : null,
                     'waf' => self::Waf() ? (isset($c['waf']) ? (string) $c['waf'] : 'off') : 'none',
+                    'waf_stat' => self::Waf() ? (self::WafStats()[strtolower((string) $c['domain'])] ?? array('n' => 0, 'last' => array())) : null,
                     // (what the panel needs to show an app it does not know, and to take it back)
                     'image' => isset($c['image']) ? (string) $c['image'] : '', 'domain' => (string) $c['domain'], 'hostport' => (int) $c['hostport'],
                     'volumes' => (int) $c['volumes'], 'public' => (int) $c['public']);

@@ -190,8 +190,25 @@ class module_controller extends ctrl_module
         } else {
             $pill = '<span class="dh-pill">' . self::t('%s (its node confirms it at its next call)', array(self::t($words[$wf]))) . '</span>';
         }
+        // what it refused in the last 24 hours (On only: Watch only writes its rules to the node's Caddy log)
+        $ws = json_decode((string) ($c['dc_wafstat_tx'] ?? ''), true);
+        $refused = '';
+        if ($wis === 'on' && is_array($ws)) {
+            $n = (int) ($ws['n'] ?? 0);
+            $refused = '<span class="dh-holes">' . ($n === 0 ? self::t('It refused nothing in the last 24 hours.') : self::t($n === 1 ? 'It refused 1 request in the last 24 hours.' : 'It refused %s requests in the last 24 hours.', array($n))) . '</span>';
+            if (!empty($ws['last'])) {
+                $refused .= '<details class="dh-holes-list"><summary>' . self::t('The last ones') . '</summary><ul>';
+                foreach ($ws['last'] as $e) {
+                    $refused .= '<li>' . ((int) $e['at'] > 0 ? self::h(date('j M H:i', (int) $e['at'])) . ' ' : '') . '<code>' . self::h((string) $e['path']) . '</code>'
+                        . ((string) $e['why'] !== '' ? ': ' . self::h((string) $e['why']) : '') . '</li>';
+                }
+                $refused .= '</ul></details>';
+            }
+        } elseif ($wis === 'watch') {
+            $refused = '<span class="dh-holes">' . self::t('Watch: what it would refuse is written to the node\'s Caddy log (journalctl -u caddy on the node), not counted here.') . '</span>';
+        }
         $out .= $form . '<div class="dh-guard-text"><b>' . self::t('Web firewall (Coraza)') . '</b> ' . $pill
-            . '<small>' . self::t('Requests to the app pass the OWASP Core Rule Set first (the same rules as ModSecurity on the panel): SQL and script injection, path tricks, shell commands, known attack tools and the like are refused before they reach it. Watch only writes them down (in the node\'s Caddy log), for an app that seems to be refused something it needs.') . '</small></div>';
+            . '<small>' . self::t('Requests to the app pass the OWASP Core Rule Set first (the same rules as ModSecurity on the panel): SQL and script injection, path tricks, shell commands, known attack tools and the like are refused before they reach it. Watch only writes them down (in the node\'s Caddy log), for an app that seems to be refused something it needs.') . $refused . '</small></div>';
         if ($admin) {
             $out .= '<select class="form-control dh-guard-choice" name="inWaf" onchange="this.form.submit()" aria-label="' . self::t('Web firewall (Coraza)') . '">';
             foreach (array('on' => 'On', 'watch' => 'Watch', 'off' => 'Off') as $k => $v) {

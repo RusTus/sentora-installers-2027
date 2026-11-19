@@ -1,0 +1,5 @@
+#!/bin/bash
+# fake journalctl: Caddy's journal is what the test puts in $FAKE_DIR/caddy-journal
+echo "journalctl $*" >> "$FAKE_DIR/calls.log"
+cat "$FAKE_DIR/caddy-journal" 2> /dev/null
+exit 0

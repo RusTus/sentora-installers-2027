@@ -465,6 +465,12 @@ wait_for 900 bash -c "v=\$(php '$T/node_real.php' info sys_last_at); [ \"\${v:-0
     && ok "the node installed its security updates (it went $([ "$(panel info sys_last_ok)" = 1 ] && echo well || echo badly))" || bad "security updates did not run"
 [ "$(panel info sys_last_ok)" = 1 ] || bad "the security update run failed: $(in_box 'tail -5 /var/log/sentora-docker-node-sysupdate.log')"
 
+# (the web firewall's refusals reach the panel: the SQL injection and the attack tool from above, read from Caddy's
+# journal every 10 minutes; and only its findings are in the journal, not its notes on every request)
+WS=$(wait_for 700 bash -c "php '$T/node_real.php' field $CID dc_wafstat_tx | grep -E '\"n\":[1-9]'")
+echo "  web firewall: $WS" | cut -c1-300
+echo "$WS" | grep -q '"why":"Found User-Agent associated with security scanner"\|"why":"SQL Injection' && ok "the panel shows what the web firewall refused for the app, with the rule" || bad "no web firewall count at the panel: $(panel field $CID dc_wafstat_tx)"
+[ "$(in_box 'journalctl -u caddy --no-pager -o cat | grep -c "key not found in collection"')" = 0 ] && ok "the journal has only the web firewall's findings, not its notes on every request" || bad "the web firewall's notes still fill the journal"
 say "Deleting"
 panel act "$CID" delete > /dev/null
 wait_for 180 bash -c "php '$T/node_real.php' state $CID | grep -x deleted" > /dev/null && ok "deleted in the panel" || bad "not deleted: $(panel state "$CID")"

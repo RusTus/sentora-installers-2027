@@ -1598,6 +1598,20 @@ check(preg_match('/' . preg_quote((string) $ga['dc_domain_vc'], '/') . " \{\n\te
 check(val("SELECT dc_waf_vc FROM x_dh_containers WHERE dc_id_pk = " . $gid) === 'on', 'the node reports it in force');
 check(strpos($gcalls(), 'podman[' . $gu . '] stop') === false && strpos($gcalls(), 'podman[' . $gu . '] start') === false, 'the app kept running', $gcalls());
 check(!dh::SetGuards($gacc === 1 ? 3 : $gacc, $gid, array('waf' => 'off')) && strpos(dh::$why, 'Only an administrator') !== false, 'a customer can not change it');
+// what it refused: counted per app from Caddy's journal (the path only: never the query or the visitor's address)
+$dom = strtolower((string) $ga['dc_domain_vc']);
+file_put_contents($gfake . '/caddy-journal', implode("\n", array(
+    '{"level":"error","ts":1795065799.04,"logger":"http.handlers.waf","msg":"[client \"203.0.113.9\"] Coraza: Warning. SQL Injection Attack Detected via libinjection [file \"@owasp_crs/REQUEST-942-APPLICATION-ATTACK-SQLI.conf\"] [line \"5885\"] [id \"942100\"] [rev \"\"] [msg \"SQL Injection Attack Detected via libinjection\"] [data \"x\"] [severity \"critical\"] [hostname \"\"] [uri \"/?id=1\"] [unique_id \"AAA111\"]"}',
+    '{"level":"error","ts":1795065799.05,"logger":"http.handlers.waf","msg":"WAF rule violation detected","hostname":"' . $dom . '","uri":"/login.php?pass=secret123&id=1%27","client_ip":"203.0.113.9","unique_id":"AAA111"}',
+    '{"level":"error","ts":1795065800.05,"logger":"http.handlers.waf","msg":"WAF rule violation detected","hostname":"other.example.com","uri":"/","client_ip":"203.0.113.9","unique_id":"BBB222"}',
+    'not json at all')) . "\n");
+$agentB('once');
+$ws = json_decode((string) val("SELECT dc_wafstat_tx FROM x_dh_containers WHERE dc_id_pk = " . $gid), true);
+check(is_array($ws) && $ws['n'] === 1 && $ws['last'][0]['path'] === '/login.php' && $ws['last'][0]['why'] === 'SQL Injection Attack Detected via libinjection'
+    && strpos(json_encode($ws), 'secret123') === false && strpos(json_encode($ws), '203.0.113.9') === false, 'what it refused for this app: counted, with the path and the rule (no query, no visitor address)', json_encode($ws));
+$r = req($gacc, '', array(), array('settings' => (string) $gid));
+check(strpos($r['html'], 'It refused 1 request in the last 24 hours.') !== false && strpos($r['html'], '<code>/login.php</code>: SQL Injection Attack Detected via libinjection') !== false, 'its Settings show it', '');
+@unlink($gfake . '/caddy-journal');
 check(dh::SetGuards(1, $gid, array('waf' => 'watch')) && lastjob($gid)['jb_action_vc'] === 'proxy', 'an administrator sets Watch: only its site changes', json_encode(lastjob($gid)));
 $agentB('once');
 $agentB('once');

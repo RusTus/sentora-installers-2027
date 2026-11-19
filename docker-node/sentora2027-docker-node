@@ -624,6 +624,11 @@ mkdir -p $CADDY_DIR/sentora
     # need sudo (which SELinux rightly refuses, and the node does not need it)
     echo "	skip_install_trust"
     echo "	admin localhost:2019"
+    # (with the web firewall: only what it finds goes to the journal, not the many notes it writes on every request)
+    if grep -q '^CADDY_WAF=1' /etc/sentora-docker-node/platform.conf 2> /dev/null; then
+        echo "	log {"; echo "		exclude http.handlers.waf"; echo "	}"
+        echo "	log sentora-waf {"; echo "		include http.handlers.waf"; echo "		level ERROR"; echo "	}"
+    fi
     echo "}"
     echo ""
     echo "import $CADDY_DIR/sentora/*.caddy"

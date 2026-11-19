@@ -140,6 +140,8 @@ class dh
         self::AddColumns('x_dh_containers', array('dc_waf_vc' => "VARCHAR(10) NOT NULL DEFAULT ''"));
         // (139) a node's CrowdSec settings from here: sharing with its community, the safe list
         self::AddColumns('x_dh_nodes', array('nd_cs_tx' => "TEXT NULL"));
+        // (140) what the web firewall refused for an app in the last 24 hours (its node's count and last few)
+        self::AddColumns('x_dh_containers', array('dc_wafstat_tx' => "TEXT NULL"));
         // (apps made before it get Watch: what it would refuse is only written down, so a running customer app
         // is never refused anything overnight; an administrator turns it On)
         if (self::Get('waf_from') === '') {
@@ -3640,6 +3642,18 @@ class dh
                 if ($sum !== null) {
                     $zdbh->prepare("UPDATE x_dh_containers SET dc_scan_tx = :s WHERE dc_id_pk = :c")->execute(array(':s' => json_encode($sum), ':c' => $cid));
                 }
+            }
+            if (isset($s['waf_stat']) && is_array($s['waf_stat'])) {
+                // (only plain numbers and short plain lines are kept)
+                $ws = array('n' => isset($s['waf_stat']['n']) && is_int($s['waf_stat']['n']) ? max(0, min(10000000, $s['waf_stat']['n'])) : 0, 'last' => array(), 'at' => time());
+                foreach (isset($s['waf_stat']['last']) && is_array($s['waf_stat']['last']) ? array_slice($s['waf_stat']['last'], 0, 5) : array() as $e) {
+                    if (is_array($e)) {
+                        $ws['last'][] = array('at' => isset($e['at']) && is_int($e['at']) ? $e['at'] : 0,
+                            'path' => mb_substr(preg_replace('#[^A-Za-z0-9._~/%+-]#', '', (string) ($e['path'] ?? '')), 0, 120),
+                            'why' => mb_substr(preg_replace('#[^A-Za-z0-9 ._:,()/-]#', '', (string) ($e['why'] ?? '')), 0, 160));
+                    }
+                }
+                $zdbh->prepare("UPDATE x_dh_containers SET dc_wafstat_tx = :w WHERE dc_id_pk = :c")->execute(array(':w' => json_encode($ws), ':c' => $cid));
             }
             if (isset($s['waf']) && in_array($s['waf'], array('on', 'watch', 'off', 'none'), true)) {
                 $zdbh->prepare("UPDATE x_dh_containers SET dc_waf_vc = :w WHERE dc_id_pk = :c")->execute(array(':w' => $s['waf'], ':c' => $cid));
