@@ -17,7 +17,6 @@ jobs:
           - {system: alma10, image: quay.io/almalinuxorg/almalinux:10}
           - {system: rocky10, image: quay.io/rockylinux/rockylinux:10}
           - {system: fedora45, image: quay.io/fedora/fedora:45}
-    container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v5
-      - run: bash .github/scripts/crowdsec-probe.sh ${{ matrix.system }}
+      - run: docker run --rm -v "$PWD/.github/scripts:/probe:ro" ${{ matrix.image }} bash /probe/crowdsec-probe.sh ${{ matrix.system }}
