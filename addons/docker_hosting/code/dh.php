@@ -1787,7 +1787,7 @@ class dh
      */
     static function CsUnblock($id, $ip)
     {
-        if (!self::Node((int) $id) || filter_var($ip, FILTER_VALIDATE_IP) === false) {
+        if (!self::Node((int) $id) || self::CsAddr($ip) !== (string) $ip) {
             return self::No('Not an address.');
         }
         self::Queue((int) $id, 0, 'unblock', array('ip' => (string) $ip));
@@ -3536,7 +3536,8 @@ class dh
         $out['cs_count'] = isset($cs['count']) && is_numeric($cs['count']) ? max(0, (int) $cs['count']) : 0;
         $out['cs_blocked'] = array();
         foreach (isset($cs['blocked']) && is_array($cs['blocked']) ? array_slice($cs['blocked'], 0, 100) : array() as $b) {
-            if (is_array($b) && isset($b['ip']) && is_string($b['ip']) && filter_var($b['ip'], FILTER_VALIDATE_IP) !== false) {
+            // (an address, or a range CrowdSec blocks as a whole)
+            if (is_array($b) && isset($b['ip']) && is_string($b['ip']) && (filter_var($b['ip'], FILTER_VALIDATE_IP) !== false || self::CsAddr($b['ip']) === $b['ip'])) {
                 $out['cs_blocked'][] = array('ip' => $b['ip'], 'why' => isset($b['why']) && is_string($b['why']) && preg_match('#^[A-Za-z0-9_./-]{0,100}$#', $b['why']) ? $b['why'] : '',
                     'left' => isset($b['left']) && is_numeric($b['left']) ? max(0, (int) $b['left']) : 0);
             }

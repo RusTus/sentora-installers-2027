@@ -1227,11 +1227,12 @@ class snode
                 return self::CsSettings($d);
             case 'unblock':
                 // (an address CrowdSec blocks, let through again)
-                $ip = isset($d['ip']) && is_string($d['ip']) && filter_var($d['ip'], FILTER_VALIDATE_IP) !== false ? $d['ip'] : '';
+                // (or a range CrowdSec blocks as a whole)
+                $ip = isset($d['ip']) && is_string($d['ip']) && self::CsAddr($d['ip']) === $d['ip'] ? $d['ip'] : '';
                 if ($ip === '' || !self::Crowdsec()) {
                     return array(false, $ip === '' ? 'refused: not an address' : 'this node has no CrowdSec');
                 }
-                $r = self::Run(array('cscli', 'decisions', 'delete', '--ip', $ip), null, 60);
+                $r = self::Run(array('cscli', 'decisions', 'delete', strpos($ip, '/') !== false ? '--range' : '--ip', $ip), null, 60);
                 self::$csAt = 0;
                 return array($r[0] === 0, 'unblocked ' . $ip . ': ' . self::Tail($r[1]));
             case 'network':

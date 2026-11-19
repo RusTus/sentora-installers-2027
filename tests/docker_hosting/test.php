@@ -1665,11 +1665,13 @@ check(strpos((string) @file_get_contents($csd . '/parsers/s02-enrich/sentora-saf
 // what it blocks, and Unblock
 file_put_contents($gfake . '/cs-decisions.json', json_encode(array(array('scenario' => 'crowdsecurity/http-probing', 'decisions' => array(
     array('type' => 'ban', 'value' => '192.0.2.99', 'scenario' => 'crowdsecurity/http-probing', 'duration' => '3h52m10.5s'),
-    array('type' => 'ban', 'value' => '<script>', 'scenario' => 'x', 'duration' => '1h'))))));
+    array('type' => 'ban', 'value' => '<script>', 'scenario' => 'x', 'duration' => '1h'),
+    array('type' => 'ban', 'value' => '198.18.0.0/16', 'scenario' => 'crowdsecurity/ssh-bf', 'duration' => '30m'))))));
 sleep(1);
 $agentB('once');
 $i = dh::Info($nrow());
-check(count($i['cs_blocked']) === 1 && $i['cs_blocked'][0]['ip'] === '192.0.2.99' && $i['cs_blocked'][0]['left'] > 13900, 'the panel sees what it blocks (only real addresses come along)', json_encode($i['cs_blocked']));
+check(count($i['cs_blocked']) === 2 && $i['cs_blocked'][0]['ip'] === '192.0.2.99' && $i['cs_blocked'][0]['left'] > 13900 && $i['cs_blocked'][1]['ip'] === '198.18.0.0/16',
+    'the panel sees what it blocks, addresses and ranges (only real ones come along)', json_encode($i['cs_blocked']));
 $r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $bid));
 check(strpos($r['html'], '<code>192.0.2.99</code><span class="dh-muted">http-probing, for 3 h more</span>') !== false && strpos($r['html'], 'value="cs-unblock"') !== false, 'its page lists it, with why, how long, and Unblock', '');
 if (getenv('DH_PAGES')) {
@@ -1679,7 +1681,10 @@ $r = req(1, 'NodeAct', array('inId' => (string) $bid, 'inWhat' => 'cs-unblock', 
 file_put_contents($gfake . '/calls.log', '');
 $agentB('once');
 check(strpos($gcalls(), 'cscli decisions delete --ip 192.0.2.99') !== false, 'Unblock lets it through on the node', $gcalls());
-check(!dh::CsUnblock((int) $bid, '192.0.2.99; rm -rf /'), 'only an address can be unblocked');
+check(!dh::CsUnblock((int) $bid, '192.0.2.99; rm -rf /'), 'only an address or a range can be unblocked');
+dh::CsUnblock((int) $bid, '198.18.0.0/16');
+$agentB('once');
+check(strpos($gcalls(), 'cscli decisions delete --range 198.18.0.0/16') !== false, 'a blocked range is unblocked as a range', $gcalls());
 @unlink($gfake . '/cs-decisions.json');
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
