@@ -1515,6 +1515,17 @@ class snode
         if (@chgrp($file, self::P('CADDY_GROUP', 'caddy'))) {
             @chmod($file, 0640);
         }
+        if ($log) {
+            // (the access log belongs to Caddy's user: the check below runs as root and would otherwise make it
+            // root's, which Caddy then can not write: found by the node test, 2026-11-19)
+            $lf = self::P('CADDY_LOG', '/var/log/caddy/sentora-access.log');
+            if (!is_file($lf) && is_dir(dirname($lf))) {
+                @touch($lf);
+            }
+            @chown($lf, self::P('CADDY_USER', 'caddy'));
+            @chgrp($lf, self::P('CADDY_GROUP', 'caddy'));
+            @chmod($lf, 0640);
+        }
         $v = self::Run(array(self::P('CADDY_BIN', 'caddy'), 'validate', '--config', self::$caddy . '/Caddyfile', '--adapter', 'caddyfile'), null, 60);
         $r = $v[0] === 0 ? self::Run(array('systemctl', 'reload', self::P('CADDY_SERVICE', 'caddy')), null, 60) : $v;
         if ($r[0] !== 0) {

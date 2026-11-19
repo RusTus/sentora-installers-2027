@@ -550,22 +550,23 @@ sslverify=1
 REPO_EOF
     fi
     rm -rf "$tmp"
-    # (local only before the package's first start: it does not contact CrowdSec's servers even once; a stand-in
-    # registration file keeps its install script from registering, which it would refuse to do and so fail)
-    local fresh=
-    if [ ! -f /etc/crowdsec/config.yaml.local ]; then
-        fresh=1
-        install -d -m 755 /etc/crowdsec
-        printf "# Written by Sentora Docker Node: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n" > /etc/crowdsec/config.yaml.local
-        [ -e /etc/crowdsec/online_api_credentials.yaml ] || printf "# Sentora Docker Node: not registered (local only)\n" > /etc/crowdsec/online_api_credentials.yaml
-    fi
-    if ! run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables; then
-        # (its install script still wanted to register: let it, once, as the package does by itself; the
-        # registration is removed and local only set again right after)
-        [ -n "$fresh" ] && [ "$PKG" = apt ] || return 1
-        rm -f /etc/crowdsec/config.yaml.local /etc/crowdsec/online_api_credentials.yaml
-        run dpkg --configure -a || return 1
-        note "CrowdSec's package registered with its servers once while installing (no attack data); that registration is removed now."
+    # Local only before CrowdSec's first start, so it never pulls anything from CrowdSec's servers. On AlmaLinux,
+    # Rocky, RHEL and Fedora it is set before the package, which then does not contact them at all. Debian's and
+    # Ubuntu's package registers with them while installing and fails without that (found by the node test,
+    # 2026-11-19): there it registers once (a machine account, no attack data), with its services kept from
+    # starting meanwhile (policy-rc.d), and the registration is removed and local only set before it first runs.
+    if [ "$PKG" = apt ]; then
+        local policy=
+        if [ ! -e /usr/sbin/policy-rc.d ]; then policy=1; printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d; fi
+        run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables; local rc=$?
+        [ -n "$policy" ] && rm -f /usr/sbin/policy-rc.d
+        [ $rc -eq 0 ] || return 1
+    else
+        if [ ! -f /etc/crowdsec/config.yaml.local ]; then
+            install -d -m 755 /etc/crowdsec
+            printf "# Written by Sentora Docker Node: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n" > /etc/crowdsec/config.yaml.local
+        fi
+        run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables || return 1
     fi
     command -v cscli > /dev/null 2>&1
 }
@@ -578,6 +579,7 @@ if crowdsec_install; then
     fi
     # the apps' access log (Caddy writes it, CrowdSec reads it), and what reads it
     install -d -m 750 -o caddy -g "$CADDY_GROUP" /var/log/caddy 2> /dev/null || install -d -m 750 /var/log/caddy
+    [ -e /var/log/caddy/sentora-access.log ] || install -m 640 -o caddy -g "$CADDY_GROUP" /dev/null /var/log/caddy/sentora-access.log 2> /dev/null
     if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
         run semanage fcontext -a -t httpd_log_t '/var/log/caddy(/.*)?' || run semanage fcontext -m -t httpd_log_t '/var/log/caddy(/.*)?'
         restorecon -R /var/log/caddy > /dev/null 2>&1
