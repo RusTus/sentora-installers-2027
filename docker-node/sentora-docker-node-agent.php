@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '118';
+    const VERSION = '119';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -729,6 +729,152 @@ class snode
         return self::P('CADDY_WAF', '') === '1';
     }
 
+    // ----- blocking repeat attackers (CrowdSec, Docker Hosting 139, owner 2026-11-19: local by default) -----
+
+    /** Whether this node has CrowdSec (the installer's, with its nftables blocker). */
+    static function Crowdsec()
+    {
+        return self::P('CROWDSEC', '') === '1';
+    }
+
+    static function CsDir()
+    {
+        return getenv('SNODE_CSDIR') ?: '/etc/crowdsec';
+    }
+
+    /** Whether this node shares with CrowdSec's community (its central API on, with this node registered). */
+    static function CsSharing()
+    {
+        $local = (string) @file_get_contents(self::CsDir() . '/config.yaml.local');
+        return is_file(self::CsDir() . '/online_api_credentials.yaml') && strpos($local, 'online_client: null') === false;
+    }
+
+    /**
+     * An address or a range for the safe list ('' when it is neither).
+     */
+    static function CsAddr($a)
+    {
+        $a = trim((string) $a);
+        if (filter_var($a, FILTER_VALIDATE_IP) !== false) {
+            return $a;
+        }
+        if (preg_match('#^([0-9a-fA-F:.]+)/(\d{1,3})$#', $a, $m) && filter_var($m[1], FILTER_VALIDATE_IP) !== false
+            && (int) $m[2] <= (strpos($m[1], ':') !== false ? 128 : 32) && (int) $m[2] >= (strpos($m[1], ':') !== false ? 16 : 8)) {
+            return $m[1] . '/' . (int) $m[2];
+        }
+        return '';
+    }
+
+    /**
+     * The panel's settings for CrowdSec: sharing on or off, and the safe list (never blocked; the panel's own
+     * addresses always on it). Sharing off: its central API switched off and this node's registration there
+     * removed; on: registered and switched on. CrowdSec is restarted with them.
+     */
+    static function CsSettings(array $d)
+    {
+        if (!self::Crowdsec()) {
+            return array(false, 'this node has no CrowdSec');
+        }
+        $safe = array();
+        foreach (isset($d['safe']) && is_array($d['safe']) ? array_slice($d['safe'], 0, 200) : array() as $a) {
+            $a = self::CsAddr($a);
+            if ($a === '') {
+                return array(false, 'refused: not an address');
+            }
+            $safe[$a] = true;
+        }
+        // (the panel's own addresses: never blocked)
+        $host = (string) parse_url((string) (self::$cfg['panel'] ?? ''), PHP_URL_HOST);
+        if ($host !== '') {
+            foreach (filter_var($host, FILTER_VALIDATE_IP) !== false ? array($host) : (array) @gethostbynamel($host) as $ip) {
+                $safe[$ip] = true;
+            }
+            foreach (filter_var($host, FILTER_VALIDATE_IP) !== false ? array() : (array) @dns_get_record($host, DNS_AAAA) as $r) {
+                if (isset($r['ipv6']) && filter_var($r['ipv6'], FILTER_VALIDATE_IP) !== false) {
+                    $safe[$r['ipv6']] = true;
+                }
+            }
+        }
+        $ips = $cidrs = '';
+        foreach (array_keys($safe) as $a) {
+            if (strpos($a, '/') !== false) {
+                $cidrs .= "    - \"" . $a . "\"\n";
+            } else {
+                $ips .= "    - \"" . $a . "\"\n";
+            }
+        }
+        $f = self::CsDir() . '/parsers/s02-enrich/sentora-safe-list.yaml';
+        @mkdir(dirname($f), 0755, true);
+        self::WriteFile($f, "# Written by the Sentora Docker Node agent from the panel (Nodes > Manage): addresses never blocked.\n"
+            . "name: sentora/safe-list\ndescription: \"Sentora: the panel's and the administrators' addresses, never blocked\"\nwhitelist:\n  reason: \"Sentora safe list\"\n"
+            . ($ips !== '' ? "  ip:\n" . $ips : '') . ($cidrs !== '' ? "  cidr:\n" . $cidrs : '') . ($ips === '' && $cidrs === '' ? "  ip: []\n" : ''), 0644);
+        $share = !empty($d['share']);
+        $cred = self::CsDir() . '/online_api_credentials.yaml';
+        if ($share) {
+            self::WriteFile(self::CsDir() . '/config.yaml.local', "# Written by the Sentora Docker Node agent: sharing with CrowdSec's community is on (the panel's switch).\n", 0644);
+            if (!is_file($cred) || filesize($cred) < 20) {
+                $r = self::Run(array('cscli', 'capi', 'register', '-f', $cred), null, 60);
+                if ($r[0] !== 0) {
+                    return array(false, 'CrowdSec: could not register with its community: ' . self::Tail($r[1]));
+                }
+            }
+        } else {
+            // (local: nothing goes to CrowdSec's servers; the registration the package made at install is removed)
+            self::WriteFile(self::CsDir() . '/config.yaml.local', "# Written by the Sentora Docker Node agent: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n", 0644);
+            @unlink($cred);
+        }
+        $r = self::Run(array('systemctl', 'restart', self::P('CROWDSEC_SERVICE', 'crowdsec')), null, 120);
+        self::$csAt = 0;
+        return $r[0] === 0 ? array(true, 'CrowdSec: ' . ($share ? 'shares with its community' : 'local only') . ', ' . count($safe) . ' address(es) on the safe list')
+            : array(false, 'CrowdSec did not start again: ' . self::Tail($r[1]));
+    }
+
+    /** @var int when CsInfo last asked CrowdSec */
+    static $csAt = 0;
+    /** @var array */
+    static $cs = array();
+
+    /**
+     * CrowdSec's state for the panel (asked at most once a minute): on, sharing, the safe list's size, and the
+     * addresses it blocks now (up to 100: the address, why, and for how much longer).
+     */
+    static function CsInfo()
+    {
+        if (!self::Crowdsec()) {
+            return array('on' => 0);
+        }
+        if (time() - self::$csAt < 60 && self::$cs) {
+            return self::$cs;
+        }
+        self::$csAt = time();
+        $act = self::Run(array('systemctl', 'is-active', self::P('CROWDSEC_SERVICE', 'crowdsec')), null, 10);
+        $r = self::Run(array('cscli', 'decisions', 'list', '-o', 'json', '--limit', '200'), null, 30);
+        $j = json_decode(trim($r[1]), true);
+        $blocked = array();
+        $count = 0;
+        foreach (is_array($j) ? $j : array() as $alert) {
+            foreach (isset($alert['decisions']) && is_array($alert['decisions']) ? $alert['decisions'] : array() as $dc) {
+                if (($dc['type'] ?? '') !== 'ban' || !isset($dc['value'])) {
+                    continue;
+                }
+                $count++;
+                if (count($blocked) < 100) {
+                    $left = 0;
+                    if (preg_match_all('/(\d+(?:\.\d+)?)(h|m|s)/', (string) ($dc['duration'] ?? ''), $mm, PREG_SET_ORDER)) {
+                        foreach ($mm as $x) {
+                            $left += (int) round((float) $x[1] * array('h' => 3600, 'm' => 60, 's' => 1)[$x[2]]);
+                        }
+                    }
+                    $blocked[] = array('ip' => (string) $dc['value'], 'why' => (string) ($dc['scenario'] ?? ($alert['scenario'] ?? '')), 'left' => $left);
+                }
+            }
+        }
+        $safe = (string) @file_get_contents(self::CsDir() . '/parsers/s02-enrich/sentora-safe-list.yaml');
+        self::$cs = array('on' => trim($act[1]) === 'active' ? 1 : 2, 'share' => self::CsSharing() ? 1 : 0, 'safe' => substr(md5($safe), 0, 12),
+            'count' => $count, 'blocked' => $blocked);
+        return self::$cs;
+    }
+
     /** Trivy on this node (the installer's, a pinned release), or '' when this node has none. */
     static function Trivy()
     {
@@ -1077,6 +1223,17 @@ class snode
                     return array(false, 'refused: bad email');
                 }
                 return self::Settings($email, !empty($d['local_certs']));
+            case 'crowdsec':
+                return self::CsSettings($d);
+            case 'unblock':
+                // (an address CrowdSec blocks, let through again)
+                $ip = isset($d['ip']) && is_string($d['ip']) && filter_var($d['ip'], FILTER_VALIDATE_IP) !== false ? $d['ip'] : '';
+                if ($ip === '' || !self::Crowdsec()) {
+                    return array(false, $ip === '' ? 'refused: not an address' : 'this node has no CrowdSec');
+                }
+                $r = self::Run(array('cscli', 'decisions', 'delete', '--ip', $ip), null, 60);
+                self::$csAt = 0;
+                return array($r[0] === 0, 'unblocked ' . $ip . ': ' . self::Tail($r[1]));
             case 'network':
                 // the customers (their Linux users) whose apps may reach the local network; kept here, applied at once
                 $users = array();
@@ -1322,9 +1479,14 @@ class snode
                     . "\t\t\tInclude @owasp_crs/*.conf\n\t\t\tSecRuleEngine " . $mode . "\n\t\t\tSecRequestBodyLimitAction ProcessPartial\n\t\t\tSecResponseBodyAccess Off\n\t\t\tSecAuditEngine Off\n\t\t`\n\t}\n}\n";
             }
         }
+        $log = self::Crowdsec();
+        if ($log) {
+            // the apps' access log, which CrowdSec reads (rolled at 20 MB, 3 kept: it can not fill the disk)
+            $t .= "\n(sentora_log) {\n\tlog {\n\t\toutput file " . self::P('CADDY_LOG', '/var/log/caddy/sentora-access.log') . " {\n\t\t\troll_size 20MiB\n\t\t\troll_keep 3\n\t\t}\n\t\tformat json\n\t}\n}\n";
+        }
         ksort($s['containers']);
         foreach ($s['containers'] as $cid => $c) {
-            $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n";
+            $t .= "\n# container " . (int) $cid . " (" . $c['user'] . ")\n" . $c['domain'] . " {\n\tencode zstd gzip\n" . ($log ? "\timport sentora_log\n" : '');
             if (!(int) $c['public'] && $c['auth'] !== '') {
                 // (Caddy before 2.8 wants the hash base64-encoded, under its older name)
                 $t .= self::CaddyOld() ? "\tbasicauth {\n\t\tsetup " . base64_encode($c['auth']) . "\n\t}\n" : "\tbasic_auth {\n\t\tsetup " . $c['auth'] . "\n\t}\n";
@@ -1384,7 +1546,8 @@ class snode
         return array('cpus' => max(1, (int) $cpus), 'mem_mb' => $mem, 'disk_total_mb' => (int) (disk_total_space($home) / 1048576), 'disk_free_mb' => (int) (disk_free_space($home) / 1048576),
             'os' => $os, 'kernel' => php_uname('r'), 'podman' => $p[0] === 0 ? trim(str_replace('podman version', '', $p[1])) : 'missing',
             'caddy' => $c[0] === 0 ? strtok(trim($c[1]), ' ') : 'missing', 'agent' => self::VERSION, 'selinux' => $se[0] === 0 ? trim($se[1]) : '',
-            'apparmor' => is_file('/sys/module/apparmor/parameters/enabled') ? (trim((string) @file_get_contents('/sys/module/apparmor/parameters/enabled')) === 'Y' ? 'on' : 'off') : '')
+            'apparmor' => is_file('/sys/module/apparmor/parameters/enabled') ? (trim((string) @file_get_contents('/sys/module/apparmor/parameters/enabled')) === 'Y' ? 'on' : 'off') : '',
+            'crowdsec' => self::CsInfo())
             + self::SysInfo();
     }
 

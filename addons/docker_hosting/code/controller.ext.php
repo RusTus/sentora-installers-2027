@@ -680,6 +680,11 @@ class module_controller extends ctrl_module
             $what = self::Post('inAutoagent') === '1' ? 'autoagent-on' : 'autoagent-off';
         } elseif ($what === 'trusted') {
             $what = self::Post('inTrusted') === '1' ? 'trusted-on' : 'trusted-off';
+        } elseif ($what === 'csshare') {
+            $what = self::Post('inCsshare') === '1' ? 'cs-share-on' : 'cs-share-off';
+        } elseif ($what === 'cs-unblock') {
+            self::Done(dh::CsUnblock((int) self::Int('inId'), self::Post('inIp')), 'The node lets that address through again the next time it calls (a few seconds).');
+            return;
         }
         $texts = array('node-update' => 'The node updates itself the next time it calls (a few seconds); it is back within a few minutes, its apps keep running.',
             'sys-security' => 'The node installs its security updates now; the result shows here when it is done.',
@@ -689,7 +694,9 @@ class module_controller extends ctrl_module
             'autosec-on' => 'Security updates now install by themselves at night.', 'autosec-off' => 'Security updates now wait for you.',
             'autoagent-on' => 'Node updates now install by themselves at night.', 'autoagent-off' => 'Node updates now wait for you (Update now).',
             'trusted-on' => 'Trusted: new apps on this node start with Extra isolation off (each app\'s Settings can still turn it on).',
-            'trusted-off' => 'Not trusted: new apps on this node start with every guard on.');
+            'trusted-off' => 'Not trusted: new apps on this node start with every guard on.',
+            'cs-share-on' => 'The node shares the addresses that attack it with CrowdSec\'s community and gets its list of known attackers (it takes a moment).',
+            'cs-share-off' => 'The node keeps to itself again: nothing is shared with CrowdSec\'s servers.');
         self::Done(dh::NodeAct((int) self::Int('inId'), $what, self::Me()), isset($texts[$what]) ? $texts[$what] : 'Done.');
     }
 
@@ -790,6 +797,20 @@ class module_controller extends ctrl_module
         $a = dh::Account((int) self::Int('inAcc'));
         self::Done(dh::SetLan(self::Me(), (int) self::Int('inAcc'), $on), $on ? '%s\'s apps may reach the local network now (the nodes take it within a few seconds).'
             : '%s\'s apps can no longer reach the local network (the nodes take it within a few seconds).', array($a ? $a['ac_user_vc'] : ''));
+    }
+
+    /**
+     * A node's CrowdSec safe list (administrators).
+     *
+     * @return void
+     */
+    static function doNodeCsSafe()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        self::Done(dh::CsSafe((int) self::Int('inId'), isset($_POST['inSafe']) && is_string($_POST['inSafe']) ? $_POST['inSafe'] : ''), 'Saved; the node never blocks these addresses from the next time it calls.');
     }
 
     /**
@@ -1996,6 +2017,52 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * A node's CrowdSec: what it blocks now (with Unblock), sharing with CrowdSec's community (off unless an
+     * administrator switches it on), and the safe list.
+     *
+     * @param int $id
+     * @param array $n
+     * @param array $i Its report.
+     * @return string
+     */
+    static function NodeCrowdsec($id, array $n, array $i)
+    {
+        $out = '<h4>' . self::t('Blocking repeat attackers (CrowdSec)') . '</h4>';
+        if ((int) $i['cs_on'] === 0) {
+            return $out . '<p>' . self::t('Not on this node yet: it comes with the node\'s next update (Update node above).') . '</p>';
+        }
+        $cs = dh::CsWanted($n);
+        $out .= '<p>' . ((int) $i['cs_on'] === 1
+                ? '<span class="dh-pill is-ok">' . self::t('Runs') . '</span> ' . self::t('An address that keeps attacking the apps (probing, scanning, the web firewall refusing it again and again) or keeps guessing SSH passwords is blocked at the node\'s firewall for a while.')
+                : '<span class="dh-pill is-bad">' . self::t('Installed, but not running') . '</span> ' . self::t('See journalctl -u crowdsec on the node.')) . '</p>'
+            . self::Switch($id, 'csshare', (int) $cs['share'] === 1, 'Share with the CrowdSec community',
+                '(off: nothing leaves the node. On: the addresses that attack it, with what they tried and when, go to CrowdSec\'s servers in France, and the node gets their list of known attackers, blocked before they try. Say so in your privacy terms.)');
+        if ((int) $i['cs_share'] !== (int) $cs['share']) {
+            $out .= '<p class="dh-muted">' . self::t('The node takes this the next time it calls.') . '</p>';
+        }
+        // what it blocks now
+        $out .= '<p>' . ((int) $i['cs_count'] === 0 ? self::t('It blocks no address now.') : self::t($i['cs_count'] === 1 ? 'It blocks 1 address now.' : 'It blocks %s addresses now.', array((int) $i['cs_count']))) . '</p>';
+        if ($i['cs_blocked']) {
+            $out .= '<div class="dh-blocked">';
+            foreach ($i['cs_blocked'] as $b) {
+                $left = (int) $b['left'];
+                $out .= '<div class="dh-blocked-row"><code>' . self::h($b['ip']) . '</code><span class="dh-muted">' . self::h(preg_replace('#^[a-z0-9_-]+/#', '', $b['why']))
+                    . ($left > 0 ? ', ' . self::t('for %s more', array($left >= 3600 ? floor($left / 3600) . ' h' : max(1, (int) ceil($left / 60)) . ' min')) : '') . '</span>'
+                    . '<form class="dh-inline" method="post" action="./?module=docker_hosting&amp;tab=nodes&amp;action=NodeAct">' . runtime_csfr::Token()
+                    . '<input type="hidden" name="inId" value="' . (int) $id . '"><input type="hidden" name="inWhat" value="cs-unblock"><input type="hidden" name="inIp" value="' . self::h($b['ip']) . '">'
+                    . '<button class="btn btn-sm btn-default" type="submit">' . self::t('Unblock') . '</button></form></div>';
+            }
+            $out .= '</div>';
+        }
+        // the safe list
+        $out .= '<form method="post" action="./?module=docker_hosting&amp;tab=nodes&amp;action=NodeCsSafe">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $id . '">'
+            . '<label class="dh-field"><span>' . self::t('Never blocked (safe list)') . '</span><textarea class="form-control" name="inSafe" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24">' . self::h(implode("\n", $cs['safe'])) . '</textarea>'
+            . '<small>' . self::t('Your own addresses and your office\'s, one per line (a range like 198.51.100.0/24 too): CrowdSec never blocks them, so a mistyped password can not lock you out. The panel\'s own address is always on it.') . '</small></label>'
+            . '<button class="btn btn-sm btn-default" type="submit">' . self::t('Save and send to the node') . '</button></form>';
+        return $out;
+    }
+
+    /**
      * A linked node's management: updates, restart, settings, address.
      *
      * @param int $id
@@ -2034,6 +2101,7 @@ class module_controller extends ctrl_module
                 'Restart this node? Its apps are down for a minute or two and start again by themselves.')
             . self::Switch($id, 'autosec', (int) $n['nd_autosec_in'] === 1, 'Nightly security updates', '(installed by themselves between 03:00 and 05:00)')
             . self::NodeApps($id)
+            . self::NodeCrowdsec($id, $n, $i)
             . '<h4>' . self::t('Certificates') . '</h4>'
             . '<form method="post" action="./?module=docker_hosting&amp;tab=nodes&amp;action=NodeSettings">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . $id . '">'
             . '<label class="dh-check"><input type="radio" name="inLocal" value="0"' . ($st['local_certs'] ? '' : ' checked') . '> <span>' . self::t('Let\'s Encrypt (for apps on real domains: the app\'s name must point to this node from the internet, and ports 80 and 443 must reach it)') . '</span></label>'

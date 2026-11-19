@@ -91,6 +91,10 @@ function lastjob($cid)
 {
     return row("SELECT * FROM x_dh_jobs WHERE jb_ct_fk = :c ORDER BY jb_id_pk DESC LIMIT 1", array(':c' => $cid));
 }
+function lastjobnode($node)
+{
+    return row("SELECT * FROM x_dh_jobs WHERE jb_node_fk = :n AND jb_ct_fk = 0 ORDER BY jb_id_pk DESC LIMIT 1", array(':n' => $node));
+}
 
 chdir($T . '/root');
 require $T . '/root/dryden/loader.inc.php';
@@ -1377,7 +1381,7 @@ file_put_contents($nb . '/caddy/Caddyfile', "import sentora/*.caddy\n");
 file_put_contents($nb . '/fake/resolv.conf', "nameserver 192.168.1.1\n");
 $envB = 'FAKE_DIR=' . escapeshellarg($nb . '/fake') . ' SNODE_ETC=' . escapeshellarg($nb . '/etc') . ' SNODE_STATE=' . escapeshellarg($nb . '/state') . ' SNODE_CADDY=' . escapeshellarg($nb . '/caddy')
     . ' SNODE_RUN=' . escapeshellarg($nb . '/run') . ' SNODE_HOME=' . escapeshellarg($nb . '/home') . ' SNODE_SUBID=' . escapeshellarg($nb . '/sub') . ' SNODE_KEYFILE=' . escapeshellarg($nb . '/key.txt')
-    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' SNODE_PROC=' . escapeshellarg($nb . '/fake/proc') . ' SNODE_SCANDIR=' . escapeshellarg($nb . '/scan') . ' ';
+    . ' SNODE_PASSWD=' . escapeshellarg($nb . '/fake/passwd') . ' SNODE_RESOLV=' . escapeshellarg($nb . '/fake/resolv.conf') . ' SNODE_RUNMARK=' . escapeshellarg($nb . '/runmark') . ' SNODE_PROC=' . escapeshellarg($nb . '/fake/proc') . ' SNODE_SCANDIR=' . escapeshellarg($nb . '/scan') . ' SNODE_CSDIR=' . escapeshellarg($nb . '/cs') . ' ';
 $agentB = function ($args) use ($envB, $T) {
     return (string) shell_exec($envB . 'PATH=' . escapeshellarg($T . '/fakebin') . ':$PATH php ' . escapeshellarg(getenv('DH_AGENT')) . ' ' . $args . ' 2>&1; echo "exit=$?"');
 };
@@ -1611,6 +1615,72 @@ check(dh::Guards(dh::Container($gid))['waf'] === 'watch' && dh::Get('waf_from') 
 dh::SetGuards(1, $gid, array('waf' => 'on'));
 $agentB('once');
 $agentB('once');
+
+section('repeat attackers (139): CrowdSec');
+$csd = $nb . '/cs';
+@mkdir($csd, 0755, true);
+// (the installer's: local only, the registration the package made removed)
+file_put_contents($csd . '/config.yaml.local', "api:\n  server:\n    online_client: null\n");
+$nrow = function () use ($bid) { return dh::Node((int) $bid); };
+$agentB('once');
+check(dh::Info($nrow())['cs_on'] === 0, 'a node without CrowdSec says so');
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $bid));
+check(strpos($r['html'], 'Blocking repeat attackers (CrowdSec)') !== false && strpos($r['html'], 'comes with the node') !== false, 'its page says it comes with the node\'s update');
+file_put_contents($nb . '/etc/platform.conf', "CROWDSEC=1\n", FILE_APPEND);
+file_put_contents($gfake . '/calls.log', '');
+$agentB('once');
+$agentB('once');
+$agentB('once');
+$i = dh::Info($nrow());
+check($i['cs_on'] === 1 && $i['cs_share'] === 0, 'the node reports it runs, local only', json_encode($i));
+$sl = (string) @file_get_contents($csd . '/parsers/s02-enrich/sentora-safe-list.yaml');
+check(strpos($sl, "whitelist:\n  reason: \"Sentora safe list\"\n  ip:\n    - \"127.0.0.1\"") !== false, 'the panel sent its settings by itself: the safe list has the panel\'s own address', $sl);
+check(strpos((string) @file_get_contents($csd . '/config.yaml.local'), 'online_client: null') !== false && !is_file($csd . '/online_api_credentials.yaml')
+    && strpos($gcalls(), 'cscli capi register') === false, 'local only: its central API off, nothing registered', $gcalls());
+check(strpos($sitesB(), "(sentora_log) {\n\tlog {\n\t\toutput file /var/log/caddy/sentora-access.log {\n\t\t\troll_size 20MiB\n\t\t\troll_keep 3") !== false
+    && strpos($sitesB(), "\tencode zstd gzip\n\timport sentora_log\n") !== false, 'the apps\' access log for it (rolled, it can not fill the disk)', $sitesB());
+// sharing: only an administrator, and only when switched on
+$r = req(1, 'NodeAct', array('inId' => (string) $bid, 'inWhat' => 'csshare', 'inCsshare' => '1'));
+check(strpos($r['text'], 'shares the addresses') !== false && lastjobnode($bid)['jb_action_vc'] === 'crowdsec', 'an administrator switches sharing on', $r['text']);
+file_put_contents($gfake . '/calls.log', '');
+$agentB('once');
+$agentB('once');
+check(strpos($gcalls(), 'cscli capi register -f ' . $csd . '/online_api_credentials.yaml') !== false && strpos((string) @file_get_contents($csd . '/config.yaml.local'), 'online_client: null') === false
+    && strpos($gcalls(), 'systemctl restart crowdsec') !== false && dh::Info($nrow())['cs_share'] === 1, 'shared: registered with CrowdSec, its central API on, CrowdSec restarted', $gcalls());
+req(1, 'NodeAct', array('inId' => (string) $bid, 'inWhat' => 'csshare', 'inCsshare' => '0'));
+$agentB('once');
+$agentB('once');
+check(!is_file($csd . '/online_api_credentials.yaml') && strpos((string) @file_get_contents($csd . '/config.yaml.local'), 'online_client: null') !== false && dh::Info($nrow())['cs_share'] === 0,
+    'off again: the registration removed, its central API off');
+// the safe list
+$r = req(1, 'NodeCsSafe', array('inId' => (string) $bid, 'inSafe' => "203.0.113.7\nnot-an-address"));
+check(strpos($r['text'], 'not an address') !== false, 'a wrong line is refused, with what was wrong', $r['text']);
+$r = req(1, 'NodeCsSafe', array('inId' => (string) $bid, 'inSafe' => "203.0.113.7  # my office\n198.51.100.0/24\n2001:db8::1"));
+$agentB('once');
+$sl = (string) @file_get_contents($csd . '/parsers/s02-enrich/sentora-safe-list.yaml');
+check(strpos($sl, '- "203.0.113.7"') !== false && strpos($sl, "cidr:\n    - \"198.51.100.0/24\"") !== false && strpos($sl, '- "2001:db8::1"') !== false && strpos($sl, '- "127.0.0.1"') !== false,
+    'the safe list: addresses, a range, IPv6, and the panel\'s own', $sl);
+$r = req(3, 'NodeCsSafe', array('inId' => (string) $bid, 'inSafe' => "192.0.2.1"));
+check(strpos((string) @file_get_contents($csd . '/parsers/s02-enrich/sentora-safe-list.yaml'), '192.0.2.1') === false && strpos(json_encode(dh::CsWanted($nrow())), '192.0.2.1') === false, 'only an administrator can change it');
+// what it blocks, and Unblock
+file_put_contents($gfake . '/cs-decisions.json', json_encode(array(array('scenario' => 'crowdsecurity/http-probing', 'decisions' => array(
+    array('type' => 'ban', 'value' => '192.0.2.99', 'scenario' => 'crowdsecurity/http-probing', 'duration' => '3h52m10.5s'),
+    array('type' => 'ban', 'value' => '<script>', 'scenario' => 'x', 'duration' => '1h'))))));
+sleep(1);
+$agentB('once');
+$i = dh::Info($nrow());
+check(count($i['cs_blocked']) === 1 && $i['cs_blocked'][0]['ip'] === '192.0.2.99' && $i['cs_blocked'][0]['left'] > 13900, 'the panel sees what it blocks (only real addresses come along)', json_encode($i['cs_blocked']));
+$r = req(1, '', array(), array('tab' => 'nodes', 'manage' => (string) $bid));
+check(strpos($r['html'], '<code>192.0.2.99</code><span class="dh-muted">http-probing, for 3 h more</span>') !== false && strpos($r['html'], 'value="cs-unblock"') !== false, 'its page lists it, with why, how long, and Unblock', '');
+if (getenv('DH_PAGES')) {
+    file_put_contents(getenv('DH_PAGES') . '/node.html', $r['html']);
+}
+$r = req(1, 'NodeAct', array('inId' => (string) $bid, 'inWhat' => 'cs-unblock', 'inIp' => '192.0.2.99'));
+file_put_contents($gfake . '/calls.log', '');
+$agentB('once');
+check(strpos($gcalls(), 'cscli decisions delete --ip 192.0.2.99') !== false, 'Unblock lets it through on the node', $gcalls());
+check(!dh::CsUnblock((int) $bid, '192.0.2.99; rm -rf /'), 'only an address can be unblocked');
+@unlink($gfake . '/cs-decisions.json');
 
 $jobsBefore = (int) val("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_state_vc IN ('queued','sent')");
 $out = shell_exec('DH_SECRET=other-secret-0123456789abcdef DH_REQ=' . escapeshellarg(json_encode(array('me' => 1, 'action' => 'NewKeys'))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');

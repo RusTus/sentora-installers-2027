@@ -138,6 +138,8 @@ class dh
         self::AddColumns('x_dh_containers', array('dc_scan_tx' => "TEXT NULL"));
         // (138) the web firewall: what its node says is in force ('on', 'watch', 'off'; 'none': no firewall there)
         self::AddColumns('x_dh_containers', array('dc_waf_vc' => "VARCHAR(10) NOT NULL DEFAULT ''"));
+        // (139) a node's CrowdSec settings from here: sharing with its community, the safe list
+        self::AddColumns('x_dh_nodes', array('nd_cs_tx' => "TEXT NULL"));
         // (apps made before it get Watch: what it would refuse is only written down, so a running customer app
         // is never refused anything overnight; an administrator turns it On)
         if (self::Get('waf_from') === '') {
@@ -1644,7 +1646,17 @@ class dh
         } elseif ($what === 'trusted-on' || $what === 'trusted-off') {
             // (a node of the administrator's own: its new apps start with the guards off; each app can still have them on)
             $zdbh->prepare("UPDATE x_dh_nodes SET nd_trusted_in = :a WHERE nd_id_pk = :n")->execute(array(':a' => $what === 'trusted-on' ? 1 : 0, ':n' => (int) $id));
-                } elseif ($what === 'autoagent-on' || $what === 'autoagent-off') {
+                } elseif ($what === 'cs-share-on' || $what === 'cs-share-off') {
+            // (sharing the addresses that attack this node with CrowdSec's community, and getting its list back)
+            $n = self::Node((int) $id);
+            $cs = $n ? self::CsWanted($n) : null;
+            if (!$cs) {
+                return self::No('No such node.');
+            }
+            $cs['share'] = $what === 'cs-share-on' ? 1 : 0;
+            self::CsSend((int) $id, $cs);
+            self::Log('node-job', 'Node "' . $n['nd_name_vc'] . '": CrowdSec ' . ($cs['share'] ? 'shares with its community' : 'local only'), (int) $by, 0, 0, (int) $id);
+        } elseif ($what === 'autoagent-on' || $what === 'autoagent-off') {
             $zdbh->prepare("UPDATE x_dh_nodes SET nd_autoagent_in = :a WHERE nd_id_pk = :n")->execute(array(':a' => $what === 'autoagent-on' ? 1 : 0, ':n' => (int) $id));
         } elseif (isset($jobs[$what])) {
             $q = $zdbh->prepare("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_node_fk = :n AND jb_ct_fk = 0 AND jb_action_vc = :a AND jb_state_vc IN ('queued','sent')");
@@ -1675,6 +1687,111 @@ class dh
         }
         $j = json_decode((string) $n['nd_settings_tx'], true);
         return array('email' => is_array($j) && isset($j['email']) ? (string) $j['email'] : '', 'local_certs' => is_array($j) && !empty($j['local_certs']) ? 1 : 0);
+    }
+
+    /**
+     * A node's CrowdSec settings as asked here: sharing (off unless an administrator switched it on, owner
+     * 2026-11-19) and the safe list (addresses and ranges never blocked; the node adds the panel's own).
+     *
+     * @param array $n
+     * @return array{share:int, safe:array<int,string>, sent:int}
+     */
+    static function CsWanted(array $n)
+    {
+        $j = json_decode((string) ($n['nd_cs_tx'] ?? ''), true);
+        $j = is_array($j) ? $j : array();
+        $safe = array();
+        foreach (isset($j['safe']) && is_array($j['safe']) ? $j['safe'] : array() as $a) {
+            if (is_string($a) && self::CsAddr($a) !== '') {
+                $safe[] = self::CsAddr($a);
+            }
+        }
+        return array('share' => !empty($j['share']) ? 1 : 0, 'safe' => $safe, 'sent' => !empty($j['sent']) ? 1 : 0);
+    }
+
+    /**
+     * An address or a range (CIDR) for the safe list, written as the node writes it ('' when it is neither).
+     *
+     * @param string $a
+     * @return string
+     */
+    static function CsAddr($a)
+    {
+        $a = trim((string) $a);
+        if (filter_var($a, FILTER_VALIDATE_IP) !== false) {
+            return $a;
+        }
+        if (preg_match('#^([0-9a-fA-F:.]+)/(\d{1,3})$#', $a, $m) && filter_var($m[1], FILTER_VALIDATE_IP) !== false
+            && (int) $m[2] <= (strpos($m[1], ':') !== false ? 128 : 32) && (int) $m[2] >= (strpos($m[1], ':') !== false ? 16 : 8)) {
+            return $m[1] . '/' . (int) $m[2];
+        }
+        return '';
+    }
+
+    /**
+     * Keep a node's CrowdSec settings and send them to it (one waiting job at a time: the newest wins).
+     *
+     * @param int $id
+     * @param array $cs
+     * @return void
+     */
+    static function CsSend($id, array $cs)
+    {
+        global $zdbh;
+        $zdbh->prepare("UPDATE x_dh_nodes SET nd_cs_tx = :c WHERE nd_id_pk = :n")
+            ->execute(array(':c' => json_encode(array('share' => (int) $cs['share'], 'safe' => array_values($cs['safe']), 'sent' => 1)), ':n' => (int) $id));
+        $zdbh->prepare("DELETE FROM x_dh_jobs WHERE jb_node_fk = :n AND jb_ct_fk = 0 AND jb_action_vc = 'crowdsec' AND jb_state_vc = 'queued'")->execute(array(':n' => (int) $id));
+        self::Queue((int) $id, 0, 'crowdsec', array('share' => (int) $cs['share'], 'safe' => array_values($cs['safe'])));
+    }
+
+    /**
+     * Change a node's safe list (administrators; one address or range per line, # starts a note).
+     *
+     * @param int $id
+     * @param string $text
+     * @return bool (dh::$why when not)
+     */
+    static function CsSafe($id, $text)
+    {
+        $n = self::Node((int) $id);
+        if (!$n) {
+            return self::No('No such node.');
+        }
+        $safe = array();
+        foreach (preg_split('/[\r\n,]+/', (string) $text) as $l) {
+            $l = trim((string) preg_replace('/#.*$/', '', $l));
+            if ($l === '') {
+                continue;
+            }
+            $a = self::CsAddr($l);
+            if ($a === '') {
+                return self::No(sprintf('"%s" is not an address or a range (like 203.0.113.7 or 203.0.113.0/24).', mb_substr($l, 0, 60)));
+            }
+            $safe[$a] = true;
+        }
+        if (count($safe) > 200) {
+            return self::No('At most 200 addresses or ranges.');
+        }
+        $cs = self::CsWanted($n);
+        $cs['safe'] = array_keys($safe);
+        self::CsSend((int) $id, $cs);
+        return true;
+    }
+
+    /**
+     * Let an address CrowdSec blocks on a node through again.
+     *
+     * @param int $id
+     * @param string $ip
+     * @return bool (dh::$why when not)
+     */
+    static function CsUnblock($id, $ip)
+    {
+        if (!self::Node((int) $id) || filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return self::No('Not an address.');
+        }
+        self::Queue((int) $id, 0, 'unblock', array('ip' => (string) $ip));
+        return true;
     }
 
     /**
@@ -3410,6 +3527,20 @@ class dh
         foreach (array('os', 'kernel', 'podman', 'caddy', 'agent', 'selinux', 'apparmor') as $k) {
             $out[$k] = isset($i[$k]) && is_string($i[$k]) ? mb_substr(preg_replace('/[\x00-\x1F\x7F]/', '', $i[$k]), 0, 100) : '';
         }
+        // (agent 119: CrowdSec: 0 none, 1 runs, 2 installed but not running; what it blocks now)
+        // (from the node's report, or as kept here once cleaned)
+        $cs = isset($i['crowdsec']) && is_array($i['crowdsec']) ? $i['crowdsec']
+            : array('on' => $i['cs_on'] ?? 0, 'share' => $i['cs_share'] ?? 0, 'count' => $i['cs_count'] ?? 0, 'blocked' => $i['cs_blocked'] ?? array());
+        $out['cs_on'] = isset($cs['on']) && in_array((int) $cs['on'], array(0, 1, 2), true) ? (int) $cs['on'] : 0;
+        $out['cs_share'] = !empty($cs['share']) ? 1 : 0;
+        $out['cs_count'] = isset($cs['count']) && is_numeric($cs['count']) ? max(0, (int) $cs['count']) : 0;
+        $out['cs_blocked'] = array();
+        foreach (isset($cs['blocked']) && is_array($cs['blocked']) ? array_slice($cs['blocked'], 0, 100) : array() as $b) {
+            if (is_array($b) && isset($b['ip']) && is_string($b['ip']) && filter_var($b['ip'], FILTER_VALIDATE_IP) !== false) {
+                $out['cs_blocked'][] = array('ip' => $b['ip'], 'why' => isset($b['why']) && is_string($b['why']) && preg_match('#^[A-Za-z0-9_./-]{0,100}$#', $b['why']) ? $b['why'] : '',
+                    'left' => isset($b['left']) && is_numeric($b['left']) ? max(0, (int) $b['left']) : 0);
+            }
+        }
         return $out;
     }
 
@@ -3431,6 +3562,18 @@ class dh
         $info = isset($d['info']) ? self::CleanInfo($d['info']) : self::Info($n);
         $zdbh->prepare("UPDATE x_dh_nodes SET nd_seen_in = :t, nd_ip_vc = :i, nd_info_tx = :f WHERE nd_id_pk = :n")
             ->execute(array(':t' => time(), ':i' => self::Ip($ip), ':f' => json_encode($info), ':n' => $node));
+        // CrowdSec on the node: the panel's settings sent once it has it (the safe list with the panel's own address
+        // first of all), and again when its sharing differs from the panel's switch (a node set up again)
+        if ($info['cs_on'] > 0) {
+            $cs = self::CsWanted($n);
+            if (!$cs['sent'] || $info['cs_share'] !== $cs['share']) {
+                $w = $zdbh->prepare("SELECT COUNT(*) FROM x_dh_jobs WHERE jb_node_fk = :n AND jb_action_vc = 'crowdsec' AND jb_state_vc IN ('queued','sent')");
+                $w->execute(array(':n' => $node));
+                if ((int) $w->fetchColumn() === 0) {
+                    self::CsSend($node, $cs);
+                }
+            }
+        }
         // the node lets other customers reach the local network than the panel says (a node set up
         // again, or a change it missed): the list is sent again
         if (is_array($info['cfg_lan_users']) && $info['cfg_lan_users'] !== self::LanUsers()) {

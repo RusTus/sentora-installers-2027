@@ -509,6 +509,89 @@ else
 fi
 systemctl daemon-reload
 
+ui_step "Blocking repeat attackers (CrowdSec)"
+# CrowdSec reads the apps' access log (Caddy), SSH and the system's logs, and an address that keeps attacking is
+# blocked at the node's firewall (its nftables blocker) for a while (Docker Hosting 139, owner 2026-11-19).
+# Local by default: nothing is shared with CrowdSec's servers until an administrator switches sharing on in the
+# panel. From CrowdSec's own signed repository on every system (Debian and Ubuntu carry a 2023 version only,
+# AlmaLinux, Rocky, RHEL and Fedora none): its key's fingerprint is checked here.
+CROWDSEC_KEY_FPR=6A89E3C2303A901A889971D3376ED5326E93CD0C
+crowdsec_install() {
+    local tmp fpr
+    if command -v cscli > /dev/null 2>&1 && [ -x /usr/bin/crowdsec ] && { [ -f /etc/apt/sources.list.d/sentora-crowdsec.list ] || [ -f /etc/yum.repos.d/sentora-crowdsec.repo ]; }; then
+        note "CrowdSec is in place ($(cscli version 2> /dev/null | sed -n 's/^version: //p'))."
+        return 0
+    fi
+    tmp=$(mktemp -d)
+    if [ "$PKG" = apt ]; then
+        command -v gpg > /dev/null 2>&1 || run $PKG_INSTALL gnupg || { rm -rf "$tmp"; return 1; }
+        curl -fsSL --proto =https "https://packagecloud.io/crowdsec/crowdsec/gpgkey" -o "$tmp/key.asc" || { rm -rf "$tmp"; return 1; }
+        fpr=$(gpg --show-keys --with-colons "$tmp/key.asc" 2> /dev/null | awk -F: '$1 == "fpr" {print $10; exit}')
+        if [ "$fpr" != "$CROWDSEC_KEY_FPR" ]; then
+            note "CrowdSec's signing key is not the one expected ($fpr): not installed."
+            rm -rf "$tmp"; return 1
+        fi
+        install -d -m 755 /etc/apt/keyrings
+        gpg --dearmor < "$tmp/key.asc" > /etc/apt/keyrings/sentora-crowdsec.gpg && chmod 644 /etc/apt/keyrings/sentora-crowdsec.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/sentora-crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/any/ any main" > /etc/apt/sources.list.d/sentora-crowdsec.list
+        run apt-get -q update
+    else
+        cat > /etc/yum.repos.d/sentora-crowdsec.repo <<'REPO_EOF'
+[sentora-crowdsec]
+name=CrowdSec (for Sentora Docker Node)
+baseurl=https://packagecloud.io/crowdsec/crowdsec/rpm_any/rpm_any/$basearch
+repo_gpgcheck=1
+gpgcheck=1
+enabled=1
+gpgkey=https://packagecloud.io/crowdsec/crowdsec/gpgkey
+       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-C822EDD6B39954A1.pub.gpg
+       https://packagecloud.io/crowdsec/crowdsec/gpgkey/crowdsec-crowdsec-FED78314A2468CCF.pub.gpg
+sslverify=1
+REPO_EOF
+    fi
+    rm -rf "$tmp"
+    run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables || return 1
+    command -v cscli > /dev/null 2>&1
+}
+if crowdsec_install; then
+    # local only: CrowdSec's central API off, and the registration its package made at install removed (it is
+    # made again only when an administrator switches sharing on in the panel)
+    if ! grep -q "sharing with CrowdSec's community is on" /etc/crowdsec/config.yaml.local 2> /dev/null; then
+        printf "# Written by Sentora Docker Node: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n" > /etc/crowdsec/config.yaml.local
+        rm -f /etc/crowdsec/online_api_credentials.yaml
+    fi
+    # the apps' access log (Caddy writes it, CrowdSec reads it), and what reads it
+    install -d -m 750 -o caddy -g "$CADDY_GROUP" /var/log/caddy 2> /dev/null || install -d -m 750 /var/log/caddy
+    if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce)" != Disabled ]; then
+        run semanage fcontext -a -t httpd_log_t '/var/log/caddy(/.*)?' || run semanage fcontext -m -t httpd_log_t '/var/log/caddy(/.*)?'
+        restorecon -R /var/log/caddy > /dev/null 2>&1
+    fi
+    run cscli hub update
+    run cscli collections install crowdsecurity/linux crowdsecurity/sshd crowdsecurity/caddy
+    install -d -m 755 /etc/crowdsec/acquis.d
+    printf "# Written by Sentora Docker Node: the apps' access log (Caddy).\nfilenames:\n  - /var/log/caddy/sentora-access.log\nlabels:\n  type: caddy\n" > /etc/crowdsec/acquis.d/sentora-caddy.yaml
+    # (the safe list: the agent writes it from the panel, with the panel's own addresses)
+    install -d -m 755 /etc/crowdsec/parsers/s02-enrich
+    [ -f /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml ] || printf "name: sentora/safe-list\ndescription: \"Sentora: addresses never blocked\"\nwhitelist:\n  reason: \"Sentora safe list\"\n  ip: []\n" > /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml
+    run systemctl enable crowdsec crowdsec-firewall-bouncer
+    run systemctl restart crowdsec
+    # (the blocker needs its key with CrowdSec's local API: its package makes it when CrowdSec runs)
+    if ! grep -qE '^api_key: *[A-Za-z0-9]' /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml 2> /dev/null; then
+        cscli bouncers delete sentora-firewall > /dev/null 2>&1
+        k=$(cscli bouncers add sentora-firewall -o raw 2> /dev/null)
+        [ -n "$k" ] && sed -i "s#^api_key:.*#api_key: $k#" /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+    fi
+    run systemctl restart crowdsec-firewall-bouncer
+    if systemctl is-active --quiet crowdsec && systemctl is-active --quiet crowdsec-firewall-bouncer; then
+        note "CrowdSec runs ($(cscli version 2> /dev/null | sed -n 's/^version: //p')), local only: repeat attackers are blocked at the node's firewall; nothing is shared."
+        echo "CROWDSEC=1" >> /etc/sentora-docker-node/platform.conf
+    else
+        note "CrowdSec did not start (see journalctl -u crowdsec -u crowdsec-firewall-bouncer): this node blocks no repeat attackers."
+    fi
+else
+    note "CrowdSec could not be installed (see $LOG): this node blocks no repeat attackers."
+fi
+
 ui_step "Web server (Caddy, automatic HTTPS)"
 mkdir -p $CADDY_DIR/sentora
 [ -f $CADDY_DIR/Caddyfile ] && [ ! -f $CADDY_DIR/Caddyfile.before-sentora ] && cp -p $CADDY_DIR/Caddyfile $CADDY_DIR/Caddyfile.before-sentora
@@ -662,6 +745,7 @@ if [ "${1:-}" = --purge ]; then
     userdel sentora-scan 2>/dev/null
     # (the system's own Caddy back: the sites file below no longer uses the web firewall)
     rm -f "/etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf" /usr/local/bin/caddy-sentora
+    rm -f /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml /etc/crowdsec/acquis.d/sentora-caddy.yaml
     echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl daemon-reload; systemctl restart "$CADDY_SERVICE" 2>/dev/null
 fi
 systemctl daemon-reload

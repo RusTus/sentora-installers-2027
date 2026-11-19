@@ -1,0 +1,9 @@
+#!/bin/bash
+# fake cscli: the blocks are what the test puts in $FAKE_DIR/cs-decisions.json (none: nothing blocked)
+echo "cscli $*" >> "$FAKE_DIR/calls.log"
+case "$1 $2" in
+    "decisions list") cat "$FAKE_DIR/cs-decisions.json" 2> /dev/null || echo "null" ;;
+    "decisions delete") echo "1 decision(s) deleted" ;;
+    "capi register") prev=; for a in "$@"; do [ "$prev" = -f ] && printf 'url: https://api.crowdsec.net/\nlogin: x\npassword: y\n' > "$a"; prev=$a; done; echo "registered" ;;
+esac
+exit 0

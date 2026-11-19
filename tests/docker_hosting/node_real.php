@@ -92,9 +92,12 @@ switch ($a[1]) {
     case 'lan':
         echo dh::SetLan(1, (int) $a[2], $a[3] === '1') ? "ok\n" : 'refused: ' . dh::$why . "\n";
         break;
+    case 'unblock':
+        echo dh::CsUnblock(1, $a[2]) ? "ok\n" : 'refused: ' . dh::$why . "\n";
+        break;
     case 'info':
         $n = dh::Node(1);
-        echo $n ? dh::Info($n)[$a[2]] . "\n" : "gone\n";
+        echo $n ? (is_array(dh::Info($n)[$a[2]]) ? json_encode(dh::Info($n)[$a[2]]) : dh::Info($n)[$a[2]]) . "\n" : "gone\n";
         break;
     case 'remove':
         echo dh::RemoveNode(1, 1) ? dh::$why . "\n" : 'refused: ' . dh::$why . "\n";

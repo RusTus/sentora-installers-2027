@@ -225,6 +225,22 @@ C=$(atk "-A 'sqlmap/1.8' https://kuma.example.test/")
 [ "$C" = 403 ] && ok "an attack tool is refused (403)" || bad "attack tool: HTTP $C (want 403)"
 C=$(atk "'https://kuma.example.test/?q=hello%20world'")
 case "$C" in 200|302) ok "a normal request goes through ($C)" ;; *) bad "normal request: HTTP $C" ;; esac
+# repeat attackers (CrowdSec, 139): from CrowdSec's own signed repository, local only (nothing shared, no
+# registration with its servers), reading the apps' access log and SSH; a block reaches the node's firewall
+# and the panel, and Unblock in the panel takes it away
+CS=$(in_box 'systemctl is-active crowdsec crowdsec-firewall-bouncer | tr "\n" " "; echo; cscli version 2> /dev/null | sed -n "s/^version: //p"; [ -e /etc/crowdsec/online_api_credentials.yaml ] && echo registered || echo not-registered; grep -c "online_client: null" /etc/crowdsec/config.yaml.local; cscli collections list -o raw 2> /dev/null | cut -d, -f1 | grep -cE "^crowdsecurity/(caddy|sshd|linux)$"' | tr -d '\r')
+echo "$CS" | sed 's/^/  crowdsec: /'
+echo "$CS" | head -1 | grep -qx "active active " && ok "CrowdSec and its firewall blocker run ($(echo "$CS" | sed -n 2p))" || bad "CrowdSec: $(echo "$CS" | head -1)"
+echo "$CS" | grep -qx not-registered && [ "$(echo "$CS" | sed -n 4p)" = 1 ] && ok "local only: not registered with CrowdSec's servers, its central API off" || bad "not local only: $CS"
+[ "$(echo "$CS" | sed -n 5p)" = 3 ] && ok "it reads the system, SSH and the apps' access log (Caddy)" || bad "collections: $CS"
+wait_for 60 in_box "grep -c '\"$GW\"' /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml" > /dev/null && ok "the panel's address ($GW) is on its safe list (never blocked)" || bad "the panel's address is not on the safe list: $(in_box 'cat /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml')"
+in_box 'test -s /var/log/caddy/sentora-access.log' && ok "the apps' access log is written (CrowdSec reads it)" || bad "no access log: $(in_box 'ls -laZ /var/log/caddy/ 2>&1; journalctl -u caddy --no-pager | grep -i "log" | tail -3')"
+in_box 'cscli decisions add --ip 192.0.2.50 --duration 10m --reason sentora-test' > /dev/null 2>&1
+wait_for 60 in_box 'nft list ruleset 2> /dev/null | grep -c 192.0.2.50' > /dev/null && ok "a block reaches the node's firewall (nftables)" || bad "the block is not in the firewall: $(in_box 'nft list tables; journalctl -u crowdsec-firewall-bouncer --no-pager | tail -5')"
+wait_for 120 bash -c "php '$T/node_real.php' info cs_blocked | grep -o 192.0.2.50" > /dev/null && ok "the panel sees it" || bad "the panel does not see the block: $(panel info cs_blocked)"
+[ "$(panel unblock 192.0.2.50)" = ok ] || bad "Unblock refused"
+for _ in $(seq 1 40); do [ "$(in_box 'nft list ruleset 2> /dev/null | grep -c 192.0.2.50')" = 0 ] && break; sleep 3; done
+[ "$(in_box 'nft list ruleset 2> /dev/null | grep -c 192.0.2.50')" = 0 ] && ok "Unblock in the panel takes it out of the node's firewall" || bad "still blocked after Unblock"
 C=$(in_box "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 http://\$(hostname -I | awk '{print \$1}'):20000/" 2> /dev/null)
 [ "$C" = 000 ] && ok "the container's port is not reachable from outside 127.0.0.1" || bad "port 20000 answers on the public address ($C)"
 # another container (any customer's) must not reach the node's 127.0.0.1: the app behind the setup
