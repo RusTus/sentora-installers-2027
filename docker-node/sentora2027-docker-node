@@ -550,6 +550,11 @@ sslverify=1
 REPO_EOF
     fi
     rm -rf "$tmp"
+    # (local only before the package's first start: it does not contact CrowdSec's servers even once)
+    if [ ! -f /etc/crowdsec/config.yaml.local ]; then
+        install -d -m 755 /etc/crowdsec
+        printf "# Written by Sentora Docker Node: local only, nothing is shared with CrowdSec's servers (the panel's switch).\napi:\n  server:\n    online_client: null\n" > /etc/crowdsec/config.yaml.local
+    fi
     run $PKG_INSTALL crowdsec crowdsec-firewall-bouncer-nftables || return 1
     command -v cscli > /dev/null 2>&1
 }
@@ -572,7 +577,8 @@ if crowdsec_install; then
     printf "# Written by Sentora Docker Node: the apps' access log (Caddy).\nfilenames:\n  - /var/log/caddy/sentora-access.log\nlabels:\n  type: caddy\n" > /etc/crowdsec/acquis.d/sentora-caddy.yaml
     # (the safe list: the agent writes it from the panel, with the panel's own addresses)
     install -d -m 755 /etc/crowdsec/parsers/s02-enrich
-    [ -f /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml ] || printf "name: sentora/safe-list\ndescription: \"Sentora: addresses never blocked\"\nwhitelist:\n  reason: \"Sentora safe list\"\n  ip: []\n" > /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml
+    # (never empty: CrowdSec refuses an empty one; the node's own local addresses are always on it)
+    [ -f /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml ] || printf "name: sentora/safe-list\ndescription: \"Sentora: addresses never blocked\"\nwhitelist:\n  reason: \"Sentora safe list\"\n  ip:\n    - \"127.0.0.1\"\n    - \"::1\"\n" > /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml
     run systemctl enable crowdsec crowdsec-firewall-bouncer
     run systemctl restart crowdsec
     # (the blocker needs its key with CrowdSec's local API: its package makes it when CrowdSec runs)

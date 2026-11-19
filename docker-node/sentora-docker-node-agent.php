@@ -795,6 +795,8 @@ class snode
                 }
             }
         }
+        // (the node's own local addresses always: never blocked anyway, and CrowdSec refuses an empty list)
+        $safe['127.0.0.1'] = $safe['::1'] = true;
         $ips = $cidrs = '';
         foreach (array_keys($safe) as $a) {
             if (strpos($a, '/') !== false) {
@@ -807,7 +809,7 @@ class snode
         @mkdir(dirname($f), 0755, true);
         self::WriteFile($f, "# Written by the Sentora Docker Node agent from the panel (Nodes > Manage): addresses never blocked.\n"
             . "name: sentora/safe-list\ndescription: \"Sentora: the panel's and the administrators' addresses, never blocked\"\nwhitelist:\n  reason: \"Sentora safe list\"\n"
-            . ($ips !== '' ? "  ip:\n" . $ips : '') . ($cidrs !== '' ? "  cidr:\n" . $cidrs : '') . ($ips === '' && $cidrs === '' ? "  ip: []\n" : ''), 0644);
+            . "  ip:\n" . $ips . ($cidrs !== '' ? "  cidr:\n" . $cidrs : ''), 0644);
         $share = !empty($d['share']);
         $cred = self::CsDir() . '/online_api_credentials.yaml';
         if ($share) {

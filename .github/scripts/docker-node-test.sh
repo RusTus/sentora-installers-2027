@@ -233,6 +233,9 @@ CS=$(in_box 'systemctl is-active crowdsec crowdsec-firewall-bouncer | tr "\n" " 
 echo "$CS" | sed 's/^/  crowdsec: /'
 echo "$CS" | head -1 | grep -qx "active active " && ok "CrowdSec and its firewall blocker run ($(echo "$CS" | sed -n 2p))" || { bad "CrowdSec: $(echo "$CS" | head -1)"; in_box 'systemctl status crowdsec --no-pager | head -12; tail -25 /var/log/crowdsec.log 2> /dev/null; journalctl -u crowdsec --no-pager | tail -15'; }
 echo "$CS" | grep -qx not-registered && [ "$(echo "$CS" | sed -n 4p)" = 1 ] && ok "local only: not registered with CrowdSec's servers, its central API off" || bad "not local only: $CS"
+# (what CrowdSec's log says about its central API: since the installer's local-only setting, nothing at all)
+CAPI=$(in_box 'journalctl -u crowdsec --no-pager -o cat 2> /dev/null | grep -iE "central api|community-blocklist|capi" | tail -5')
+[ -z "$CAPI" ] && ok "CrowdSec never contacted its servers (not even at install)" || bad "CrowdSec contacted its servers: $CAPI"
 [ "$(echo "$CS" | sed -n 5p)" = 3 ] && ok "it reads the system, SSH and the apps' access log (Caddy)" || bad "collections: $CS"
 wait_for 60 in_box "grep -c '\"$GW\"' /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml" > /dev/null && ok "the panel's address ($GW) is on its safe list (never blocked)" || bad "the panel's address is not on the safe list: $(in_box 'cat /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml')"
 in_box 'test -s /var/log/caddy/sentora-access.log' && ok "the apps' access log is written (CrowdSec reads it)" || bad "no access log: $(in_box 'ls -laZ /var/log/caddy/ 2>&1; journalctl -u caddy --no-pager | grep -i "log" | tail -3')"
