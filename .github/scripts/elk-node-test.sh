@@ -85,7 +85,7 @@ KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-v
 D=$(KB '/api/dashboards?per_page=50')
 for d in sentora-overview sentora-websites sentora-mail sentora-security sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB /api/kibana/settings | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
-[ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/status")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
+[ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/security/me")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"
 SENT=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)
@@ -126,9 +126,10 @@ python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/other.crt" "$W/o
 sleep 8; es -X POST https://127.0.0.1:9200/logs-sentora-*/_refresh > /dev/null 2>&1
 N2=$(es "https://127.0.0.1:9200/logs-sentora-*/_count" | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
 [ "$N2" = "$N" ] && ok "another certificate's lines were turned away" || bad "a stranger's line got in ($N -> $N2)"
-openssl s_client -connect "$IP:6514" -CAfile "$W/node-ca.crt" < /dev/null > "$OUT/nocert.txt" 2>&1
+# (a line sent, and a moment for the node's answer: it turns the connection away once it sees there is no certificate)
+( printf '{"message":"no certificate"}\n'; sleep 4 ) | timeout 15 openssl s_client -connect "$IP:6514" -CAfile "$W/node-ca.crt" -quiet > "$OUT/nocert.txt" 2>&1
 grep -qiE 'alert|certificate required' "$OUT/nocert.txt" && ok "no certificate: turned away" || bad "a connection without a certificate was not turned away"
-[ "$(KB '/api/status' -o /dev/null -w '%{http_code}')" = 200 ] && ok "the Kibana login works" || bad "the Kibana login does not work"
+[ "$(KB '/api/security/me' -o /dev/null -w '%{http_code}')" = 200 ] && ok "the Kibana login works" || bad "the Kibana login does not work"
 [ "$(KB '/api/console/proxy?path=/_data_stream/logs-sentora-default&method=DELETE' -X POST -H 'kbn-xsrf: x' -o /dev/null -w '%{http_code}')" != 200 ] && \
     [ "$(es '-o /dev/null -w %{http_code} https://127.0.0.1:9200/_data_stream/logs-sentora-default')" = 200 ] && ok "the Kibana login can not delete the logs" || bad "the Kibana login could delete the logs"
 # the firewall: who may reach Kibana
@@ -143,12 +144,12 @@ in_box 'sentora-elk-node retention 7' > /dev/null && es https://127.0.0.1:9200/_
 in_box 'sentora-elk-node status' > "$OUT/status.txt" 2>&1; grep -q "Logs kept: *7 days" "$OUT/status.txt" && ok "status shows it" || bad "status: $(cat "$OUT/status.txt")"
 in_box 'sentora-elk-node password' > "$OUT/password.txt" 2>&1
 NEWPW=$(sed -n 's/.*password: \([A-Za-z0-9]*\).*/\1/p' "$OUT/password.txt")
-[ -n "$NEWPW" ] && [ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/status")" = 200 ] && ok "a new Kibana password works" || bad "sentora-elk-node password: $(cat "$OUT/password.txt")"
+[ -n "$NEWPW" ] && [ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/security/me")" = 200 ] && ok "a new Kibana password works" || bad "sentora-elk-node password: $(cat "$OUT/password.txt")"
 in_box "bash /root/elk-node/sentora2027-elk-node --panel https://$GW --panel-cert /root/panel.crt --panel-code $CODE --files /root/elk-node" > "$OUT/again.txt" 2>&1 && bad "a second install went on" || { grep -q "already an Elk node" "$OUT/again.txt" && ok "a second install is refused (use --update)" || bad "second install: $(tail -2 "$OUT/again.txt")"; }
 in_box "bash /root/elk-node/sentora2027-elk-node --update --files /root/elk-node" > "$OUT/update.txt" 2>&1 && ok "--update finished" || bad "--update stopped: $(tail -5 "$OUT/update.txt")"
 [ "$(in_box 'sentora-elk-node key' | head -1)" = "$NODEKEY" ] && ok "the node key is the same after the update" || bad "the update changed the node key"
 es https://127.0.0.1:9200/_ilm/policy/sentora-logs | grep -q '"min_age":"7d"' && ok "the update kept the retention" || bad "the update reset the retention"
-[ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/status")" = 200 ] && ok "the update kept the Kibana login" || bad "the update broke the Kibana login"
+[ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/security/me")" = 200 ] && ok "the update kept the Kibana login" || bad "the update broke the Kibana login"
 N3=$(es "https://127.0.0.1:9200/logs-sentora-*/_count" | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "$N3" = "$N" ] && ok "the update kept the logs" || bad "logs after the update: $N3 (were $N)"
 SENT2=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)
 for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_refresh > /dev/null 2>&1; N4=$(es "https://127.0.0.1:9200/logs-sentora-*/_count" | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${N4:-0}" -ge $((N + SENT2)) ] && break; sleep 3; done
