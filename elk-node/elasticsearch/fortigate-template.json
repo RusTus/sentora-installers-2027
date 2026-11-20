@@ -1,0 +1,101 @@
+{
+  "index_patterns": [
+    "logs-fortigate-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "_meta": {
+    "description": "Sentora Elk node: a FortiGate's logs (sentora-elk-node fortigate)"
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0,
+      "index.default_pipeline": "logs@default-pipeline"
+    },
+    "mappings": {
+      "properties": {
+        "fgt": {
+          "type": "flattened",
+          "ignore_above": 1024
+        },
+        "fortigate": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            },
+            "subtype": {
+              "type": "keyword"
+            },
+            "appcat": {
+              "type": "keyword"
+            },
+            "category": {
+              "type": "keyword"
+            },
+            "service": {
+              "type": "keyword"
+            },
+            "threat": {
+              "type": "keyword"
+            },
+            "description": {
+              "type": "keyword"
+            },
+            "vpn": {
+              "properties": {
+                "tunnel": {
+                  "type": "keyword"
+                },
+                "assigned_ip": {
+                  "type": "ip",
+                  "ignore_malformed": true
+                }
+              }
+            }
+          }
+        },
+        "source": {
+          "properties": {
+            "geo": {
+              "properties": {
+                "location": {
+                  "type": "geo_point"
+                }
+              }
+            },
+            "bytes": {
+              "type": "long"
+            }
+          }
+        },
+        "destination": {
+          "properties": {
+            "geo": {
+              "properties": {
+                "location": {
+                  "type": "geo_point"
+                }
+              }
+            },
+            "bytes": {
+              "type": "long"
+            }
+          }
+        },
+        "network": {
+          "properties": {
+            "bytes": {
+              "type": "long"
+            }
+          }
+        }
+      }
+    }
+  }
+}
