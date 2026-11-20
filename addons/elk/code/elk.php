@@ -1,0 +1,918 @@
+<?php
+
+/**
+ * Elk (administrators): the panel's logs, live, to the panel's Elk node (Elasticsearch, Logstash and Kibana on a
+ * server of its own, installed with sentora2027-elk-node), through this server's own rsyslog.
+ *
+ * - The panel has a certificate of its own for this (made by the daemon, root's key in DIR; the certificate itself is
+ *   public: the node's installer fetches it from code/node.php?cert=1 and shows the panel's code, which the
+ *   administrator compares with this page). The node takes lines only from that certificate.
+ * - "Add the Elk node" stores the node's address and key (SE1-...); the daemon connects, finds the node's certificate
+ *   authority in what the node shows, compares its code with the key typed, and only then pins it: rsyslog checks the
+ *   node against that authority and the node's name (sentora-elk-node) on every connection.
+ * - The daemon (root, every run) turns the chosen groups of logs into rsyslog's settings: files followed with imfile
+ *   (websites, the panel, Dovecot, FTP, DNS, fail2ban...) and the lines rsyslog already receives from the journal by
+ *   program (Postfix, SSH logins, sudo), sent as JSON lines over TLS with a disk queue (1 GB) while the node is away.
+ *   A setting rsyslog refuses is never left in place. Paths come from the panel's settings (log_dir) and the
+ *   system's own files; rsyslog's user, AppArmor and SELinux are handled as Log Forwarder does.
+ * - Every supported system: rsyslog and its TLS driver are installed with the system's package command.
+ *
+ * @package Sentora
+ * @license GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
+ *
+ * Written by RusTus, 2026-11-20
+ */
+class elk
+{
+    const DIR = '/etc/sentora/elk';
+    const CONF = '/etc/rsyslog.d/61-sentora-elk.conf';
+    const STATE_DIR = '/var/lib/sentora/elk';
+    const AA_SNIPPET = '/etc/apparmor.d/rsyslog.d/sentora-elk';
+    const AA_PROFILE = '/etc/apparmor.d/usr.sbin.rsyslogd';
+    const PORT = 6514;
+    const NODE_NAME = 'sentora-elk-node';
+    const NODE_TYPE = 'sentora-elk';
+    const PREFIX = 'SE1';
+    const QUEUE = '1g';
+    /** The hidden settings (x_settings, module Elk). */
+    const S_CERT = 'elk_panel_cert';
+    const S_NODE = 'elk_node';
+    const S_NODEKEY = 'elk_nodekey';
+    const S_NODECA = 'elk_node_ca';
+    const S_PAIRING = 'elk_pairing';
+    const S_GROUPS = 'elk_groups';
+    const S_CHECK = 'elk_check';
+
+    // ---------------------------------------------------------------------------------------------
+    // Settings
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * A hidden setting of this module ('' when not there).
+     *
+     * @param string $name One of the S_ constants.
+     * @return string
+     */
+    static function Setting($name)
+    {
+        $v = ctrl_options::GetSystemOption($name);
+        return $v === false || $v === null ? '' : (string) $v;
+    }
+
+    /**
+     * Write a hidden setting (made when it is not there; never shown in Sentora Config).
+     *
+     * @param string $name One of the S_ constants.
+     * @param string $value
+     * @return void
+     */
+    static function Save($name, $value)
+    {
+        global $zdbh;
+        $q = $zdbh->prepare("SELECT COUNT(*) FROM x_settings WHERE so_name_vc = :n");
+        $q->execute(array(':n' => $name));
+        if ((int) $q->fetchColumn() === 0) {
+            $zdbh->prepare("INSERT INTO x_settings (so_name_vc, so_cleanname_vc, so_value_tx, so_defvalues_tx, so_desc_tx, so_module_vc, so_usereditable_en)
+                VALUES (:n, :c, '', NULL, 'Elk: the Elk node (written by the panel and the daemon).', 'Elk', 'false')")
+                ->execute(array(':n' => $name, ':c' => ucfirst(str_replace('_', ' ', $name))));
+        }
+        $zdbh->prepare("UPDATE x_settings SET so_value_tx = :v WHERE so_name_vc = :n")->execute(array(':v' => (string) $value, ':n' => $name));
+    }
+
+    /**
+     * The groups of logs an administrator can send, in the page's order: key => (label, what is in it).
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    static function Groups()
+    {
+        return array(
+            'websites' => array('Websites', 'Every hosted website\'s visits and errors (Apache).'),
+            'mail' => array('Mail', 'Postfix (sent, bounced, refused), Dovecot (mailbox logins), webmail logins.'),
+            'logins' => array('Server logins', 'SSH logins and sudo, FTP logins.'),
+            'bans' => array('Bans', 'fail2ban: addresses found and banned, by jail.'),
+            'panel' => array('The panel', 'Panel pages and errors, failed panel logins, what root did for the panel, the daemon, the problems log.'),
+            'ftp' => array('FTP', 'Uploads and other file changes over FTP.'),
+            'dns' => array('DNS', 'BIND\'s log.'),
+        );
+    }
+
+    /**
+     * The groups switched on (all of them until the administrator chooses).
+     *
+     * @return string[]
+     */
+    static function Chosen()
+    {
+        $v = self::Setting(self::S_GROUPS);
+        if ($v === '') {
+            return array_keys(self::Groups());
+        }
+        return array_values(array_intersect(array_keys(self::Groups()), explode(',', $v)));
+    }
+
+    /**
+     * The panel's certificate (public; '' until the daemon has made it).
+     *
+     * @return string
+     */
+    static function PanelCert()
+    {
+        $pem = self::Setting(self::S_CERT);
+        return strpos($pem, '-----BEGIN CERTIFICATE-----') === 0 ? $pem : '';
+    }
+
+    /**
+     * The node: array(addr, key typed, pinned CA, pairing state) ('' parts when not set).
+     *
+     * @return array{addr: string, key: string, ca: string, pairing: string}
+     */
+    static function Node()
+    {
+        return array('addr' => self::Setting(self::S_NODE), 'key' => self::Setting(self::S_NODEKEY), 'ca' => self::Setting(self::S_NODECA),
+            'pairing' => self::Setting(self::S_PAIRING));
+    }
+
+    /**
+     * Is the node paired (its certificate authority pinned)?
+     *
+     * @return bool
+     */
+    static function Paired()
+    {
+        $n = self::Node();
+        return $n['addr'] !== '' && strpos($n['ca'], '-----BEGIN CERTIFICATE-----') === 0;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Codes (the node framework's, as the core's sys_nodes and NODES.md: base32 without I, O, 0, 1)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Base32 of bytes, with the node framework's letters.
+     *
+     * @param string $bin
+     * @return string
+     */
+    static function Base32($bin)
+    {
+        $a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        $bits = '';
+        foreach (str_split($bin) as $c) {
+            $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
+        }
+        $out = '';
+        foreach (str_split($bits, 5) as $chunk) {
+            $out .= $a[bindec(str_pad($chunk, 5, '0'))];
+        }
+        return $out;
+    }
+
+    /**
+     * A certificate's public key, as one line: base64 of its SubjectPublicKeyInfo (DER).
+     *
+     * @param string $pem A certificate.
+     * @return string '' when it is not one.
+     */
+    static function Spki($pem)
+    {
+        $k = @openssl_pkey_get_public($pem);
+        if ($k === false) {
+            return '';
+        }
+        $d = openssl_pkey_get_details($k);
+        if (!is_array($d) || !isset($d['key'])) {
+            return '';
+        }
+        return preg_replace('/-----[A-Z ]+-----|\s+/', '', (string) $d['key']);
+    }
+
+    /**
+     * The panel's code for the Elk node type (shown on the page; the node's installer shows the same).
+     *
+     * @return string XXXX-XXXX, or '' before the certificate exists.
+     */
+    static function PanelCode()
+    {
+        $spki = self::Spki(self::PanelCert());
+        if ($spki === '') {
+            return '';
+        }
+        if (class_exists('sys_nodes') && method_exists('sys_nodes', 'PanelCode')) {
+            return sys_nodes::PanelCode(self::NODE_TYPE, $spki);
+        }
+        $c = substr(self::Base32(substr(hash('sha256', self::NODE_TYPE . '|' . $spki, true), 0, 10)), 0, 8);
+        return substr($c, 0, 4) . '-' . substr($c, 4, 4);
+    }
+
+    /**
+     * A certificate's key code: the first 16 letters of base32 of the SHA-256 of its public key (DER).
+     *
+     * @param string $pem
+     * @return string '' when it is not a certificate.
+     */
+    static function KeyCode($pem)
+    {
+        $spki = self::Spki($pem);
+        return $spki === '' ? '' : substr(self::Base32(substr(hash('sha256', (string) base64_decode($spki), true), 0, 10)), 0, 16);
+    }
+
+    /**
+     * The 16 letters of a node key as typed (SE1-XXXX-XXXX-XXXX-XXXX; spaces, case and dashes do not matter).
+     *
+     * @param string $typed
+     * @return string '' when it is not one.
+     */
+    static function ParseKey($typed)
+    {
+        $k = strtoupper(preg_replace('/[\s-]+/', '', (string) $typed));
+        if (strpos($k, self::PREFIX) === 0) {
+            $k = substr($k, strlen(self::PREFIX));
+        }
+        return preg_match('/^[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{16}$/', $k) ? $k : '';
+    }
+
+    /**
+     * A node key written out.
+     *
+     * @param string $code The 16 letters.
+     * @return string
+     */
+    static function NodeKey($code)
+    {
+        return self::PREFIX . '-' . implode('-', str_split($code, 4));
+    }
+
+    /**
+     * Is this an address a node can have (a name or an IP address)?
+     *
+     * @param string $a
+     * @return bool
+     */
+    static function ValidAddr($a)
+    {
+        return filter_var($a, FILTER_VALIDATE_IP) !== false
+            || (strlen($a) <= 253 && preg_match('/^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/', $a));
+    }
+
+    /**
+     * The page: store the node to add (the daemon pairs it). Returns '' or what is wrong.
+     *
+     * @param string $addr
+     * @param string $key
+     * @return string
+     */
+    static function AddNode($addr, $key)
+    {
+        $addr = strtolower(trim((string) $addr));
+        if (!self::ValidAddr($addr)) {
+            return 'That is not an address: the Elk node\'s IP address or name.';
+        }
+        if (self::ParseKey($key) === '') {
+            return 'That is not an Elk node key: it looks like SE1-XXXX-XXXX-XXXX-XXXX (sentora-elk-node key on the node shows it).';
+        }
+        self::Save(self::S_NODE, $addr);
+        self::Save(self::S_NODEKEY, self::NodeKey(self::ParseKey($key)));
+        self::Save(self::S_NODECA, '');
+        self::Save(self::S_PAIRING, 'wait ' . time());
+        return '';
+    }
+
+    /**
+     * The page: forget the node (the panel stops sending at the next daemon run; the logs stay on the node).
+     *
+     * @return void
+     */
+    static function RemoveNode()
+    {
+        foreach (array(self::S_NODE, self::S_NODEKEY, self::S_NODECA, self::S_PAIRING) as $n) {
+            self::Save($n, '');
+        }
+    }
+
+    /**
+     * The page: the groups to send.
+     *
+     * @param string[] $groups
+     * @return void
+     */
+    static function SaveGroups(array $groups)
+    {
+        $g = array_values(array_intersect(array_keys(self::Groups()), $groups));
+        self::Save(self::S_GROUPS, $g ? implode(',', $g) : 'none');
+    }
+
+    /**
+     * What the daemon last noted (for the page).
+     *
+     * @return array
+     */
+    static function State()
+    {
+        $j = @json_decode((string) @file_get_contents(self::STATE_DIR . '/status.json'), true);
+        return is_array($j) ? $j : array();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The daemon's side (root)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * A command that runs with only its own input and output open (the core's ctrl_system::OwnFiles, when this panel
+     * has it).
+     *
+     * @param string $cmd
+     * @return string
+     */
+    static function Own($cmd)
+    {
+        return method_exists('ctrl_system', 'OwnFiles') ? ctrl_system::OwnFiles($cmd) : $cmd;
+    }
+
+    /**
+     * rsyslog's program ('' when not installed).
+     *
+     * @return string
+     */
+    static function RsyslogBin()
+    {
+        foreach (array('/usr/sbin/rsyslogd', '/sbin/rsyslogd') as $b) {
+            if (is_file($b) && is_executable($b)) {
+                return $b;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * rsyslog's TLS driver ('' when missing).
+     *
+     * @return string
+     */
+    static function TlsModule()
+    {
+        foreach (array_merge((array) glob('/usr/lib*/rsyslog/lmnsd_gtls.so'), (array) glob('/usr/lib/*/rsyslog/lmnsd_gtls.so')) as $f) {
+            if (is_file($f)) {
+                return $f;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * The packages missing (the same names on every supported system).
+     *
+     * @return string[]
+     */
+    static function Missing()
+    {
+        $need = array();
+        if (self::RsyslogBin() === '') {
+            $need[] = 'rsyslog';
+        }
+        if (self::TlsModule() === '') {
+            $need[] = 'rsyslog-gnutls';
+        }
+        if (!is_executable('/usr/bin/setfacl') && !is_executable('/bin/setfacl')) {
+            $need[] = 'acl';
+        }
+        return $need;
+    }
+
+    /**
+     * Root: install what is missing with this system's package command (the setting package_install), let rsyslog
+     * start with the system, and have the journal hand it its lines (rsyslog's package asks the journal for them;
+     * the journal reads that when it starts).
+     *
+     * @return string What happened ('' when nothing was missing).
+     */
+    static function InstallMissing()
+    {
+        $need = self::Missing();
+        if (!$need) {
+            return '';
+        }
+        $cmd = trim((string) ctrl_options::GetSystemOption('package_install'));
+        if ($cmd === '') {
+            $cmd = is_executable('/usr/bin/apt-get') ? 'apt-get -qq -y install' : (is_executable('/usr/bin/dnf') ? 'dnf -y -q install' : '');
+        }
+        if ($cmd === '') {
+            return 'could not install ' . implode(', ', $need) . ': this system\'s package command is not known.';
+        }
+        exec(self::Own('DEBIAN_FRONTEND=noninteractive ' . $cmd . ' ' . implode(' ', array_map('escapeshellarg', $need)) . ' > /dev/null 2>&1'));
+        if (in_array('rsyslog', $need, true) && self::RsyslogBin() !== '') {
+            exec(self::Own('systemctl restart systemd-journald > /dev/null 2>&1; systemctl enable --now rsyslog > /dev/null 2>&1'));
+        }
+        $left = self::Missing();
+        return $left ? 'could not install ' . implode(', ', $left) . ': sending waits for them.' : 'installed ' . implode(', ', $need) . '.';
+    }
+
+    /**
+     * The user rsyslog runs as (root on most systems; Ubuntu's drops to syslog).
+     *
+     * @return string
+     */
+    static function RsyslogUser()
+    {
+        $out = array();
+        exec('ps -o user= -C rsyslogd 2> /dev/null', $out);
+        $u = isset($out[0]) ? trim($out[0]) : '';
+        return preg_match('/^[a-z_][a-z0-9_-]{0,31}$/', $u) ? $u : 'root';
+    }
+
+    /**
+     * The group rsyslog's user is in ('root' for root).
+     *
+     * @return string
+     */
+    static function RsyslogGroup()
+    {
+        $u = self::RsyslogUser();
+        if ($u === 'root' || !function_exists('posix_getpwnam')) {
+            return 'root';
+        }
+        $p = posix_getpwnam($u);
+        $g = is_array($p) ? posix_getgrgid((int) $p['gid']) : false;
+        return is_array($g) ? (string) $g['name'] : 'root';
+    }
+
+    /**
+     * Write a file through a temporary file in its own (root's) folder.
+     *
+     * @param string $file
+     * @param string $data
+     * @param int $mode
+     * @param string $group
+     * @return bool
+     */
+    static function WriteFile($file, $data, $mode, $group = 'root')
+    {
+        $dir = dirname($file);
+        $tmp = @tempnam($dir, '.elk.');
+        if ($tmp === false || dirname($tmp) !== rtrim($dir, '/')) {
+            if ($tmp !== false) {
+                @unlink($tmp);
+            }
+            return false;
+        }
+        $ok = @file_put_contents($tmp, $data) !== false && @chmod($tmp, $mode) && @chgrp($tmp, $group) && @rename($tmp, $file);
+        if (!$ok) {
+            @unlink($tmp);
+        }
+        return $ok;
+    }
+
+    /**
+     * Root: the module's folders, the panel's own key and certificate (made once; the certificate is kept public in
+     * the settings for code/node.php), and rsyslog's AppArmor rule file. Install, upgrade and every daemon run call it.
+     *
+     * @return string[] What it did.
+     */
+    static function Setup()
+    {
+        $did = array();
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            return $did;
+        }
+        $grp = self::RsyslogGroup();
+        foreach (array(self::DIR => array(0750, $grp), self::STATE_DIR => array(0750, 'sentora')) as $dir => $m) {
+            if (is_link($dir)) {
+                @unlink($dir);
+            }
+            if (!is_dir($dir)) {
+                @mkdir($dir, $m[0], true);
+                $did[] = 'made ' . $dir;
+            }
+            @chown($dir, 0);
+            @chgrp($dir, $m[1]);
+            @chmod($dir, $m[0]);
+        }
+        $key = self::DIR . '/panel.key';
+        $crt = self::DIR . '/panel.crt';
+        if (!is_file($key) || !is_file($crt) || self::Spki((string) @file_get_contents($crt)) === '') {
+            $host = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
+            $cmd = 'openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout ' . escapeshellarg($key . '.new') . ' -out ' . escapeshellarg($crt . '.new')
+                . ' -days 7300 -subj ' . escapeshellarg('/CN=sentora-panel/O=' . ($host !== '' ? $host : 'Sentora panel'))
+                . ' -addext "basicConstraints=critical,CA:FALSE" -addext "keyUsage=critical,digitalSignature" -addext "extendedKeyUsage=clientAuth" 2>&1';
+            exec(self::Own('umask 077; ' . $cmd), $o, $rc);
+            if ($rc === 0 && @rename($key . '.new', $key) && @rename($crt . '.new', $crt)) {
+                $did[] = 'made the panel\'s certificate for its Elk node';
+            } else {
+                @unlink($key . '.new');
+                @unlink($crt . '.new');
+                $did[] = 'could not make the panel\'s certificate: ' . substr(implode(' ', $o), 0, 200);
+            }
+        }
+        // the key: root's, readable by rsyslog's group (rsyslog opens the connection after it gives up root)
+        foreach (array($key => 0640, $crt => 0644) as $f => $mode) {
+            if (is_file($f) && !is_link($f)) {
+                @chown($f, 0);
+                @chgrp($f, $grp);
+                @chmod($f, $mode);
+            }
+        }
+        $pem = (string) @file_get_contents($crt);
+        if ($pem !== '' && self::Setting(self::S_CERT) !== $pem) {
+            self::Save(self::S_CERT, $pem);
+        }
+        // rsyslog's AppArmor profile (Ubuntu, Debian): the logs it sends, its key and the node's authority
+        if (is_file(self::AA_PROFILE) && is_dir(dirname(self::AA_SNIPPET))) {
+            $rules = "# Sentora Elk: the logs it sends to the Elk node, the panel's certificate and the node's authority\n"
+                . "  /var/sentora/logs/ r,\n  /var/sentora/logs/** r,\n  /var/lib/sentora/*.log r,\n  /var/log/dovecot*.log r,\n  /var/log/fail2ban.log r,\n"
+                . "  " . self::DIR . "/ r,\n  " . self::DIR . "/** r,\n";
+            if (@file_get_contents(self::AA_SNIPPET) !== $rules) {
+                if (is_link(self::AA_SNIPPET)) {
+                    @unlink(self::AA_SNIPPET);
+                }
+                file_put_contents(self::AA_SNIPPET, $rules);
+                @chmod(self::AA_SNIPPET, 0644);
+                if (is_executable('/sbin/apparmor_parser') || is_executable('/usr/sbin/apparmor_parser')) {
+                    exec('apparmor_parser -r ' . escapeshellarg(self::AA_PROFILE) . ' 2>&1', $o2, $rc2);
+                    $did[] = $rc2 === 0 ? 'rsyslog may read the logs it sends (AppArmor)' : 'AppArmor did not take the rule file: ' . implode(' ', array_slice($o2, -2));
+                }
+            }
+        }
+        return $did;
+    }
+
+    /**
+     * Root: connect to the node with the panel's certificate and return the certificates it shows.
+     *
+     * @param string $addr
+     * @param bool $pinned Check against the pinned authority and the node's name (else: take what it shows).
+     * @return array{ok: bool, chain: string[], text: string}
+     */
+    static function Connect($addr, $pinned)
+    {
+        $ssl = array('local_cert' => self::DIR . '/panel.crt', 'local_pk' => self::DIR . '/panel.key', 'capture_peer_cert_chain' => true,
+            'SNI_enabled' => true, 'peer_name' => self::NODE_NAME);
+        $caFile = '';
+        if ($pinned) {
+            $caFile = self::DIR . '/node-ca.crt';
+            $ssl += array('verify_peer' => true, 'verify_peer_name' => true, 'cafile' => $caFile, 'allow_self_signed' => false);
+        } else {
+            $ssl += array('verify_peer' => false, 'verify_peer_name' => false);
+        }
+        $err = '';
+        set_error_handler(function ($no, $str) use (&$err) { $err = $err === '' ? $str : $err; return true; });
+        $host = filter_var($addr, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $addr . ']' : $addr;
+        $s = stream_socket_client('tls://' . $host . ':' . self::PORT, $no, $str, 10, STREAM_CLIENT_CONNECT, stream_context_create(array('ssl' => $ssl)));
+        restore_error_handler();
+        if ($s === false) {
+            $why = $str !== '' ? $str : $err;
+            return array('ok' => false, 'chain' => array(), 'text' => 'The Elk node at ' . $addr . ' did not answer on port ' . self::PORT . ' (' . trim(preg_replace('/^stream_socket_client\(\): /', '', $why)) . ').');
+        }
+        $p = stream_context_get_params($s);
+        fclose($s);
+        $chain = array();
+        foreach ((array) (isset($p['options']['ssl']['peer_certificate_chain']) ? $p['options']['ssl']['peer_certificate_chain'] : array()) as $c) {
+            if (openssl_x509_export($c, $out)) {
+                $chain[] = $out;
+            }
+        }
+        return array('ok' => true, 'chain' => $chain, 'text' => '');
+    }
+
+    /**
+     * Root: pair the node typed on the page. Its key must be the code of the authority that signed the certificate it
+     * shows (named sentora-elk-node); only then is that authority pinned.
+     *
+     * @return string What happened.
+     */
+    static function Pair()
+    {
+        $n = self::Node();
+        $want = self::ParseKey($n['key']);
+        $c = self::Connect($n['addr'], false);
+        if (!$c['ok']) {
+            self::Save(self::S_PAIRING, 'fail ' . time() . ' ' . $c['text']);
+            return $c['text'];
+        }
+        $leaf = isset($c['chain'][0]) ? $c['chain'][0] : '';
+        $info = $leaf !== '' ? openssl_x509_parse($leaf) : false;
+        $named = is_array($info) && isset($info['subject']['CN']) && $info['subject']['CN'] === self::NODE_NAME;
+        foreach ($c['chain'] as $ca) {
+            if ($want !== '' && self::KeyCode($ca) === $want) {
+                if (!$named || openssl_x509_verify($leaf, $ca) !== 1) {
+                    break;
+                }
+                self::Save(self::S_NODECA, $ca);
+                self::WriteFile(self::DIR . '/node-ca.crt', $ca, 0644, self::RsyslogGroup());
+                self::Save(self::S_PAIRING, 'ok ' . time());
+                return 'Paired with the Elk node at ' . $n['addr'] . ' (key ' . self::NodeKey($want) . ').';
+            }
+        }
+        $seen = array();
+        foreach (array_slice($c['chain'], 1) as $ca) {
+            if (($k = self::KeyCode($ca)) !== '') {
+                $seen[] = self::NodeKey($k);
+            }
+        }
+        $t = 'The server at ' . $n['addr'] . ' does not have that key' . ($seen ? ' (it shows ' . implode(', ', $seen) . ')' : '')
+            . ': nothing was sent there. Check the address and the key (sentora-elk-node key on the node).';
+        self::Save(self::S_PAIRING, 'fail ' . time() . ' ' . $t);
+        return $t;
+    }
+
+    /**
+     * The files to follow for the chosen groups: path => array(kind, account, domain).
+     *
+     * @param string[] $groups
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    static function Files(array $groups)
+    {
+        global $zdbh;
+        $logs = rtrim((string) ctrl_options::GetSystemOption('log_dir'), '/');
+        $logs = $logs !== '' ? $logs : '/var/sentora/logs';
+        $f = array();
+        $add = function ($path, $kind, $acct = '', $dom = '') use (&$f) {
+            if (is_file($path) && !is_link($path)) {
+                $f[$path] = array($kind, $acct, $dom);
+            }
+        };
+        if (in_array('websites', $groups, true)) {
+            $q = $zdbh->query("SELECT a.ac_user_vc, v.vh_name_vc FROM x_vhosts v JOIN x_accounts a ON a.ac_id_pk = v.vh_acc_fk
+                WHERE v.vh_deleted_ts IS NULL AND a.ac_deleted_ts IS NULL AND v.vh_type_in IN (1, 2) ORDER BY v.vh_name_vc");
+            foreach ($q->fetchAll(PDO::FETCH_NUM) as $r) {
+                list($user, $name) = array((string) $r[0], strtolower((string) $r[1]));
+                if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $user) || !preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', $name)) {
+                    continue;
+                }
+                $add($logs . '/domains/' . $user . '/' . $name . '-access.log', 'web-access', $user, $name);
+                $add($logs . '/domains/' . $user . '/' . $name . '-error.log', 'web-error', $user, $name);
+            }
+        }
+        if (in_array('panel', $groups, true)) {
+            $add($logs . '/sentora-access.log', 'panel-access');
+            $add($logs . '/sentora-error.log', 'panel-error');
+            $add('/var/lib/sentora/sentora-auth.log', 'panel-login');
+            $add($logs . '/zsudo.log', 'zsudo');
+            $add($logs . '/sentora.log', 'daemon');
+            $add($logs . '/problems.log', 'problems');
+        }
+        if (in_array('mail', $groups, true)) {
+            foreach (array('/var/log/dovecot-info.log', '/var/log/dovecot.log') as $p) {
+                $add($p, 'dovecot');
+            }
+            $add($logs . '/roundcube/errors.log', 'webmail');
+            $add($logs . '/roundcube/errors', 'webmail');
+        }
+        if (in_array('logins', $groups, true)) {
+            $add($logs . '/proftpd/auth.log', 'ftp-login');
+        }
+        if (in_array('ftp', $groups, true)) {
+            $add($logs . '/proftpd/access.log', 'ftp');
+        }
+        if (in_array('dns', $groups, true)) {
+            $add($logs . '/bind/bind.log', 'dns');
+        }
+        if (in_array('bans', $groups, true)) {
+            $add('/var/log/fail2ban.log', 'fail2ban');
+        }
+        return $f;
+    }
+
+    /**
+     * Does another rsyslog file load imfile already (loading it twice is an error)?
+     *
+     * @return bool
+     */
+    static function ImfileLoadedElsewhere()
+    {
+        foreach (array_merge(array('/etc/rsyslog.conf'), (array) glob('/etc/rsyslog.d/*.conf')) as $f) {
+            if ($f !== self::CONF && is_file($f) && preg_match('/^\s*(module\s*\(\s*load\s*=\s*"imfile"|\$ModLoad\s+imfile)/mi', (string) @file_get_contents($f))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * rsyslog's settings for the node and the files ('' when nothing is to be sent).
+     *
+     * @param string $addr The node.
+     * @param array $files path => (kind, account, domain).
+     * @param string[] $groups
+     * @return string
+     */
+    static function Config($addr, array $files, array $groups)
+    {
+        $streams = array_intersect($groups, array('mail', 'logins'));
+        if (!$files && !$streams) {
+            return '';
+        }
+        $q = function ($s) { return '"' . str_replace(array('\\', '"'), array('\\\\', '\\"'), (string) $s) . '"'; };
+        $host = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
+        $c = "# Sentora Elk: written by the Sentora daemon from the panel's Elk page (Admin > Elk).\n# Changes made here are replaced; use the panel.\n\n";
+        if ($files && !self::ImfileLoadedElsewhere()) {
+            $c .= "module(load=\"imfile\" mode=\"inotify\")\n";
+        }
+        $c .= "template(name=\"SentoraElk\" type=\"list\" option.jsonf=\"on\") {\n"
+            . "    property(outname=\"@timestamp\" name=\"timereported\" dateFormat=\"rfc3339\" format=\"jsonf\")\n"
+            . "    property(outname=\"sentora_host\" name=\"\$.ekhost\" format=\"jsonf\")\n"
+            . "    property(outname=\"sentora_log\" name=\"\$.eklog\" format=\"jsonf\")\n"
+            . "    property(outname=\"sentora_account\" name=\"\$.ekacct\" format=\"jsonf\")\n"
+            . "    property(outname=\"sentora_domain\" name=\"\$.ekdomain\" format=\"jsonf\")\n"
+            . "    property(outname=\"message\" name=\"\$.ekmsg\" format=\"jsonf\")\n}\n"
+            . "ruleset(name=\"sentora_elk_out\") {\n    set \$.ekhost = " . $q($host) . ";\n"
+            . "    action(type=\"omfwd\" name=\"sentora_elk\" target=" . $q($addr) . " port=\"" . self::PORT . "\" protocol=\"tcp\" template=\"SentoraElk\" TCP_Framing=\"traditional\"\n"
+            . "        StreamDriver=\"gtls\" StreamDriverMode=\"1\" StreamDriverAuthMode=\"x509/name\" StreamDriverPermittedPeers=\"" . self::NODE_NAME . "\"\n"
+            . "        streamDriver.CAFile=\"" . self::DIR . "/node-ca.crt\" streamDriver.CertFile=\"" . self::DIR . "/panel.crt\" streamDriver.KeyFile=\"" . self::DIR . "/panel.key\"\n"
+            . "        queue.type=\"LinkedList\" queue.filename=\"sentora_elk\" queue.maxDiskSpace=\"" . self::QUEUE . "\" queue.saveOnShutdown=\"on\"\n"
+            . "        action.resumeRetryCount=\"-1\" action.resumeInterval=\"30\")\n}\n\n";
+        $i = 0;
+        foreach ($files as $path => $x) {
+            $i++;
+            $c .= "ruleset(name=\"sentora_elk_f" . $i . "\") { set \$.eklog = " . $q($x[0]) . "; set \$.ekacct = " . $q($x[1]) . "; set \$.ekdomain = " . $q($x[2])
+                . "; set \$.ekmsg = \$msg; call sentora_elk_out }\n"
+                . "input(type=\"imfile\" file=" . $q($path) . " tag=\"sentora-elk\" ruleset=\"sentora_elk_f" . $i . "\" freshStartTail=\"on\" reopenOnTruncate=\"on\")\n";
+        }
+        // lines rsyslog already receives (the journal, the system's log socket), by program: sent with their tag
+        $rules = array();
+        if (in_array('mail', $groups, true)) {
+            $rules[] = "if (\$programname startswith \"postfix\") then {\n    set \$.eklog = \"mail\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
+        }
+        if (in_array('logins', $groups, true)) {
+            $rules[] = "if (\$programname == \"sshd\" or \$programname == \"sshd-session\" or \$programname == \"sudo\") then {\n    set \$.eklog = \"auth\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
+        }
+        if ($rules) {
+            $c .= "\n" . implode("\n", $rules) . "\n";
+        }
+        return $c;
+    }
+
+    /**
+     * Put new settings in place only if rsyslog accepts them (rsyslogd -N1); otherwise the previous ones stay.
+     * Then restart rsyslog.
+     *
+     * @param string $conf
+     * @return string What happened.
+     */
+    static function Install($conf)
+    {
+        $backup = @file_get_contents(self::CONF);
+        self::WriteFile(self::CONF, $conf, 0644);
+        exec(self::Own(escapeshellarg(self::RsyslogBin() !== '' ? self::RsyslogBin() : 'rsyslogd') . ' -N1 2>&1'), $out, $rc);
+        $errors = array_values(array_filter($out, function ($l) { return stripos($l, 'error') !== false; }));
+        if ($rc !== 0 || $errors) {
+            if ($backup !== false) {
+                self::WriteFile(self::CONF, $backup, 0644);
+            } else {
+                @unlink(self::CONF);
+            }
+            return 'rsyslog refused the new settings; the previous ones stay: ' . substr(implode(' ', $errors ?: array_slice($out, -2)), 0, 300);
+        }
+        self::Restart();
+        return 'rsyslog sends with the new settings.';
+    }
+
+    /**
+     * Restart rsyslog (its settings are read at start).
+     *
+     * @return void
+     */
+    static function Restart()
+    {
+        exec(self::Own('systemctl enable rsyslog > /dev/null 2>&1; systemctl restart rsyslog > /dev/null 2>&1 || service rsyslog restart > /dev/null 2>&1'));
+    }
+
+    /**
+     * Let rsyslog (when it is not root) read exactly the files it sends: a read ACL on each, passage through their
+     * closed folders; taken away again from files no longer sent.
+     *
+     * @param string[] $paths
+     * @param string[] $before
+     * @return string[] The files that have it now.
+     */
+    static function Grant(array $paths, array $before)
+    {
+        $user = self::RsyslogUser();
+        if ($user === 'root' || !is_executable('/usr/bin/setfacl') && !is_executable('/bin/setfacl')) {
+            return $user === 'root' ? array() : $before;
+        }
+        $now = array();
+        foreach ($paths as $p) {
+            if (!is_file($p) || is_link($p)) {
+                continue;
+            }
+            foreach (array(dirname(dirname($p)), dirname($p)) as $dir) {
+                if (is_dir($dir) && !is_link($dir) && (fileperms($dir) & 0001) === 0) {
+                    exec('setfacl -m ' . escapeshellarg('u:' . $user . ':x') . ' ' . escapeshellarg($dir) . ' 2>/dev/null');
+                }
+            }
+            if ((fileperms($p) & 0004) === 0) {
+                exec('setfacl -m ' . escapeshellarg('u:' . $user . ':r') . ' ' . escapeshellarg($p) . ' 2>/dev/null');
+            }
+            $now[] = $p;
+        }
+        foreach (array_diff($before, $now) as $p) {
+            if (is_file($p) && !is_link($p)) {
+                exec('setfacl -x ' . escapeshellarg('u:' . $user) . ' ' . escapeshellarg($p) . ' 2>/dev/null');
+            }
+        }
+        return $now;
+    }
+
+    /**
+     * Root, every daemon run: the panel's certificate, the node paired when one was added, rsyslog's settings in line
+     * with the page, rsyslog allowed to read the files, and the state noted for the page.
+     *
+     * @return string[] What it did, for the daemon log.
+     */
+    static function Apply()
+    {
+        $say = array();
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            return array('Skipped (needs root).');
+        }
+        foreach (self::Setup() as $l) {
+            $say[] = $l;
+        }
+        $old = self::State();
+        $st = array('time' => time(), 'acl' => isset($old['acl']) && is_array($old['acl']) ? $old['acl'] : array(),
+            'install_tried' => isset($old['install_tried']) ? (int) $old['install_tried'] : 0);
+        $n = self::Node();
+        // a node added on the page: paired here (and again after a failed try, every run)
+        if ($n['addr'] !== '' && !self::Paired()) {
+            $say[] = self::Pair();
+            $n = self::Node();
+        } elseif (self::Paired() && @file_get_contents(self::DIR . '/node-ca.crt') !== $n['ca']) {
+            self::WriteFile(self::DIR . '/node-ca.crt', $n['ca'], 0644, self::RsyslogGroup());
+        }
+        $groups = self::Chosen();
+        if (self::Paired() && $groups && self::Missing() && time() - $st['install_tried'] > 3600) {
+            $st['install_tried'] = time();
+            $say[] = self::InstallMissing();
+        }
+        $files = self::Paired() ? self::Files($groups) : array();
+        $conf = self::Paired() && !self::Missing() ? self::Config($n['addr'], $files, $groups) : '';
+        $current = @file_get_contents(self::CONF);
+        if ($conf === '' && $current !== false) {
+            @unlink(self::CONF);
+            self::Restart();
+            $say[] = 'Nothing to send: rsyslog no longer sends to an Elk node.';
+        } elseif ($conf !== '' && $current !== $conf) {
+            $res = self::Install($conf);
+            $say[] = $res;
+            if (strpos($res, 'refused') !== false) {
+                $st['error'] = $res;
+            }
+        }
+        if (!isset($st['error']) && isset($old['error']) && $conf !== '' && $current === $conf) {
+            $st['error'] = $old['error'];
+        }
+        $st['acl'] = self::Grant(array_keys($files), $st['acl']);
+        $st['files'] = count($files);
+        $st['kinds'] = array_values(array_unique(array_map(function ($x) { return $x[0]; }, $files)));
+        $st['missing'] = self::Missing();
+        // the queue on disk (lines waiting while the node is away) and a check of the connection every 10 minutes
+        $qb = 0;
+        foreach ((array) glob('/var/spool/rsyslog/sentora_elk*') as $qf) {
+            $qb += (int) @filesize($qf);
+        }
+        $st['queued'] = $qb;
+        if (self::Paired()) {
+            $prev = isset($old['probe']) && time() - (int) $old['probe'] < 600 && (int) self::Setting(self::S_CHECK) < (int) $old['probe'] ? $old : null;
+            if ($prev === null) {
+                $c = self::Connect($n['addr'], true);
+                $st['probe'] = time();
+                $st['reachable'] = $c['ok'];
+                $st['probetext'] = $c['text'];
+            } else {
+                $st['probe'] = $prev['probe'];
+                $st['reachable'] = $prev['reachable'];
+                $st['probetext'] = $prev['probetext'];
+            }
+        }
+        self::WriteFile(self::STATE_DIR . '/status.json', json_encode($st, JSON_UNESCAPED_SLASHES), 0640, 'sentora');
+        $say[] = self::Paired() ? ('Sending ' . count($files) . ' log file(s)' . (array_intersect($groups, array('mail', 'logins')) ? ' and the mail and login lines' : '') . ' to the Elk node at ' . $n['addr'] . '.')
+            : ($n['addr'] !== '' ? 'Waiting to pair with the Elk node.' : 'No Elk node yet.');
+        return $say;
+    }
+
+    /**
+     * Root, when the module is removed or switched off: rsyslog stops sending; the ACLs and the AppArmor rule file go.
+     * The panel's certificate and the node stay (a reinstall keeps them).
+     *
+     * @return void
+     */
+    static function Remove()
+    {
+        $st = self::State();
+        $user = self::RsyslogUser();
+        foreach ((array) (isset($st['acl']) ? $st['acl'] : array()) as $p) {
+            if ($user !== 'root' && is_file($p) && !is_link($p)) {
+                exec('setfacl -x ' . escapeshellarg('u:' . $user) . ' ' . escapeshellarg($p) . ' 2>/dev/null');
+            }
+        }
+        if (is_file(self::CONF)) {
+            @unlink(self::CONF);
+            self::Restart();
+        }
+        if (is_file(self::AA_SNIPPET)) {
+            @unlink(self::AA_SNIPPET);
+            exec('apparmor_parser -r ' . escapeshellarg(self::AA_PROFILE) . ' > /dev/null 2>&1');
+        }
+    }
+}

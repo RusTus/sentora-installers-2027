@@ -1,0 +1,67 @@
+/* Elk in the panel's style: colours from the theme's shared --sn-* variables (etc/styles/THEMES.md), with these as
+   the fallback, so it follows Light, Dark and Auto. One ordered file: change a rule where it is. */
+.ek { --ek-ink: var(--sn-ink, #1f2933); --ek-muted: var(--sn-muted, #6b7785); --ek-line: var(--sn-line, #e6e9ee);
+      --ek-card: var(--sn-card, #ffffff); --ek-bg: var(--sn-soft, #f4f6f9); --ek-accent: var(--sn-accent, #447fb3);
+      --ek-accent-soft: var(--sn-accent-soft, #e3edf6); --ek-ok: var(--sn-ok, #1b7a50); --ek-ok-soft: var(--sn-ok-soft, #e3f5ec);
+      --ek-warn: var(--sn-warn, #8f5b00); --ek-warn-soft: var(--sn-warn-soft, #fff4d6); --ek-bad: var(--sn-bad, #b42318); --ek-bad-soft: var(--sn-bad-soft, #fdecea);
+      color: var(--ek-ink); background: var(--ek-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+.ek * { box-sizing: border-box; }
+.ek-muted { color: var(--ek-muted); font-size: 12px; font-weight: normal; }
+.ek-ico { width: 16px; height: 16px; vertical-align: -3px; flex: none; }
+/* messages */
+.ek-msg { margin: 0 0 14px; padding: 10px 12px; border-left: 4px solid; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.ek-msg.is-ok { color: var(--ek-ok); background: var(--ek-ok-soft); }
+.ek-msg.is-bad { color: var(--ek-bad); background: var(--ek-bad-soft); }
+/* the tiles */
+.ek-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.ek-tile { background: var(--ek-card); border-radius: 8px; padding: 12px 14px; border-left: 4px solid var(--ek-line); box-shadow: 0 1px 3px rgba(20,30,40,0.08); min-width: 0; }
+.ek-tile b { display: block; font-size: 22px; line-height: 1.15; overflow-wrap: anywhere; }
+.ek-tile span { font-size: 12px; color: var(--ek-muted); overflow-wrap: anywhere; }
+.ek-tile.is-ok { border-left-color: var(--ek-ok); } .ek-tile.is-ok b { color: var(--ek-ok); }
+.ek-tile.is-wait { border-left-color: var(--ek-accent); } .ek-tile.is-wait b { color: var(--ek-accent); }
+.ek-tile.is-watch { border-left-color: var(--ek-warn); } .ek-tile.is-watch b { color: var(--ek-warn); }
+.ek-tile.is-bad { border-left-color: var(--ek-bad); } .ek-tile.is-bad b { color: var(--ek-bad); }
+/* cards */
+.ek-card { background: var(--ek-card); border-radius: 6px; box-shadow: 0 1px 3px rgba(20,30,40,0.08); padding: 16px 18px; margin: 0 0 14px; min-width: 0; }
+.ek-card h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+.ek-after { margin: 12px 0 0; line-height: 1.5; max-width: 90ch; }
+/* the node, as a card row: what it is on the left, its buttons on the right */
+.ek-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--ek-line); border-radius: 8px; }
+.ek-row-main { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.ek-row-main > .ek-ico { width: 22px; height: 22px; color: var(--ek-accent); margin-top: 2px; }
+.ek-row-main .ek-muted { margin-top: 3px; overflow-wrap: anywhere; }
+.ek-addr { font-size: 14px; overflow-wrap: anywhere; }
+.ek-row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.ek-inline { display: inline; margin: 0; }
+.ek-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--ek-line); color: var(--ek-muted); white-space: nowrap; }
+.ek-pill.is-ok { background: var(--ek-ok-soft); color: var(--ek-ok); }
+.ek-pill.is-wait { background: var(--ek-accent-soft); color: var(--ek-accent); }
+.ek-pill.is-watch { background: var(--ek-warn-soft); color: var(--ek-warn); }
+.ek-pill.is-bad { background: var(--ek-bad-soft); color: var(--ek-bad); }
+/* setting a node up: the steps, the command, the code, the form */
+.ek-steps { margin: 0 0 14px; padding-left: 20px; line-height: 1.55; }
+.ek-steps li { margin-bottom: 8px; }
+.ek-pre { margin: 6px 0 0; padding: 8px 10px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ek-bg); color: var(--ek-ink); border: 1px solid var(--ek-line); border-radius: 4px; }
+.ek-code { display: inline-block; padding: 2px 10px; border-radius: 4px; font: 700 15px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 1px; background: var(--ek-ok-soft); color: var(--ek-ok); }
+.ek-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; max-width: 820px; }
+.ek-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ek-muted); margin: 0; }
+.ek-form input[type="text"] { padding: 6px 8px; border: 1px solid var(--ek-line); border-radius: 4px; background: var(--ek-card); color: var(--ek-ink); font-size: 13px; width: 100%; }
+/* the groups of logs */
+.ek-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-bottom: 12px; }
+.ek-group { display: flex; gap: 10px; align-items: flex-start; font-weight: normal; margin: 0; padding: 8px 10px; border: 1px solid var(--ek-line); border-radius: 6px; cursor: pointer; }
+.ek-group input { margin-top: 3px; flex: none; }
+.ek-group > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* the commands on the node */
+.ek-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ek-table td { padding: 7px 8px; border-bottom: 1px solid var(--ek-line); vertical-align: top; }
+.ek-table td:first-child { white-space: nowrap; width: 1%; }
+.ek-table code { background: var(--ek-bg); color: var(--ek-ink); padding: 1px 5px; border-radius: 3px; }
+/* phones */
+@media (max-width: 760px) {
+  .ek { padding: 10px; }
+  .ek-tiles { grid-template-columns: 1fr 1fr; }
+  .ek-form, .ek-groups { grid-template-columns: 1fr; }
+  .ek-table td:first-child { white-space: normal; }
+  .ek-table tr { display: flex; flex-direction: column; border-bottom: 1px solid var(--ek-line); }
+  .ek-table td { border: 0; width: auto; }
+}

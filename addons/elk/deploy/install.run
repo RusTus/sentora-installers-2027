@@ -1,0 +1,33 @@
+<?php
+/**
+ * Elk install step (run as root from the panel's folder, by zppy or the daemon): the panel's certificate for its Elk
+ * node, the module's folders, and the module for administrators only.
+ *
+ * Written by RusTus, 2026-11-20
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+require_once dirname(__FILE__) . '/../code/elk.php';
+
+$elkInstall = function () {
+    global $zdbh;
+    foreach (elk::Setup() as $l) {
+        echo "Elk: " . $l . ".\n";
+    }
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        // administrators only (group 1)
+        $zdbh->prepare("DELETE FROM x_permissions WHERE pe_module_fk = :m AND pe_group_fk <> 1")->execute(array(':m' => $id));
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = 1 AND pe_module_fk = :m");
+        $has->execute(array(':m' => $id));
+        if ((int) $has->fetchColumn() === 0) {
+            $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (1, :m)")->execute(array(':m' => $id));
+        }
+        echo "Elk: for administrators (Admin > Elk): add your Elk node there.\n";
+    }
+};
+$elkInstall();

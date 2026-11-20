@@ -1,0 +1,11 @@
+<?php
+/**
+ * Elk upgrade step (run by zppy as root, in the panel's folder, after the new files are in place): repairs what it
+ * needs (folders, the certificate, the AppArmor rule file). rsyslog's settings follow at the next daemon run.
+ *
+ * Written by RusTus, 2026-11-20
+ */
+require_once dirname(__FILE__) . '/../code/elk.php';
+foreach (elk::Setup() as $elkLine) {
+    echo "Elk: " . $elkLine . ".\n";
+}

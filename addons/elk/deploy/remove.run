@@ -1,0 +1,10 @@
+<?php
+/**
+ * Elk removal (run as root): rsyslog stops sending to the Elk node; the ACLs and the AppArmor rule file go. The
+ * panel's certificate and the node's settings stay (a reinstall goes on where it was); the logs stay on the node.
+ *
+ * Written by RusTus, 2026-11-20
+ */
+require_once dirname(__FILE__) . '/../code/elk.php';
+elk::Remove();
+echo "Elk: rsyslog no longer sends to the Elk node; its settings and permissions are removed.\n";

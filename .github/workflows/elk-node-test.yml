@@ -1,6 +1,7 @@
-# Sentora Elk node test: Ubuntu 26.04 in a container with systemd is made an Elk node
-# (elk-node/sentora2027-elk-node: Elasticsearch, Logstash, Kibana 9 and Sentora's dashboards) and fed real
-# panel log lines of every kind over TLS with the panel's certificate, including what it must refuse.
+# Sentora Elk test, the whole way: a real panel (the Docker image) with the Elk add-on, and Ubuntu 26.04 in a
+# container with systemd made its Elk node (elk-node/sentora2027-elk-node: Elasticsearch, Logstash, Kibana 9
+# and Sentora's dashboards); the panel pairs and its own logs arrive; real log lines of every kind, and what
+# the node must refuse.
 # The script: .github/scripts/elk-node-test.sh. Results kept 14 days.
 name: Elk node test
 
@@ -10,6 +11,8 @@ on:
     branches: [master2027]
     paths:
       - elk-node/**
+      - addons/elk/**
+      - sentora-repo/elk.zpp
       - tests/elk/**
       - .github/scripts/elk-node-test.sh
       - .github/workflows/elk-node-test.yml
@@ -20,7 +23,7 @@ permissions:
 jobs:
   elk-node:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - name: The dashboards are the builder's
