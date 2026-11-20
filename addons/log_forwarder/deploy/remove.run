@@ -6,5 +6,7 @@
  * Written by RusTus, 2026-11-09
  */
 require_once dirname(__FILE__) . '/../code/logforwarder.php';
+require_once dirname(__FILE__) . '/../code/elk.php';
 log_forwarder::Remove();
+elk::Remove();
 echo "Log Forwarder: rsyslog no longer forwards; its settings and permissions are removed.\n";

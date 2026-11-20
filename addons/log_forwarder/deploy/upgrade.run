@@ -7,7 +7,11 @@
  * Written by RusTus, 2026-11-09
  */
 require_once dirname(__FILE__) . '/../code/logforwarder.php';
+require_once dirname(__FILE__) . '/../code/elk.php';
 log_forwarder::Ensure();
 foreach (log_forwarder::Setup() as $logForwarderLine) {
     echo "Log Forwarder: " . $logForwarderLine . ".\n";
+}
+foreach (elk::Setup() as $logForwarderLine) {
+    echo "Log Forwarder (Elk node): " . $logForwarderLine . ".\n";
 }

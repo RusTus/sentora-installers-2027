@@ -1,0 +1,246 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes.",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "title": "Visitors",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 7,
+    "x": 34,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.geo.country_iso_code",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "title": "Countries",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 7,
+    "x": 41,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" and event.action : *) or (sentora.log : \"fail2ban\" and event.action : \"ban\") or (sentora.log : \"web-access\" and http.response.status_code : (403 or 404) and url.path : (\"/wp-login.php\" or \"/xmlrpc.php\" or \"/.env\" or \"/.git/config\" or \"/phpmyadmin/\" or \"/admin/\" or \"/wp-admin/setup-config.php\"))",
+     "language": "kql"
+    },
+    "title": "Attacks and failed logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 7,
+    "x": 34,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"fail2ban\" and event.action : \"ban\"",
+     "language": "kql"
+    },
+    "title": "Addresses banned",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 7,
+    "x": 41,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Visits",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.geo.country_name"
+      ],
+      "label": "Country",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Visitors by country",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 14,
+    "x": 34,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Attempts",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" and event.action : *) or (sentora.log : \"fail2ban\" and event.action : \"ban\") or (sentora.log : \"web-access\" and http.response.status_code : (403 or 404) and url.path : (\"/wp-login.php\" or \"/xmlrpc.php\" or \"/.env\" or \"/.git/config\" or \"/phpmyadmin/\" or \"/admin/\" or \"/wp-admin/setup-config.php\"))",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.geo.country_name"
+      ],
+      "label": "Country",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Attacks by country",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 14,
+    "x": 34,
+    "y": 22
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 30000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: World map"
+}

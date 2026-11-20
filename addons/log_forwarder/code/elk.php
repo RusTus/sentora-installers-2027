@@ -1,11 +1,11 @@
 <?php
 
 /**
- * Elk (administrators): the panel's logs, live, to the panel's Elk node (Elasticsearch, Logstash and Kibana on a
+ * Log Forwarder's Elk node (administrators): the panel's logs, live, to the panel's Elk node (Elasticsearch, Logstash and Kibana on a
  * server of its own, installed with sentora2027-elk-node), through this server's own rsyslog.
  *
  * - The panel has a certificate of its own for this (made by the daemon, root's key in DIR; the certificate itself is
- *   public: the node's installer fetches it from code/node.php?cert=1 and shows the panel's code, which the
+ *   public: the node's installer fetches it from modules/log_forwarder/code/node.php?cert=1 and shows the panel's code, which the
  *   administrator compares with this page). The node takes lines only from that certificate.
  * - "Add the Elk node" stores the node's address and key (SE1-...); the daemon connects, finds the node's certificate
  *   authority in what the node shows, compares its code with the key typed, and only then pins it: rsyslog checks the
@@ -20,11 +20,12 @@
  * @package Sentora
  * @license GPL-3.0 https://www.gnu.org/licenses/gpl-3.0.html
  *
- * Written by RusTus, 2026-11-20
+ * Written by RusTus, 2026-11-20 (part of Log Forwarder since 203)
  */
 class elk
 {
     const DIR = '/etc/sentora/elk';
+    /** The separate rsyslog file of the first version (removed: the Elk node's lines are in Log Forwarder's file). */
     const CONF = '/etc/rsyslog.d/61-sentora-elk.conf';
     const STATE_DIR = '/var/lib/sentora/elk';
     const AA_SNIPPET = '/etc/apparmor.d/rsyslog.d/sentora-elk';
@@ -73,7 +74,7 @@ class elk
         $q->execute(array(':n' => $name));
         if ((int) $q->fetchColumn() === 0) {
             $zdbh->prepare("INSERT INTO x_settings (so_name_vc, so_cleanname_vc, so_value_tx, so_defvalues_tx, so_desc_tx, so_module_vc, so_usereditable_en)
-                VALUES (:n, :c, '', NULL, 'Elk: the Elk node (written by the panel and the daemon).', 'Elk', 'false')")
+                VALUES (:n, :c, '', NULL, 'Log Forwarder: the Elk node (written by the panel and the daemon).', 'Log Forwarder', 'false')")
                 ->execute(array(':n' => $name, ':c' => ucfirst(str_replace('_', ' ', $name))));
         }
         $zdbh->prepare("UPDATE x_settings SET so_value_tx = :v WHERE so_name_vc = :n")->execute(array(':v' => (string) $value, ':n' => $name));
@@ -674,41 +675,36 @@ class elk
     }
 
     /**
-     * Does another rsyslog file load imfile already (loading it twice is an error)?
+     * What the Elk node gets, for Log Forwarder's rsyslog settings (null: nothing, not paired or rsyslog missing).
      *
-     * @return bool
+     * @return array{addr: string, files: array<string, array{0: string, 1: string, 2: string}>, streams: string[]}|null
      */
-    static function ImfileLoadedElsewhere()
+    static function Plan()
     {
-        foreach (array_merge(array('/etc/rsyslog.conf'), (array) glob('/etc/rsyslog.d/*.conf')) as $f) {
-            if ($f !== self::CONF && is_file($f) && preg_match('/^\s*(module\s*\(\s*load\s*=\s*"imfile"|\$ModLoad\s+imfile)/mi', (string) @file_get_contents($f))) {
-                return true;
-            }
+        $groups = self::Chosen();
+        if (!self::Paired() || !$groups || self::Missing()) {
+            return null;
         }
-        return false;
+        $n = self::Node();
+        $streams = array_values(array_intersect($groups, array('mail', 'logins')));
+        $files = self::Files($groups);
+        return ($files || $streams) ? array('addr' => $n['addr'], 'files' => $files, 'streams' => $streams) : null;
     }
 
     /**
-     * rsyslog's settings for the node and the files ('' when nothing is to be sent).
+     * The Elk node's part of Log Forwarder's rsyslog settings: the template and the output (head), and the lines rsyslog
+     * already receives from the journal, by program (tail). The files are followed by Log Forwarder's own inputs (each
+     * file once: rsyslog follows a file in one input only), whose rulesets call sentora_elk_out with $.ek* set.
      *
-     * @param string $addr The node.
-     * @param array $files path => (kind, account, domain).
-     * @param string[] $groups
-     * @return string
+     * @param array $plan From Plan().
+     * @return array{head: string, tail: string}
      */
-    static function Config($addr, array $files, array $groups)
+    static function Part(array $plan)
     {
-        $streams = array_intersect($groups, array('mail', 'logins'));
-        if (!$files && !$streams) {
-            return '';
-        }
         $q = function ($s) { return '"' . str_replace(array('\\', '"'), array('\\\\', '\\"'), (string) $s) . '"'; };
         $host = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
-        $c = "# Sentora Elk: written by the Sentora daemon from the panel's Elk page (Admin > Elk).\n# Changes made here are replaced; use the panel.\n\n";
-        if ($files && !self::ImfileLoadedElsewhere()) {
-            $c .= "module(load=\"imfile\" mode=\"inotify\")\n";
-        }
-        $c .= "template(name=\"SentoraElk\" type=\"list\" option.jsonf=\"on\") {\n"
+        $head = "# The Elk node (administrators): the panel's own logs as JSON lines over TLS, the node's authority pinned\n"
+            . "template(name=\"SentoraElk\" type=\"list\" option.jsonf=\"on\") {\n"
             . "    property(outname=\"@timestamp\" name=\"timereported\" dateFormat=\"rfc3339\" format=\"jsonf\")\n"
             . "    property(outname=\"sentora_host\" name=\"\$.ekhost\" format=\"jsonf\")\n"
             . "    property(outname=\"sentora_log\" name=\"\$.eklog\" format=\"jsonf\")\n"
@@ -716,55 +712,19 @@ class elk
             . "    property(outname=\"sentora_domain\" name=\"\$.ekdomain\" format=\"jsonf\")\n"
             . "    property(outname=\"message\" name=\"\$.ekmsg\" format=\"jsonf\")\n}\n"
             . "ruleset(name=\"sentora_elk_out\") {\n    set \$.ekhost = " . $q($host) . ";\n"
-            . "    action(type=\"omfwd\" name=\"sentora_elk\" target=" . $q($addr) . " port=\"" . self::PORT . "\" protocol=\"tcp\" template=\"SentoraElk\" TCP_Framing=\"traditional\"\n"
+            . "    action(type=\"omfwd\" name=\"sentora_elk\" target=" . $q($plan['addr']) . " port=\"" . self::PORT . "\" protocol=\"tcp\" template=\"SentoraElk\" TCP_Framing=\"traditional\"\n"
             . "        StreamDriver=\"gtls\" StreamDriverMode=\"1\" StreamDriverAuthMode=\"x509/name\" StreamDriverPermittedPeers=\"" . self::NODE_NAME . "\"\n"
             . "        streamDriver.CAFile=\"" . self::DIR . "/node-ca.crt\" streamDriver.CertFile=\"" . self::DIR . "/panel.crt\" streamDriver.KeyFile=\"" . self::DIR . "/panel.key\"\n"
             . "        queue.type=\"LinkedList\" queue.filename=\"sentora_elk\" queue.maxDiskSpace=\"" . self::QUEUE . "\" queue.saveOnShutdown=\"on\"\n"
             . "        action.resumeRetryCount=\"-1\" action.resumeInterval=\"30\")\n}\n\n";
-        $i = 0;
-        foreach ($files as $path => $x) {
-            $i++;
-            $c .= "ruleset(name=\"sentora_elk_f" . $i . "\") { set \$.eklog = " . $q($x[0]) . "; set \$.ekacct = " . $q($x[1]) . "; set \$.ekdomain = " . $q($x[2])
-                . "; set \$.ekmsg = \$msg; call sentora_elk_out }\n"
-                . "input(type=\"imfile\" file=" . $q($path) . " tag=\"sentora-elk\" ruleset=\"sentora_elk_f" . $i . "\" freshStartTail=\"on\" reopenOnTruncate=\"on\")\n";
-        }
-        // lines rsyslog already receives (the journal, the system's log socket), by program: sent with their tag
         $rules = array();
-        if (in_array('mail', $groups, true)) {
+        if (in_array('mail', $plan['streams'], true)) {
             $rules[] = "if (\$programname startswith \"postfix\") then {\n    set \$.eklog = \"mail\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
         }
-        if (in_array('logins', $groups, true)) {
+        if (in_array('logins', $plan['streams'], true)) {
             $rules[] = "if (\$programname == \"sshd\" or \$programname == \"sshd-session\" or \$programname == \"sudo\") then {\n    set \$.eklog = \"auth\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
         }
-        if ($rules) {
-            $c .= "\n" . implode("\n", $rules) . "\n";
-        }
-        return $c;
-    }
-
-    /**
-     * Put new settings in place only if rsyslog accepts them (rsyslogd -N1); otherwise the previous ones stay.
-     * Then restart rsyslog.
-     *
-     * @param string $conf
-     * @return string What happened.
-     */
-    static function Install($conf)
-    {
-        $backup = @file_get_contents(self::CONF);
-        self::WriteFile(self::CONF, $conf, 0644);
-        exec(self::Own(escapeshellarg(self::RsyslogBin() !== '' ? self::RsyslogBin() : 'rsyslogd') . ' -N1 2>&1'), $out, $rc);
-        $errors = array_values(array_filter($out, function ($l) { return stripos($l, 'error') !== false; }));
-        if ($rc !== 0 || $errors) {
-            if ($backup !== false) {
-                self::WriteFile(self::CONF, $backup, 0644);
-            } else {
-                @unlink(self::CONF);
-            }
-            return 'rsyslog refused the new settings; the previous ones stay: ' . substr(implode(' ', $errors ?: array_slice($out, -2)), 0, 300);
-        }
-        self::Restart();
-        return 'rsyslog sends with the new settings.';
+        return array('head' => $head, 'tail' => $rules ? "\n# The Elk node: lines rsyslog already receives (the journal), by program, sent with their tag\n" . implode("\n", $rules) . "\n" : '');
     }
 
     /**
@@ -815,84 +775,92 @@ class elk
     }
 
     /**
-     * Root, every daemon run: the panel's certificate, the node paired when one was added, rsyslog's settings in line
-     * with the page, rsyslog allowed to read the files, and the state noted for the page.
+     * Root, every daemon run, before Log Forwarder writes rsyslog's settings: the panel's certificate, the node paired when
+     * one was added on the page, rsyslog installed when the node is to get lines.
      *
      * @return string[] What it did, for the daemon log.
      */
-    static function Apply()
+    static function Prepare()
     {
         $say = array();
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
-            return array('Skipped (needs root).');
+            return $say;
         }
         foreach (self::Setup() as $l) {
             $say[] = $l;
         }
-        $old = self::State();
-        $st = array('time' => time(), 'acl' => isset($old['acl']) && is_array($old['acl']) ? $old['acl'] : array(),
-            'install_tried' => isset($old['install_tried']) ? (int) $old['install_tried'] : 0);
+        // the separate file of the Elk add-on's first version: its lines are in Log Forwarder's file now
+        if (is_file(self::CONF)) {
+            @unlink(self::CONF);
+        }
         $n = self::Node();
-        // a node added on the page: paired here (and again after a failed try, every run)
         if ($n['addr'] !== '' && !self::Paired()) {
             $say[] = self::Pair();
-            $n = self::Node();
         } elseif (self::Paired() && @file_get_contents(self::DIR . '/node-ca.crt') !== $n['ca']) {
             self::WriteFile(self::DIR . '/node-ca.crt', $n['ca'], 0644, self::RsyslogGroup());
         }
-        $groups = self::Chosen();
-        if (self::Paired() && $groups && self::Missing() && time() - $st['install_tried'] > 3600) {
-            $st['install_tried'] = time();
+        $old = self::State();
+        if (self::Paired() && self::Chosen() && self::Missing() && time() - (int) ($old['install_tried'] ?? 0) > 3600) {
+            $old['install_tried'] = time();
+            self::WriteFile(self::STATE_DIR . '/status.json', json_encode($old, JSON_UNESCAPED_SLASHES), 0640, 'sentora');
             $say[] = self::InstallMissing();
         }
-        $files = self::Paired() ? self::Files($groups) : array();
-        $conf = self::Paired() && !self::Missing() ? self::Config($n['addr'], $files, $groups) : '';
-        $current = @file_get_contents(self::CONF);
-        if ($conf === '' && $current !== false) {
-            @unlink(self::CONF);
-            self::Restart();
-            $say[] = 'Nothing to send: rsyslog no longer sends to an Elk node.';
-        } elseif ($conf !== '' && $current !== $conf) {
-            $res = self::Install($conf);
-            $say[] = $res;
-            if (strpos($res, 'refused') !== false) {
-                $st['error'] = $res;
-            }
+        return $say;
+    }
+
+    /**
+     * Root, every daemon run, after Log Forwarder wrote rsyslog's settings: rsyslog may read the Elk node's files, and
+     * the state for the page (the queue on disk, a check of the connection every 10 minutes or when asked).
+     *
+     * @param string $rsyslogSaid What Log Forwarder's installing of the settings said ('' when unchanged).
+     * @return string[] What it did, for the daemon log.
+     */
+    static function After($rsyslogSaid = '')
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            return array();
         }
-        if (!isset($st['error']) && isset($old['error']) && $conf !== '' && $current === $conf) {
-            $st['error'] = $old['error'];
-        }
-        $st['acl'] = self::Grant(array_keys($files), $st['acl']);
+        $old = self::State();
+        $plan = self::Plan();
+        $files = $plan ? $plan['files'] : array();
+        $st = array('time' => time(), 'install_tried' => (int) ($old['install_tried'] ?? 0));
+        $st['acl'] = self::Grant(array_keys($files), isset($old['acl']) && is_array($old['acl']) ? $old['acl'] : array());
         $st['files'] = count($files);
         $st['kinds'] = array_values(array_unique(array_map(function ($x) { return $x[0]; }, $files)));
         $st['missing'] = self::Missing();
-        // the queue on disk (lines waiting while the node is away) and a check of the connection every 10 minutes
+        if (strpos($rsyslogSaid, 'refused') !== false) {
+            $st['error'] = $rsyslogSaid;
+        } elseif ($rsyslogSaid === '' && !empty($old['error'])) {
+            $st['error'] = $old['error'];
+        }
         $qb = 0;
         foreach ((array) glob('/var/spool/rsyslog/sentora_elk*') as $qf) {
             $qb += (int) @filesize($qf);
         }
         $st['queued'] = $qb;
         if (self::Paired()) {
-            $prev = isset($old['probe']) && time() - (int) $old['probe'] < 600 && (int) self::Setting(self::S_CHECK) < (int) $old['probe'] ? $old : null;
-            if ($prev === null) {
+            $n = self::Node();
+            $fresh = isset($old['probe']) && time() - (int) $old['probe'] < 600 && (int) self::Setting(self::S_CHECK) < (int) $old['probe'];
+            if ($fresh) {
+                $st['probe'] = $old['probe'];
+                $st['reachable'] = $old['reachable'];
+                $st['probetext'] = $old['probetext'];
+            } else {
                 $c = self::Connect($n['addr'], true);
                 $st['probe'] = time();
                 $st['reachable'] = $c['ok'];
                 $st['probetext'] = $c['text'];
-            } else {
-                $st['probe'] = $prev['probe'];
-                $st['reachable'] = $prev['reachable'];
-                $st['probetext'] = $prev['probetext'];
             }
         }
         self::WriteFile(self::STATE_DIR . '/status.json', json_encode($st, JSON_UNESCAPED_SLASHES), 0640, 'sentora');
-        $say[] = self::Paired() ? ('Sending ' . count($files) . ' log file(s)' . (array_intersect($groups, array('mail', 'logins')) ? ' and the mail and login lines' : '') . ' to the Elk node at ' . $n['addr'] . '.')
-            : ($n['addr'] !== '' ? 'Waiting to pair with the Elk node.' : 'No Elk node yet.');
-        return $say;
+        $n = self::Node();
+        return array($plan ? ('sending ' . count($files) . ' log file(s)' . ($plan['streams'] ? ' and the mail and login lines' : '') . ' to ' . $n['addr'] . '.')
+            : (self::Paired() ? 'paired; nothing chosen to send.' : ($n['addr'] !== '' ? 'waiting to pair with ' . $n['addr'] . '.' : 'no Elk node.')));
     }
 
     /**
-     * Root, when the module is removed or switched off: rsyslog stops sending; the ACLs and the AppArmor rule file go.
+     * Root, when the module is removed or switched off: the ACLs and the AppArmor rule file go (Log Forwarder takes its
+     * rsyslog settings away, the Elk node's part with them).
      * The panel's certificate and the node stay (a reinstall keeps them).
      *
      * @return void

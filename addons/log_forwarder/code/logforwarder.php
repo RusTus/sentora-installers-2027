@@ -45,6 +45,8 @@ class log_forwarder
     const QUEUE_ADMIN = '1g';
     /** The structured-data ID of the lines (the documentation enterprise number, RFC 5612). */
     const SDID = 'sentora@32473';
+    /** @var string What installing rsyslog's settings said in this run ('' when they were unchanged), for the Elk node's part. */
+    static $installed = '';
 
     // ---------------------------------------------------------------------------------------------
     // Settings
@@ -745,14 +747,18 @@ class log_forwarder
             }
         }
         // rsyslog's settings
-        $conf = self::Config($files, $active);
+        // (the Elk node's part too, administrators: code/elk.php; each file followed once)
+        $elk = class_exists('elk') ? elk::Plan() : null;
+        $conf = self::Config($files, $active, $elk);
         $current = @file_get_contents(self::CONF);
+        self::$installed = '';
         if ($conf === '' && $current !== false) {
             @unlink(self::CONF);
             self::Restart();
             $say[] = 'No destinations left: rsyslog no longer forwards.';
         } elseif ($conf !== '' && $current !== $conf) {
             $res = self::Install($conf);
+            self::$installed = $res;
             $say[] = $res;
             if (strpos($res, 'refused') !== false) {
                 foreach ($active as $id => $x) {
@@ -820,65 +826,88 @@ class log_forwarder
      *
      * @param array $files path => array(src, dests).
      * @param array $active id => array(d, target, ca, admin).
+     * @param array|null $elk The Elk node's part (elk::Plan()): its files are followed here too, each file once.
      * @return string
      */
-    static function Config($files, $active)
+    static function Config($files, $active, $elk = null)
     {
-        if (!$files || !$active) {
+        if ((!$files || !$active) && !$elk) {
             return '';
+        }
+        if (!$active) {
+            $files = array();
         }
         $q = function ($s) { return '"' . str_replace(array('\\', '"'), array('\\\\', '\\"'), (string) $s) . '"'; };
         $c = "# Sentora Log Forwarder: written by the Sentora daemon from the panel's Log Forwarder page.\n"
             . "# Changes made here are replaced; use the panel.\n\n";
-        if (!self::ImfileLoadedElsewhere()) {
+        $elkFiles = $elk ? $elk['files'] : array();
+        if (($files || $elkFiles) && !self::ImfileLoadedElsewhere()) {
             $c .= "module(load=\"imfile\" mode=\"inotify\")\n";
         }
-        foreach (array('SentoraLogForward' => '', 'SentoraLogForwardLine' => "\n") as $tname => $end) {
-        $c .= "template(name=\"" . $tname . "\" type=\"list\") {\n"
-            . "    constant(value=\"<\") property(name=\"pri\") constant(value=\">1 \")\n"
-            . "    property(name=\"timegenerated\" dateFormat=\"rfc3339\") constant(value=\" \")\n"
-            . "    property(name=\"hostname\") constant(value=\" sentora - \") property(name=\"\$.lftype\")\n"
-            . "    constant(value=\" [" . self::SDID . " account=\\\"\") property(name=\"\$.lfacct\")\n"
-            . "    constant(value=\"\\\" domain=\\\"\") property(name=\"\$.lfdomain\")\n"
-            . "    constant(value=\"\\\" log=\\\"\") property(name=\"\$.lftype\") constant(value=\"\\\"] \")\n"
-            . "    property(name=\"msg\" droplastlf=\"on\")" . ($end !== '' ? " constant(value=\"\\n\")" : '') . "\n}\n";
-        }
-        $c .= "\n";
-        foreach ($active as $id => $x) {
-            $c .= "ruleset(name=\"sentora_lf_d" . $id . "\") {\n"
-                . "    action(type=\"omfwd\" name=\"sentora_lf_" . $id . "\" target=" . $q($x['target']) . " port=\"" . (int) $x['d']['port'] . "\" protocol=\"tcp\"\n"
-                . "        template=\"" . ($x['d']['framing'] === 'line' ? 'SentoraLogForwardLine" TCP_Framing="traditional' : 'SentoraLogForward" TCP_Framing="octet-counted') . "\"\n"
-                . "        StreamDriver=\"gtls\" StreamDriverMode=\"1\" StreamDriverAuthMode=\"x509/name\" StreamDriverPermittedPeers=" . $q($x['d']['host']) . "\n"
-                . "        streamDriver.CAFile=" . $q($x['ca']) . "\n"
-                . "        queue.type=\"LinkedList\" queue.filename=\"sentora_lf_" . $id . "\" queue.maxDiskSpace=\"" . ($x['admin'] ? self::QUEUE_ADMIN : self::QUEUE_CLIENT) . "\"\n"
-                . "        queue.saveOnShutdown=\"on\" action.resumeRetryCount=\"-1\" action.resumeInterval=\"30\")\n}\n";
-        }
-        $c .= "\n";
-        $i = 0;
-        foreach ($files as $path => $f) {
-            $i++;
-            $s = $f['src'];
-            $c .= "ruleset(name=\"sentora_lf_f" . $i . "\") {\n"
-                . "    set \$.lftype = " . $q($s['type']) . ";\n    set \$.lfacct = " . $q($s['account']) . ";\n    set \$.lfdomain = " . $q($s['domain']) . ";\n";
-            foreach (array_unique($f['dests']) as $id) {
-                $c .= "    call sentora_lf_d" . (int) $id . "\n";
+        if ($active) {
+            foreach (array('SentoraLogForward' => '', 'SentoraLogForwardLine' => "\n") as $tname => $end) {
+            $c .= "template(name=\"" . $tname . "\" type=\"list\") {\n"
+                . "    constant(value=\"<\") property(name=\"pri\") constant(value=\">1 \")\n"
+                . "    property(name=\"timegenerated\" dateFormat=\"rfc3339\") constant(value=\" \")\n"
+                . "    property(name=\"hostname\") constant(value=\" sentora - \") property(name=\"\$.lftype\")\n"
+                . "    constant(value=\" [" . self::SDID . " account=\\\"\") property(name=\"\$.lfacct\")\n"
+                . "    constant(value=\"\\\" domain=\\\"\") property(name=\"\$.lfdomain\")\n"
+                . "    constant(value=\"\\\" log=\\\"\") property(name=\"\$.lftype\") constant(value=\"\\\"] \")\n"
+                . "    property(name=\"msg\" droplastlf=\"on\")" . ($end !== '' ? " constant(value=\"\\n\")" : '') . "\n}\n";
             }
-            $c .= "}\n"
-                . "input(type=\"imfile\" file=" . $q($path) . " tag=\"sentora\" ruleset=\"sentora_lf_f" . $i . "\" facility=\"local6\" severity="
-                . ($s['type'] === 'error' || $s['type'] === 'panel-error' ? '"err"' : '"info"') . " freshStartTail=\"on\" reopenOnTruncate=\"on\")\n";
+            $c .= "\n";
+            foreach ($active as $id => $x) {
+                $c .= "ruleset(name=\"sentora_lf_d" . $id . "\") {\n"
+                    . "    action(type=\"omfwd\" name=\"sentora_lf_" . $id . "\" target=" . $q($x['target']) . " port=\"" . (int) $x['d']['port'] . "\" protocol=\"tcp\"\n"
+                    . "        template=\"" . ($x['d']['framing'] === 'line' ? 'SentoraLogForwardLine" TCP_Framing="traditional' : 'SentoraLogForward" TCP_Framing="octet-counted') . "\"\n"
+                    . "        StreamDriver=\"gtls\" StreamDriverMode=\"1\" StreamDriverAuthMode=\"x509/name\" StreamDriverPermittedPeers=" . $q($x['d']['host']) . "\n"
+                    . "        streamDriver.CAFile=" . $q($x['ca']) . "\n"
+                    . "        queue.type=\"LinkedList\" queue.filename=\"sentora_lf_" . $id . "\" queue.maxDiskSpace=\"" . ($x['admin'] ? self::QUEUE_ADMIN : self::QUEUE_CLIENT) . "\"\n"
+                    . "        queue.saveOnShutdown=\"on\" action.resumeRetryCount=\"-1\" action.resumeInterval=\"30\")\n}\n";
+            }
+            $c .= "\n";
         }
-        return $c;
+        $part = $elk ? elk::Part($elk) : array('head' => '', 'tail' => '');
+        $c .= $part['head'];
+        // each file once (rsyslog follows a file in one input only): its lines to every destination that wants it
+        $all = array_unique(array_merge(array_keys($files), array_keys($elkFiles)));
+        sort($all);
+        $i = 0;
+        foreach ($all as $path) {
+            $i++;
+            $body = '';
+            $sev = '"info"';
+            if (isset($files[$path])) {
+                $s = $files[$path]['src'];
+                $body .= "    set \$.lftype = " . $q($s['type']) . ";\n    set \$.lfacct = " . $q($s['account']) . ";\n    set \$.lfdomain = " . $q($s['domain']) . ";\n";
+                foreach (array_unique($files[$path]['dests']) as $id) {
+                    $body .= "    call sentora_lf_d" . (int) $id . "\n";
+                }
+                $sev = $s['type'] === 'error' || $s['type'] === 'panel-error' ? '"err"' : '"info"';
+            }
+            if (isset($elkFiles[$path])) {
+                $e = $elkFiles[$path];
+                $body .= "    set \$.eklog = " . $q($e[0]) . "; set \$.ekacct = " . $q($e[1]) . "; set \$.ekdomain = " . $q($e[2]) . "; set \$.ekmsg = \$msg;\n    call sentora_elk_out\n";
+            }
+            $c .= "ruleset(name=\"sentora_lf_f" . $i . "\") {\n" . $body . "}\n"
+                . "input(type=\"imfile\" file=" . $q($path) . " tag=\"sentora\" ruleset=\"sentora_lf_f" . $i . "\" facility=\"local6\" severity="
+                . $sev . " freshStartTail=\"on\" reopenOnTruncate=\"on\")\n";
+        }
+        return $c . $part['tail'];
     }
 
     /**
-     * Does another rsyslog file load imfile already (loading it twice is an error)?
+     * Does an rsyslog file read before this one load imfile already (loading it twice is an error)?
      *
      * @return bool
      */
     static function ImfileLoadedElsewhere()
     {
+        // (only a file rsyslog reads before this one counts: it reads /etc/rsyslog.d in name order, and an input
+        // before the module is loaded is an error; Log Forwarder's 60- and the Elk node's 61- files agree on this)
         foreach (array_merge(array('/etc/rsyslog.conf'), (array) glob('/etc/rsyslog.d/*.conf')) as $f) {
-            if ($f !== self::CONF && is_file($f) && preg_match('/^\s*(module\s*\(\s*load\s*=\s*"imfile"|\$ModLoad\s+imfile)/mi', (string) @file_get_contents($f))) {
+            if ($f !== self::CONF && ($f === '/etc/rsyslog.conf' || strcmp(basename($f), basename(self::CONF)) < 0)
+                && is_file($f) && preg_match('/^\s*(module\s*\(\s*load\s*=\s*"imfile"|\$ModLoad\s+imfile)/mi', (string) @file_get_contents($f))) {
                 return true;
             }
         }

@@ -14,6 +14,7 @@ DV = {"type": "data_view_reference", "ref_id": "sentora-logs"}
 WEB = 'sentora.log : "web-access"'
 DASHBOARDS = [
     ("sentora-overview", "Overview"),
+    ("sentora-worldmap", "World map"),
     ("sentora-websites", "Websites"),
     ("sentora-mail", "Mail"),
     ("sentora-security", "Security"),
@@ -182,6 +183,87 @@ BOARDS = {
     ]),
 }
 
+# ---- The world map (Kibana Maps; the dashboards API takes no map panel, so the installer adds it to the
+# World map dashboard by reference with addmap.py): a dark world, where visitors come from as a heat map,
+# attacks and failed logins as red circles with their count, countries shaded by visits.
+PROBES = '("/wp-login.php" or "/xmlrpc.php" or "/.env" or "/.git/config" or "/phpmyadmin/" or "/admin/" or "/wp-admin/setup-config.php")'
+BAD = ('(event.outcome : "failure" and event.action : *) or (sentora.log : "fail2ban" and event.action : "ban") '
+       'or (sentora.log : "web-access" and http.response.status_code : (403 or 404) and url.path : ' + PROBES + ')')
+PEOPLE = WEB + " and sentora.bot : false"
+
+
+def kq(s):
+    return {"query": s, "language": "kuery"}
+
+
+MAP_LAYERS = [
+    {"id": "world", "label": "World", "type": "EMS_VECTOR_TILE", "alpha": 1, "visible": True, "minZoom": 0, "maxZoom": 24,
+     "sourceDescriptor": {"type": "EMS_TMS", "isAutoSelect": False, "id": "dark_map"},
+     "style": {"type": "EMS_VECTOR_TILE", "color": ""}, "includeInFitToBounds": True},
+    {"id": "countries", "label": "Visits by country", "type": "GEOJSON_VECTOR", "alpha": 0.45, "visible": True, "minZoom": 0, "maxZoom": 24,
+     "sourceDescriptor": {"type": "EMS_FILE", "id": "world_countries", "tooltipProperties": ["name"]},
+     "joins": [{"leftField": "iso2", "right": {"type": "ES_TERM_SOURCE", "id": "visits", "indexPatternRefName": "layer_1_join_0_index_pattern",
+                "term": "source.geo.country_iso_code", "size": 250, "metrics": [{"type": "count", "label": "Visits"}],
+                "applyGlobalQuery": True, "applyGlobalTime": True, "whereQuery": kq(PEOPLE)}}],
+     "style": {"type": "VECTOR", "isTimeAware": True, "properties": {
+         "fillColor": {"type": "DYNAMIC", "options": {"color": "Blues", "colorCategory": "palette_0", "type": "ORDINAL",
+                       "field": {"name": "__kbnjoin__count__visits", "origin": "join"}, "fieldMetaOptions": {"isEnabled": True, "sigma": 3}}},
+         "lineColor": {"type": "STATIC", "options": {"color": "#41506a"}}, "lineWidth": {"type": "STATIC", "options": {"size": 0.5}}}}},
+    {"id": "visitors", "label": "Where visitors come from", "type": "HEATMAP", "alpha": 0.9, "visible": True, "minZoom": 0, "maxZoom": 24,
+     "query": kq(PEOPLE),
+     "sourceDescriptor": {"type": "ES_GEO_GRID", "id": "visitors", "indexPatternRefName": "layer_2_source_index_pattern",
+                          "geoField": "source.geo.location", "requestType": "heatmap", "resolution": "FINE", "metrics": [{"type": "count"}],
+                          "applyGlobalQuery": True, "applyGlobalTime": True},
+     "style": {"type": "HEATMAP", "colorRampName": "theclassic"}},
+    {"id": "attacks", "label": "Attacks and failed logins", "type": "GEOJSON_VECTOR", "alpha": 0.9, "visible": True, "minZoom": 0, "maxZoom": 24,
+     "query": kq(BAD),
+     "sourceDescriptor": {"type": "ES_GEO_GRID", "id": "attacks", "indexPatternRefName": "layer_3_source_index_pattern",
+                          "geoField": "source.geo.location", "requestType": "point", "resolution": "COARSE",
+                          "metrics": [{"type": "count", "label": "Attempts"}], "applyGlobalQuery": True, "applyGlobalTime": True},
+     "style": {"type": "VECTOR", "isTimeAware": True, "properties": {
+         "fillColor": {"type": "STATIC", "options": {"color": "#f04e3e"}},
+         "lineColor": {"type": "STATIC", "options": {"color": "#ffd8d0"}}, "lineWidth": {"type": "STATIC", "options": {"size": 1.5}},
+         "iconSize": {"type": "DYNAMIC", "options": {"minSize": 7, "maxSize": 28, "field": {"name": "doc_count", "origin": "source"},
+                      "fieldMetaOptions": {"isEnabled": True, "sigma": 3}}},
+         "labelText": {"type": "DYNAMIC", "options": {"field": {"name": "doc_count", "origin": "source"}}},
+         "labelColor": {"type": "STATIC", "options": {"color": "#ffffff"}}, "labelSize": {"type": "STATIC", "options": {"size": 11}}}}},
+]
+WORLD_MAP = {
+    "attributes": {
+        "title": "Sentora: World map",
+        "description": "Where the hits come from (heat), attacks and failed logins (red), visits by country. Made by the Sentora Elk node installer.",
+        "layerListJSON": json.dumps(MAP_LAYERS),
+        "mapStateJSON": json.dumps({"zoom": 1.4, "center": {"lon": 10, "lat": 25}, "timeFilters": {"from": "now-24h", "to": "now"},
+                                    "refreshConfig": {"isPaused": False, "interval": 30000}, "query": kq(""), "filters": [],
+                                    "settings": {"autoFitToDataBounds": False, "backgroundColor": "#0b1626"}}),
+        "uiStateJSON": json.dumps({"isLayerTOCOpen": True, "openTOCDetails": []}),
+    },
+    "references": [{"name": n, "type": "index-pattern", "id": "sentora-logs"} for n in
+                   ("layer_1_join_0_index_pattern", "layer_2_source_index_pattern", "layer_3_source_index_pattern")],
+}
+# The World map dashboard: room for the map on the left (added by addmap.py at x 0, y 2, 34 x 30), live figures on the right
+WORLD_PANELS = []
+for i, (title, kql, op) in enumerate([
+        ("Visitors", PEOPLE, {"operation": "unique_count", "field": "source.ip"}),
+        ("Countries", PEOPLE, {"operation": "unique_count", "field": "source.geo.country_iso_code"}),
+        ("Attacks and failed logins", BAD, None),
+        ("Addresses banned", 'sentora.log : "fail2ban" and event.action : "ban"', None)]):
+    WORLD_PANELS.append((34 + (i % 2) * 7, 2 + (i // 2) * 5, 7, 5, metric(title, kql, "", op)))
+WORLD_PANELS.append((34, 12, 14, 10, table("Visitors by country", PEOPLE, ["source.geo.country_name"], 10, "Visits")))
+WORLD_PANELS.append((34, 22, 14, 10, table("Attacks by country", BAD, ["source.geo.country_name"], 10, "Attempts")))
+
+
+def build_free(title, placed, refresh=30000):
+    links = {"layout": "horizontal", "links": [{"type": "dashboardLink", "destination": d, "label": t} for d, t in DASHBOARDS]}
+    panels = [{"type": "links", "grid": {"x": 0, "y": 0, "w": 48, "h": 2}, "config": links}]
+    for x, y, w, h, cfg in placed:
+        panels.append({"type": "vis", "grid": {"x": x, "y": y, "w": w, "h": h}, "config": cfg})
+    return {"title": "Sentora: " + title, "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes.",
+            "time_range": {"from": "now-24h", "to": "now"}, "refresh_interval": {"pause": False, "value": refresh}, "panels": panels}
+
+
+BOARDS["sentora-worldmap"] = build_free("World map", WORLD_PANELS)
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "dashboards")
@@ -190,4 +272,7 @@ if __name__ == "__main__":
         with open(os.path.join(out, did + ".json"), "w") as f:
             json.dump(body, f, indent=1, sort_keys=True)
             f.write("\n")
-    print("wrote", len(BOARDS), "dashboards")
+    with open(os.path.join(out, "sentora-world-map.map.json"), "w") as f:
+        json.dump(WORLD_MAP, f, indent=1, sort_keys=True)
+        f.write("\n")
+    print("wrote", len(BOARDS), "dashboards and the world map")

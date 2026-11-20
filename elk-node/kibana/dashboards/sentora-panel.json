@@ -11,6 +11,11 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-websites",
       "label": "Websites",
       "type": "dashboardLink"

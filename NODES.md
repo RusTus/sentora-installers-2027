@@ -22,7 +22,7 @@ checks the other's by itself. Codes are base32 without the letters people mix up
 |---|---|---|---|---|
 | Backup node | backup-node/sentora2027-backup-node | Module Admin > Backup Config > Off-server backup | SB1 | SSH (the panel calls the node; the node's SSH key) |
 | Docker node | docker-node/sentora2027-docker-node | Docker Hosting > Nodes and apps | (its own) | HTTPS (the node calls the panel; signed and sealed messages with the add-on's own keys) |
-| Elk node | elk-node/sentora2027-elk-node (Ubuntu 26.04 for now, the owner's choice; other systems later) | Admin > Elk (the Elk add-on) | SE1 | TLS both ways on 6514 (the panel's rsyslog calls the node; the node takes only the panel's certificate, the panel pins the node's authority by its key) |
+| Elk node | elk-node/sentora2027-elk-node (Ubuntu 26.04 for now, the owner's choice; other systems later) | Advanced > Log Forwarder, Elk node (Log Forwarder 203+) | SE1 | TLS both ways on 6514 (the panel's rsyslog calls the node; the node takes only the panel's certificate, the panel pins the node's authority by its key) |
 
 ## The panel's side: `sys_nodes` (core, since 2027.86)
 

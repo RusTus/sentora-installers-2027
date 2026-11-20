@@ -10,6 +10,7 @@ require_once 'dryden/loader.inc.php';
 require_once 'cnf/db.php';
 require_once 'inc/dbc.inc.php';
 require_once dirname(__FILE__) . '/../code/logforwarder.php';
+require_once dirname(__FILE__) . '/../code/elk.php';
 
 $logForwarderInstall = function () {
     global $zdbh;
@@ -22,6 +23,9 @@ $logForwarderInstall = function () {
     log_forwarder::Ensure();
     foreach (log_forwarder::Setup() as $l) {
         $say($l . '.');
+    }
+    foreach (elk::Setup() as $l) {
+        $say('Elk node: ' . $l . '.');
     }
     $folder = basename(dirname(dirname(__FILE__)));
     $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");

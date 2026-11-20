@@ -1,0 +1,26 @@
+{
+ "attributes": {
+  "description": "Where the hits come from (heat), attacks and failed logins (red), visits by country. Made by the Sentora Elk node installer.",
+  "layerListJSON": "[{\"id\": \"world\", \"label\": \"World\", \"type\": \"EMS_VECTOR_TILE\", \"alpha\": 1, \"visible\": true, \"minZoom\": 0, \"maxZoom\": 24, \"sourceDescriptor\": {\"type\": \"EMS_TMS\", \"isAutoSelect\": false, \"id\": \"dark_map\"}, \"style\": {\"type\": \"EMS_VECTOR_TILE\", \"color\": \"\"}, \"includeInFitToBounds\": true}, {\"id\": \"countries\", \"label\": \"Visits by country\", \"type\": \"GEOJSON_VECTOR\", \"alpha\": 0.45, \"visible\": true, \"minZoom\": 0, \"maxZoom\": 24, \"sourceDescriptor\": {\"type\": \"EMS_FILE\", \"id\": \"world_countries\", \"tooltipProperties\": [\"name\"]}, \"joins\": [{\"leftField\": \"iso2\", \"right\": {\"type\": \"ES_TERM_SOURCE\", \"id\": \"visits\", \"indexPatternRefName\": \"layer_1_join_0_index_pattern\", \"term\": \"source.geo.country_iso_code\", \"size\": 250, \"metrics\": [{\"type\": \"count\", \"label\": \"Visits\"}], \"applyGlobalQuery\": true, \"applyGlobalTime\": true, \"whereQuery\": {\"query\": \"sentora.log : \\\"web-access\\\" and sentora.bot : false\", \"language\": \"kuery\"}}}], \"style\": {\"type\": \"VECTOR\", \"isTimeAware\": true, \"properties\": {\"fillColor\": {\"type\": \"DYNAMIC\", \"options\": {\"color\": \"Blues\", \"colorCategory\": \"palette_0\", \"type\": \"ORDINAL\", \"field\": {\"name\": \"__kbnjoin__count__visits\", \"origin\": \"join\"}, \"fieldMetaOptions\": {\"isEnabled\": true, \"sigma\": 3}}}, \"lineColor\": {\"type\": \"STATIC\", \"options\": {\"color\": \"#41506a\"}}, \"lineWidth\": {\"type\": \"STATIC\", \"options\": {\"size\": 0.5}}}}}, {\"id\": \"visitors\", \"label\": \"Where visitors come from\", \"type\": \"HEATMAP\", \"alpha\": 0.9, \"visible\": true, \"minZoom\": 0, \"maxZoom\": 24, \"query\": {\"query\": \"sentora.log : \\\"web-access\\\" and sentora.bot : false\", \"language\": \"kuery\"}, \"sourceDescriptor\": {\"type\": \"ES_GEO_GRID\", \"id\": \"visitors\", \"indexPatternRefName\": \"layer_2_source_index_pattern\", \"geoField\": \"source.geo.location\", \"requestType\": \"heatmap\", \"resolution\": \"FINE\", \"metrics\": [{\"type\": \"count\"}], \"applyGlobalQuery\": true, \"applyGlobalTime\": true}, \"style\": {\"type\": \"HEATMAP\", \"colorRampName\": \"theclassic\"}}, {\"id\": \"attacks\", \"label\": \"Attacks and failed logins\", \"type\": \"GEOJSON_VECTOR\", \"alpha\": 0.9, \"visible\": true, \"minZoom\": 0, \"maxZoom\": 24, \"query\": {\"query\": \"(event.outcome : \\\"failure\\\" and event.action : *) or (sentora.log : \\\"fail2ban\\\" and event.action : \\\"ban\\\") or (sentora.log : \\\"web-access\\\" and http.response.status_code : (403 or 404) and url.path : (\\\"/wp-login.php\\\" or \\\"/xmlrpc.php\\\" or \\\"/.env\\\" or \\\"/.git/config\\\" or \\\"/phpmyadmin/\\\" or \\\"/admin/\\\" or \\\"/wp-admin/setup-config.php\\\"))\", \"language\": \"kuery\"}, \"sourceDescriptor\": {\"type\": \"ES_GEO_GRID\", \"id\": \"attacks\", \"indexPatternRefName\": \"layer_3_source_index_pattern\", \"geoField\": \"source.geo.location\", \"requestType\": \"point\", \"resolution\": \"COARSE\", \"metrics\": [{\"type\": \"count\", \"label\": \"Attempts\"}], \"applyGlobalQuery\": true, \"applyGlobalTime\": true}, \"style\": {\"type\": \"VECTOR\", \"isTimeAware\": true, \"properties\": {\"fillColor\": {\"type\": \"STATIC\", \"options\": {\"color\": \"#f04e3e\"}}, \"lineColor\": {\"type\": \"STATIC\", \"options\": {\"color\": \"#ffd8d0\"}}, \"lineWidth\": {\"type\": \"STATIC\", \"options\": {\"size\": 1.5}}, \"iconSize\": {\"type\": \"DYNAMIC\", \"options\": {\"minSize\": 7, \"maxSize\": 28, \"field\": {\"name\": \"doc_count\", \"origin\": \"source\"}, \"fieldMetaOptions\": {\"isEnabled\": true, \"sigma\": 3}}}, \"labelText\": {\"type\": \"DYNAMIC\", \"options\": {\"field\": {\"name\": \"doc_count\", \"origin\": \"source\"}}}, \"labelColor\": {\"type\": \"STATIC\", \"options\": {\"color\": \"#ffffff\"}}, \"labelSize\": {\"type\": \"STATIC\", \"options\": {\"size\": 11}}}}}]",
+  "mapStateJSON": "{\"zoom\": 1.4, \"center\": {\"lon\": 10, \"lat\": 25}, \"timeFilters\": {\"from\": \"now-24h\", \"to\": \"now\"}, \"refreshConfig\": {\"isPaused\": false, \"interval\": 30000}, \"query\": {\"query\": \"\", \"language\": \"kuery\"}, \"filters\": [], \"settings\": {\"autoFitToDataBounds\": false, \"backgroundColor\": \"#0b1626\"}}",
+  "title": "Sentora: World map",
+  "uiStateJSON": "{\"isLayerTOCOpen\": true, \"openTOCDetails\": []}"
+ },
+ "references": [
+  {
+   "id": "sentora-logs",
+   "name": "layer_1_join_0_index_pattern",
+   "type": "index-pattern"
+  },
+  {
+   "id": "sentora-logs",
+   "name": "layer_2_source_index_pattern",
+   "type": "index-pattern"
+  },
+  {
+   "id": "sentora-logs",
+   "name": "layer_3_source_index_pattern",
+   "type": "index-pattern"
+  }
+ ]
+}

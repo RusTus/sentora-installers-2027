@@ -12,7 +12,7 @@ import sys
 import time
 
 host, ca, cert, key, lines = sys.argv[1:6]
-panel = sys.argv[6] if len(sys.argv) > 6 else 'panel.example.test'
+panel = sys.argv[6] if len(sys.argv) > 6 else 'panel1.example.test'
 ctx = ssl.create_default_context(cafile=ca)
 ctx.load_cert_chain(cert, key)
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()

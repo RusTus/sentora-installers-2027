@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sentora Elk Node installer: makes this server the log server of a Sentora-2027 panel, with the Elastic
-# stack (Elasticsearch, Logstash, Kibana 9) and Sentora's dashboards. The panel's Elk add-on sends its logs
+# stack (Elasticsearch, Logstash, Kibana 9) and Sentora's dashboards. The panel's Log Forwarder sends its logs
 # here (websites, the panel, mail, logins, FTP, DNS, fail2ban); its administrators read them in Kibana.
+# On the panel this is part of the Log Forwarder add-on (203 or newer): Advanced > Log Forwarder, Elk node.
 # Runs on Ubuntu 26.04 (more systems later). Run it as root on a server of its own (not the panel's),
 # with at least 4 GB of memory (8 GB or more is better) and room for the logs:
 #
@@ -9,7 +10,7 @@
 #   sudo bash sentora2027-elk-node
 #
 # Installed like every Sentora node: it asks for the panel's address, fetches the panel's certificate for
-# its logs and shows the panel's code: answer y only when it is the code on the panel's page (Admin > Elk).
+# its logs and shows the panel's code: answer y only when it is the code on the panel's page (Advanced > Log Forwarder, Elk node).
 # It ends with this node's key (SE1-XXXX-XXXX-XXXX-XXXX) and the Kibana login: paste the key, with this
 # server's address, in the panel's "Add the Elk node". From then on the panel's lines come over TLS, and
 # only the panel's own certificate is let in (the panel checks this node's certificate the same way).
@@ -254,16 +255,16 @@ if [ "$UPDATE" != 1 ]; then
         case "$PANEL" in https://*|http://*) ;; *) PANEL="https://$PANEL" ;; esac
         PANEL=${PANEL%/}
         [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
-        fetch_panel "$PANEL/modules/elk/code/node.php?cert=1" > "$CERTTMP" || true
-        [ -s "$CERTTMP" ] || die "Could not get the panel's certificate from $PANEL: is it the panel's address, reachable from here (HTTPS), and is the Elk add-on installed there (Admin > Repo Browser)?"
+        fetch_panel "$PANEL/modules/log_forwarder/code/node.php?cert=1" > "$CERTTMP" || true
+        [ -s "$CERTTMP" ] || die "Could not get the panel's certificate from $PANEL: is it the panel's address, reachable from here (HTTPS), and is Log Forwarder 203 or newer installed there (Admin > Repo Browser)?"
     fi
-    openssl x509 -in "$CERTTMP" -noout 2> /dev/null && [ "$(grep -c 'BEGIN CERTIFICATE' "$CERTTMP")" = 1 ] || die "$PANEL did not answer with a certificate: is the Elk add-on installed on that panel?"
+    openssl x509 -in "$CERTTMP" -noout 2> /dev/null && [ "$(grep -c 'BEGIN CERTIFICATE' "$CERTTMP")" = 1 ] || die "$PANEL did not answer with a certificate: is Log Forwarder 203 or newer installed on that panel?"
     CODE=$(panel_code sentora-elk "$(spki_b64 "$CERTTMP")")
     if [ -n "$PANELCODE" ]; then
         [ "$(printf '%s' "$PANELCODE" | tr a-z A-Z | tr -d ' ')" = "$CODE" ] || die "The panel's code is $CODE, not $PANELCODE: this is not the panel you meant (or something in between answers for it). Nothing was changed."
     else
         ui_heading "Check the panel's code"
-        printf '  The panel at %s has the code:\n\n      %s%s%s\n\n  In the panel: Admin > Elk shows its code.\n' "$PANEL" "$C_BOLD$C_GREEN" "$CODE" "$C_RESET" >&3
+        printf '  The panel at %s has the code:\n\n      %s%s%s\n\n  In the panel: Advanced > Log Forwarder > Elk node shows its code.\n' "$PANEL" "$C_BOLD$C_GREEN" "$CODE" "$C_RESET" >&3
         ans=''
         ui_ask "Is it the same code? (y/n)" "" ans
         case "$ans" in y|Y|yes|Yes|YES) ;; *) die "Not the same code: nothing was changed. Check the panel's address (and that nothing in between answers for it), then run this again." ;; esac
@@ -488,17 +489,24 @@ ui_step "Sentora's dashboards"
 printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-logs"' || die "Kibana refused the data view (see $LOG)."
 printf '%s' '{"changes":{"defaultIndex":"sentora-logs","defaultRoute":"/app/dashboards#/view/sentora-overview","theme:darkMode":"system"}}' > "$CONF/files/ui.json"
-# (Kibana's settings call takes no API version header)
-out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "elastic:$(cat "$CONF/elastic.pw")" -H 'kbn-xsrf: sentora' -H 'Content-Type: application/json' \
+# (Kibana's settings call is one of its internal ones: no API version header, the internal-origin header)
+out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "elastic:$(cat "$CONF/elastic.pw")" -H 'kbn-xsrf: sentora' -H 'x-elastic-internal-origin: kibana' -H 'Content-Type: application/json' \
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-websites sentora-mail sentora-security sentora-panel; do
+for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-security sentora-panel; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
 done
-note "$n dashboards (Sentora: Overview, Websites, Mail, Security, Panel and server)."
+# the world map (Kibana Maps), then on the World map dashboard by reference (the dashboards API takes no map panel)
+get kibana/dashboards/sentora-world-map.map.json "$CONF/files/map.json" && get kibana/addmap.py "$CONF/files/addmap.py" || die "Could not get the world map."
+kbapi POST "/api/saved_objects/map/sentora-world-map?overwrite=true" "$CONF/files/map.json" | grep -q '"id":"sentora-world-map"' || echo "WARNING: Kibana refused the world map"
+kbapi GET /api/saved_objects/dashboard/sentora-worldmap > "$CONF/files/wm.json" \
+    && python3 -I "$CONF/files/addmap.py" "$CONF/files/wm.json" sentora-world-map 0 2 34 30 > "$CONF/files/wm-new.json" \
+    && kbapi PUT /api/saved_objects/dashboard/sentora-worldmap "$CONF/files/wm-new.json" | grep -q '"id":"sentora-worldmap"' || echo "WARNING: the world map is not on its dashboard"
+rm -f "$CONF/files/wm.json" "$CONF/files/wm-new.json"
+note "$n dashboards (Sentora: Overview, World map, Websites, Mail, Security, Panel and server)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash
@@ -530,7 +538,7 @@ except Exception: print("Stored:        nothing yet")'
         h=$(openssl x509 -in $C/ca.crt -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | cut -c1-20); a=ABCDEFGHJKLMNPQRSTUVWXYZ23456789; c=''
         for half in 0 10; do v=$((16#${h:$half:10})); for i in 7 6 5 4 3 2 1 0; do c=$c${a:$(( (v >> (i * 5)) & 31 )):1}; done; done
         echo "SE1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}"
-        echo "Address: $(hostname -I 2> /dev/null | awk '{print $1}')   (in the panel: Admin > Elk > Add the Elk node)" ;;
+        echo "Address: $(hostname -I 2> /dev/null | awk '{print $1}')   (in the panel: Advanced > Log Forwarder > Elk node > Add the Elk node)" ;;
     password)
         p=$(openssl rand -base64 33 | tr -dc 'A-Za-z0-9' | cut -c1-24)
         es -X POST https://127.0.0.1:9200/_security/user/sentora-admin/_password -d "{\"password\":\"$p\"}" | grep -q '{}' || { echo "Elasticsearch refused it."; exit 1; }
@@ -592,7 +600,7 @@ if [ "$UPDATE" = 1 ]; then
 else
     say "Done: this server is ready for the logs of $(cat "$CONF/panel-url")."
     say ""
-    say "Last step, in the panel: Admin > Elk > Add the Elk node:"
+    say "Last step, in the panel: Advanced > Log Forwarder > Elk node > Add the Elk node:"
     say "    Address:          ${C_BOLD}${ADDR:-(its address)}${C_RESET}"
     say "    Elk node key:     ${C_BOLD}${C_GREEN}$NODEKEY${C_RESET}"
     say ""

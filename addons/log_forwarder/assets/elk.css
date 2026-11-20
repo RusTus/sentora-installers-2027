@@ -1,11 +1,14 @@
-/* Elk in the panel's style: colours from the theme's shared --sn-* variables (etc/styles/THEMES.md), with these as
+/* Log Forwarder's Elk node section in the panel's style: colours from the theme's shared --sn-* variables (etc/styles/THEMES.md), with these as
    the fallback, so it follows Light, Dark and Auto. One ordered file: change a rule where it is. */
 .ek { --ek-ink: var(--sn-ink, #1f2933); --ek-muted: var(--sn-muted, #6b7785); --ek-line: var(--sn-line, #e6e9ee);
       --ek-card: var(--sn-card, #ffffff); --ek-bg: var(--sn-soft, #f4f6f9); --ek-accent: var(--sn-accent, #447fb3);
       --ek-accent-soft: var(--sn-accent-soft, #e3edf6); --ek-ok: var(--sn-ok, #1b7a50); --ek-ok-soft: var(--sn-ok-soft, #e3f5ec);
       --ek-warn: var(--sn-warn, #8f5b00); --ek-warn-soft: var(--sn-warn-soft, #fff4d6); --ek-bad: var(--sn-bad, #b42318); --ek-bad-soft: var(--sn-bad-soft, #fdecea);
-      color: var(--ek-ink); background: var(--ek-bg); border-radius: 8px; padding: 18px; margin-top: 10px; }
+      color: var(--ek-ink); background: var(--ek-bg); border-radius: 8px; padding: 18px; margin-top: 18px; scroll-margin-top: 70px; }
 .ek * { box-sizing: border-box; }
+.ek-title { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+.ek-title .ek-ico { width: 20px; height: 20px; color: var(--ek-accent); }
+.ek-lead { margin: 0 0 14px; line-height: 1.5; max-width: 90ch; }
 .ek-muted { color: var(--ek-muted); font-size: 12px; font-weight: normal; }
 .ek-ico { width: 16px; height: 16px; vertical-align: -3px; flex: none; }
 /* messages */

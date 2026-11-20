@@ -6,6 +6,7 @@
         <div class="zmodule_desc" id="zmodule_desc_<@ ModuleName @>"><@ ModuleDesc @></div>
     </div>
     <link rel="stylesheet" href="modules/log_forwarder/assets/logforwarder.css">
+    <link rel="stylesheet" href="modules/log_forwarder/assets/elk.css">
     <@ Result @>
     <div class="lfw">
         <@ Ready @>
@@ -13,5 +14,6 @@
         <@ Destinations @>
         <@ Form @>
         <@ Help @>
+        <@ Elk @>
     </div>
 </div>
