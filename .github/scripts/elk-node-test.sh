@@ -110,7 +110,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -137,6 +137,14 @@ for k in panel-access mail auth fail2ban; do
     done
     [ "${n:-0}" -gt 0 ] && ok "the panel's own $k lines arrived ($n)" || bad "no $k lines from the panel's rsyslog"
 done
+# the uptime checks: the panel's list of websites -> the node's Heartbeat, which checks them from outside
+in_box 'systemctl is-active --quiet heartbeat-elastic' && ok "Heartbeat runs" || bad "Heartbeat does not run"
+for _ in $(seq 1 20); do in_box 'test -s /var/lib/logstash/sentora/sites.json' && break; sleep 3; done
+in_box 'grep -q panel.elktest.example /var/lib/logstash/sentora/sites.json' && ok "the node got the panel's list of websites" || bad "no list of websites on the node: $(in_box 'cat /var/lib/logstash/sentora/sites.json 2>&1' | head -c 200)"
+in_box 'sentora-elk-node monitors > /dev/null; grep -q "\"name\": \"panel.elktest.example\"" /etc/heartbeat/monitors.d/sentora-sites.yml' && ok "the list became Heartbeat checks" || bad "no Heartbeat checks: $(in_box 'cat /etc/heartbeat/monitors.d/sentora-sites.yml 2>&1' | head -c 300)"
+n=0; for _ in $(seq 1 40); do n=$(es "'https://127.0.0.1:9200/heartbeat-*/_count?q=monitor.name:panel.elktest.example'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${n:-0}" -gt 0 ] && break; sleep 5; done
+[ "${n:-0}" -gt 0 ] && ok "Heartbeat checked the panel's website ($n)" || bad "Heartbeat stored no check of the panel's website"
+es "'https://127.0.0.1:9200/logs-sentora-*/_count?q=sentora.log:sites'" | grep -q '"count":0' && ok "the list of websites is not stored among the logs" || bad "the list of websites was stored among the logs"
 in_box 'sentora-elk-node panel-from '"$PIP $GW" > /dev/null 2>&1 && ok "panel-from takes two addresses (the runner sends test lines too)" || bad "panel-from with two addresses"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"

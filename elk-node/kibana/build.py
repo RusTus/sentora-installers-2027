@@ -15,6 +15,7 @@ WEB = 'sentora.log : "web-access"'
 DASHBOARDS = [
     ("sentora-overview", "Overview"),
     ("sentora-worldmap", "World map"),
+    ("sentora-uptime", "Uptime"),
     ("sentora-websites", "Websites"),
     ("sentora-mail", "Mail"),
     ("sentora-delivery", "Mail delivery"),
@@ -32,7 +33,8 @@ NAMES = {"sentora.domain": "Website", "url.path": "Page", "source.ip": "Address"
          "sentora.log": "Kind of log", "sentora.visitor": "Visitor", "event.outcome": "Result",
          "sentora.status_class": "Answer", "rule.id": "Rule", "rule.name": "What it looks for", "sentora.waf.attack": "Attack",
          "email.to.domain": "Receiving domain", "email.from.address": "Sender", "sentora.mail.reason": "Reason",
-         "sentora.mail.spam_rules": "Spam rule"}
+         "sentora.mail.spam_rules": "Spam rule", "monitor.name": "Website", "monitor.status": "Status", "error.type": "Why",
+         "url.full": "Address checked"}
 
 
 def q(kql):
@@ -304,6 +306,46 @@ BOARDS["sentora-delivery"] = build("sentora-delivery", "Mail delivery", [
     [(16, 14, table("Who sends most", 'email.from.address : *', ["email.from.address"], 15, "Mails")),
      (16, 14, table("Mailboxes getting spam", 'sentora.mail.status : "spam"', ["user.name"], 15, "Spam")),
      (16, 14, table("Spam rules that fired most", 'sentora.mail.status : "spam"', ["sentora.mail.spam_rules"], 15, "Times"))],
+])
+
+# ---- Uptime: the node's Heartbeat checks every website from outside, every minute (data view sentora-uptime, heartbeat-*)
+UPDV = {"type": "data_view_reference", "ref_id": "sentora-uptime"}
+
+
+def up(cfg):
+    """The same chart on the uptime checks' data view."""
+    if "layers" in cfg:
+        for layer in cfg["layers"]:
+            layer["data_source"] = UPDV
+    else:
+        cfg["data_source"] = UPDV
+    return cfg
+
+
+DOWN = 'monitor.status : "down"'
+SITE = 'tags : "sentora-site"'
+BOARDS["sentora-uptime"] = build("sentora-uptime", "Uptime", [
+    [(12, 5, up(metric("Websites watched", SITE, "", {"operation": "unique_count", "field": "monitor.name"}))),
+     (12, 5, up({"type": "metric", "title": "Available", "data_source": UPDV, "query": q(SITE),
+                 "metrics": [{"type": "primary", "operation": "formula", "label": "of the checks answered",
+                              "formula": "count(kql='monitor.status : \"up\"') / count()", "format": {"type": "percent"}}]})),
+     (12, 5, up(metric("Checks that failed", SITE + " and " + DOWN, ""))),
+     (12, 5, up(metric("Websites with a failed check", SITE + " and " + DOWN, "", {"operation": "unique_count", "field": "monitor.name"})))],
+    [(32, 12, up(bars("Checks: up and down", SITE, "monitor.status", 2, "Checks"))),
+     (16, 12, up(table("Failed checks by website", SITE + " and " + DOWN, ["monitor.name"], 15, "Failed")))],
+    [(48, 12, up({"type": "xy", "title": "How fast each website answers (milliseconds)", "query": q(SITE),
+                  "legend": {"visibility": "visible", "position": "right"},
+                  "layers": [{"type": "line", "data_source": UPDV, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                              "y": [{"operation": "formula", "formula": "average(monitor.duration.us) / 1000", "label": "ms"}],
+                              "breakdown_by": {"operation": "terms", "fields": ["monitor.name"], "limit": 10, "label": "Website",
+                                               "rank_by": {"type": "alphabetical", "direction": "asc"}}}]}))],
+    [(24, 14, up({"type": "data_table", "title": "Certificates: when they expire", "data_source": UPDV, "query": q(SITE + " and tls.server.x509.not_after : *"),
+                  "metrics": [{"operation": "min", "field": "tls.server.x509.not_after", "label": "Expires"}],
+                  "rows": [{"operation": "terms", "fields": ["monitor.name"], "limit": 50, "label": "Website"}]})),
+     (24, 14, up(table("Why checks failed", SITE + " and " + DOWN, ["monitor.name", "error.type"], 15, "Times")))],
+    [(48, 3, note("Checked from the Elk node every minute: a website is **up** when it answers (an error page such as 404 counts as "
+                  "an answer; 5xx and no answer do not) and its certificate is valid. Kibana's own **Uptime** app (Observability) "
+                  "shows the same checks with each one's history."))],
 ])
 
 if __name__ == "__main__":

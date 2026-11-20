@@ -330,8 +330,8 @@ run apt-get update || die "Could not read Elastic's package list (see $LOG)."
 
 ui_step "Elasticsearch, Logstash and Kibana"
 # (the packages print a first password for the built-in user: it is replaced below, and this log is root's)
-run $PKG_INSTALL elasticsearch logstash kibana || die "Could not install the Elastic stack (see $LOG)."
-note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana 2> /dev/null)"
+run $PKG_INSTALL elasticsearch logstash kibana heartbeat-elastic || die "Could not install the Elastic stack (see $LOG)."
+note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana heartbeat-elastic 2> /dev/null)"
 # Elasticsearch maps its files into memory: the kernel must allow enough maps
 echo 'vm.max_map_count = 262144' > /etc/sysctl.d/90-sentora-elk.conf; chmod 644 /etc/sysctl.d/90-sentora-elk.conf
 run sysctl -p /etc/sysctl.d/90-sentora-elk.conf
@@ -421,6 +421,15 @@ esapi PUT /_security/role/sentora_admin "$CONF/files/role-reader.json" | grep -q
 [ -s "$CONF/logstash.pw" ] || { pw > "$CONF/logstash.pw"; chmod 600 "$CONF/logstash.pw"; }
 printf '{"password":"%s","roles":["sentora_logstash_writer"],"full_name":"Logstash (the panel'"'"'s logs)"}' "$(cat "$CONF/logstash.pw")" > "$CONF/files/u.json"
 esapi PUT /_security/user/sentora_logstash "$CONF/files/u.json" | grep -q '"created"' || die "Could not make Logstash's user."
+# Heartbeat (the uptime checks) may only write its own results (and read them back for each check's state)
+printf '%s' '{"cluster":["monitor","manage_index_templates","manage_ilm","read_ilm"],"indices":[{"names":["heartbeat-*"],"privileges":["create_doc","create_index","auto_configure","view_index_metadata","manage","read"]}]}' > "$CONF/files/role-hb.json"
+esapi PUT /_security/role/sentora_heartbeat_writer "$CONF/files/role-hb.json" | grep -q '"role"' || die "Could not make Heartbeat's role."
+[ -s "$CONF/heartbeat.pw" ] || { pw > "$CONF/heartbeat.pw"; chmod 600 "$CONF/heartbeat.pw"; }
+printf '{"password":"%s","roles":["sentora_heartbeat_writer"],"full_name":"Heartbeat (uptime checks)"}' "$(cat "$CONF/heartbeat.pw")" > "$CONF/files/u.json"
+esapi PUT /_security/user/sentora_heartbeat "$CONF/files/u.json" | grep -q '"created"' || die "Could not make Heartbeat's user."
+# the administrators read the uptime results too
+printf '%s' '{"cluster":["monitor"],"indices":[{"names":["logs-sentora-*","heartbeat-*"],"privileges":["read","view_index_metadata","monitor"]}],"applications":[{"application":"kibana-.kibana","privileges":["all"],"resources":["*"]}]}' > "$CONF/files/role-reader.json"
+esapi PUT /_security/role/sentora_admin "$CONF/files/role-reader.json" | grep -q '"role"' || die "Could not update the administrators' role."
 NEWADMINPW=''
 if ! esapi GET "/_security/user/$ADMIN_USER" | grep -q "\"$ADMIN_USER\""; then
     NEWADMINPW=$(pw)
@@ -431,6 +440,8 @@ rm -f "$CONF/files/u.json"
 note "Logs are kept $DAYS days (sentora-elk-node retention DAYS)."
 
 ui_step "Logstash (port 6514: the panel's certificate only)"
+# (the panel's list of websites, for the uptime checks, kept here by Logstash)
+mkdir -p /var/lib/logstash/sentora; chown logstash:logstash /var/lib/logstash/sentora; chmod 750 /var/lib/logstash/sentora
 cp "$CONF/files/sentora.conf" /etc/logstash/conf.d/sentora.conf; chown root:logstash /etc/logstash/conf.d/sentora.conf; chmod 640 /etc/logstash/conf.d/sentora.conf
 mkdir -p /etc/systemd/system/logstash.service.d
 printf 'SENTORA_ES_PASSWORD=%s\nLS_JAVA_OPTS=-Xms1g -Xmx1g\n' "$(cat "$CONF/logstash.pw")" > "$CONF/logstash.env"; chmod 600 "$CONF/logstash.env"
@@ -495,16 +506,55 @@ run systemctl enable kibana
 run systemctl restart kibana || die "Kibana did not start (see journalctl -u kibana)."
 wait_for 300 bash -c 'kbapi GET /api/status | grep -q "\"level\":\"available\""' || die "Kibana is not ready after 5 minutes (see journalctl -u kibana)."
 
+ui_step "Uptime checks (Heartbeat): the panel's websites, every minute"
+HB=/etc/heartbeat
+[ -f "$HB/heartbeat.yml" ] && [ ! -f "$HB/heartbeat.yml.dist" ] && cp -p "$HB/heartbeat.yml" "$HB/heartbeat.yml.dist"
+mkdir -p "$HB/monitors.d"; chmod 750 "$HB/monitors.d"
+install -m 600 /etc/elasticsearch/certs/http_ca.crt "$HB/http_ca.crt"
+{
+    echo "# Sentora Elk node (sentora2027-elk-node): the uptime checks. The checks themselves are made from the panel's list"
+    echo "# of websites by 'sentora-elk-node monitors' (a timer, every 5 minutes) into monitors.d/sentora-sites.yml."
+    echo "heartbeat.config.monitors:"
+    echo '  path: ${path.config}/monitors.d/*.yml'
+    echo "  reload.enabled: true"
+    echo "  reload.period: 60s"
+    echo "output.elasticsearch:"
+    echo "  hosts: [\"$ES\"]"
+    echo '  username: "sentora_heartbeat"'
+    echo '  password: "${SENTORA_HB_PASSWORD}"'
+    echo "  ssl.certificate_authorities: [\"$HB/http_ca.crt\"]"
+    echo "setup.ilm.enabled: true"
+    echo 'setup.ilm.policy_name: "sentora-logs"'
+    echo "setup.ilm.overwrite: false"
+    echo "setup.template.enabled: true"
+    echo "logging.level: warning"
+} > "$HB/heartbeat.yml"
+chmod 600 "$HB/heartbeat.yml"
+heartbeat keystore create --force > /dev/null 2>> "$LOG"
+tr -d '\n' < "$CONF/heartbeat.pw" | heartbeat keystore add SENTORA_HB_PASSWORD --stdin --force >> "$LOG" 2>&1 || die "Could not keep Heartbeat's password."
+printf '%s\n' '[Unit]' "Description=Sentora Elk node: the uptime checks from the panel's list of websites" '[Service]' 'Type=oneshot' \
+    'ExecStart=/usr/local/sbin/sentora-elk-node monitors' > /etc/systemd/system/sentora-elk-monitors.service
+printf '%s\n' '[Unit]' "Description=Sentora Elk node: the uptime checks from the panel's list of websites, every 5 minutes" '[Timer]' \
+    'OnBootSec=2min' 'OnUnitActiveSec=5min' '[Install]' 'WantedBy=timers.target' > /etc/systemd/system/sentora-elk-monitors.timer
+chmod 644 /etc/systemd/system/sentora-elk-monitors.service /etc/systemd/system/sentora-elk-monitors.timer
+run systemctl daemon-reload
+run systemctl enable --now sentora-elk-monitors.timer
+run systemctl enable heartbeat-elastic
+run systemctl restart heartbeat-elastic || echo "WARNING: Heartbeat did not start (journalctl -u heartbeat-elastic)"
+note "The panel sends its list of websites within the hour; the checks follow within 5 minutes (sentora-elk-node monitors)."
+
 ui_step "Sentora's dashboards"
 printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-logs"' || die "Kibana refused the data view (see $LOG)."
+printf '%s' '{"data_view":{"id":"sentora-uptime","name":"Sentora uptime checks","title":"heartbeat-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv2.json"
+kbapi POST /api/data_views/data_view "$CONF/files/dv2.json" | grep -q '"sentora-uptime"' || die "Kibana refused the uptime data view (see $LOG)."
 printf '%s' '{"changes":{"defaultIndex":"sentora-logs","defaultRoute":"/app/dashboards#/view/sentora-overview","theme:darkMode":"system"}}' > "$CONF/files/ui.json"
 # (Kibana's settings call is one of its internal ones: no API version header, the internal-origin header)
 out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "elastic:$(cat "$CONF/elastic.pw")" -H 'kbn-xsrf: sentora' -H 'x-elastic-internal-origin: kibana' -H 'Content-Type: application/json' \
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
@@ -516,7 +566,7 @@ kbapi GET /api/saved_objects/dashboard/sentora-worldmap > "$CONF/files/wm.json" 
     && python3 -I "$CONF/files/addmap.py" "$CONF/files/wm.json" sentora-world-map 0 2 34 30 > "$CONF/files/wm-new.json" \
     && kbapi PUT /api/saved_objects/dashboard/sentora-worldmap "$CONF/files/wm-new.json" | grep -q '"id":"sentora-worldmap"' || echo "WARNING: the world map is not on its dashboard"
 rm -f "$CONF/files/wm.json" "$CONF/files/wm-new.json"
-note "$n dashboards (Sentora: Overview, World map, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server)."
+note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash
@@ -528,6 +578,7 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #   sentora-elk-node kibana-from LIST  who may open Kibana: "any", or addresses/networks (203.0.113.5 10.0.0.0/8)
 #   sentora-elk-node panel-from LIST   the panel's address as this server sees it ("any": the certificate only)
 #   sentora-elk-node firewall          make the firewall rules again from those two lists
+#   sentora-elk-node monitors          the uptime checks made again from the panel's list of websites
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
@@ -536,7 +587,8 @@ es() { curl -sS --cacert $C/http_ca.crt -u "elastic:$(cat $C/elastic.pw)" -H 'Co
 ip_list() { local a; for a in "$@"; do [ "$a" = any ] || [[ "$a" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?$ ]] || { echo "Not an address or network: $a"; exit 2; }; done; }
 case "${1:-status}" in
     status)
-        for s in elasticsearch logstash kibana; do printf '%-14s %s\n' "$s" "$(systemctl is-active $s)"; done
+        for s in elasticsearch logstash kibana heartbeat-elastic; do printf '%-18s %s\n' "$s" "$(systemctl is-active $s)"; done
+        echo "Websites watched: $(grep -c '"type": "http"' /etc/heartbeat/monitors.d/sentora-sites.yml 2> /dev/null || echo 0)"
         echo "Logs kept:     $(cat $C/retention) days"
         es "https://127.0.0.1:9200/_data_stream/logs-sentora-*/_stats?human" 2> /dev/null | python3 -I -c 'import json,sys
 try:
@@ -571,8 +623,35 @@ except Exception: print("Stored:        nothing yet")'
         if ! ufw status 2> /dev/null | grep -q '^Status: active'; then ufw default deny incoming > /dev/null; ufw default allow outgoing > /dev/null; ufw --force enable > /dev/null; fi
         ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
         echo "Firewall: SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 from $(cat $C/panel-from)." ;;
+    monitors)
+        # the panel's list of websites (kept by Logstash) -> Heartbeat's checks; written only when it changed
+        python3 -I -c '
+import json, os, re
+src, dst = "/var/lib/logstash/sentora/sites.json", "/etc/heartbeat/monitors.d/sentora-sites.yml"
+try:
+    d = json.load(open(src))
+except Exception:
+    raise SystemExit(0)
+sites = []
+for x in ((d.get("sites") or [])[:2000] if isinstance(d, dict) else []):
+    h = str(x.get("host", "")).lower() if isinstance(x, dict) else ""
+    if re.fullmatch(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?", h) and "." in h:
+        sites.append((h, x.get("https") is True))
+mon = [{"type": "http", "id": "site-" + h, "name": h, "urls": [("https://" if tls else "http://") + h + "/"],
+        "schedule": "@every 1m", "timeout": "15s", "tags": ["sentora-site"],
+        "check.response.status": [200, 201, 204, 301, 302, 303, 307, 308, 401, 403, 404]} for h, tls in sorted(set(sites))]
+new = "# Made by sentora-elk-node monitors from the panel list of websites; replaced when it changes.\n" + json.dumps(mon, indent=1) + "\n"
+old = open(dst).read() if os.path.exists(dst) else ""
+if new != old:
+    tmp = dst + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(new)
+    os.chmod(tmp, 0o640)
+    os.replace(tmp, dst)
+    print("%d website(s) checked every minute" % len(mon))
+' ;;
     update) exec bash /usr/local/lib/sentora-elk/installer --update ;;
-    *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-elk-node

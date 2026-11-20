@@ -853,6 +853,8 @@ class elk
                 $st['probetext'] = $c['text'];
             }
         }
+        // the list of websites for the node's uptime checks
+        list($st['sites_hash'], $st['sites_sent']) = self::SendSites($old);
         self::WriteFile(self::STATE_DIR . '/status.json', json_encode($st, JSON_UNESCAPED_SLASHES), 0640, 'sentora');
         $n = self::Node();
         return array($plan ? ('sending ' . count($files) . ' log file(s)' . ($plan['streams'] ? ' and the mail and login lines' : '') . ' to ' . $n['addr'] . '.')
@@ -876,6 +878,60 @@ class elk
             }
         }
         return $out;
+    }
+
+    /**
+     * The list of websites the node checks from outside (uptime and certificates): every website, and the panel's own
+     * address; https where the website has its own certificate.
+     *
+     * @return array<int, array{host: string, https: bool}>
+     */
+    static function SiteList()
+    {
+        global $zdbh;
+        $out = array();
+        $q = $zdbh->query("SELECT LOWER(vh_name_vc), vh_ssl_tx FROM x_vhosts WHERE vh_deleted_ts IS NULL AND vh_type_in IN (1, 2) ORDER BY vh_name_vc");
+        foreach ($q->fetchAll(PDO::FETCH_NUM) as $r) {
+            if (preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', (string) $r[0]) && strpos((string) $r[0], '.') !== false) {
+                $out[(string) $r[0]] = array('host' => (string) $r[0], 'https' => stripos((string) $r[1], 'SSL') !== false);
+            }
+        }
+        $panel = strtolower(preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain')));
+        if ($panel !== '' && strpos($panel, '.') !== false) {
+            $out[$panel] = array('host' => $panel, 'https' => true);
+        }
+        return array_values($out);
+    }
+
+    /**
+     * Root: send the list of websites to the node (one line, kind "sites": the node keeps it for its uptime checks),
+     * when it changed or once an hour.
+     *
+     * @param array $old The last state.
+     * @return array{0: string, 1: int} The list's hash and when it was sent (unchanged when nothing was sent).
+     */
+    static function SendSites(array $old)
+    {
+        $list = self::SiteList();
+        $hash = hash('sha256', json_encode($list));
+        $prevHash = (string) ($old['sites_hash'] ?? '');
+        $prevTime = (int) ($old['sites_sent'] ?? 0);
+        if (!self::Paired() || ($hash === $prevHash && time() - $prevTime < 3600)) {
+            return array($prevHash, $prevTime);
+        }
+        $node = self::Node();
+        $ctx = stream_context_create(array('ssl' => array('local_cert' => self::DIR . '/panel.crt', 'local_pk' => self::DIR . '/panel.key',
+            'cafile' => self::DIR . '/node-ca.crt', 'verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => self::NODE_NAME, 'allow_self_signed' => false)));
+        $host = filter_var($node['addr'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $node['addr'] . ']' : $node['addr'];
+        $c = @stream_socket_client('tls://' . $host . ':' . self::PORT, $no, $str, 10, STREAM_CLIENT_CONNECT, $ctx);
+        if ($c === false) {
+            return array($prevHash, $prevTime);
+        }
+        $panel = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
+        @fwrite($c, json_encode(array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z'), 'sentora_host' => $panel, 'sentora_log' => 'sites',
+            'message' => json_encode($list)), JSON_UNESCAPED_SLASHES) . "\n");
+        fclose($c);
+        return array($hash, time());
     }
 
     /**

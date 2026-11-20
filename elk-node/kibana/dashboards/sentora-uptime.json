@@ -1,0 +1,424 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-uptime",
+      "label": "Uptime",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "monitor.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\"",
+     "language": "kql"
+    },
+    "title": "Websites watched",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "format": {
+       "type": "percent"
+      },
+      "formula": "count(kql='monitor.status : \"up\"') / count()",
+      "label": "of the checks answered",
+      "operation": "formula",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\"",
+     "language": "kql"
+    },
+    "title": "Available",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and monitor.status : \"down\"",
+     "language": "kql"
+    },
+    "title": "Checks that failed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "monitor.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and monitor.status : \"down\"",
+     "language": "kql"
+    },
+    "title": "Websites with a failed check",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "monitor.status"
+       ],
+       "label": "Status",
+       "limit": 2,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-uptime",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Checks",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "tags : \"sentora-site\"",
+     "language": "kql"
+    },
+    "title": "Checks: up and down",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Failed",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and monitor.status : \"down\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "monitor.name"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Failed checks by website",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "monitor.name"
+       ],
+       "label": "Website",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-uptime",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "formula": "average(monitor.duration.us) / 1000",
+        "label": "ms",
+        "operation": "formula"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "tags : \"sentora-site\"",
+     "language": "kql"
+    },
+    "title": "How fast each website answers (milliseconds)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "tls.server.x509.not_after",
+      "label": "Expires",
+      "operation": "min"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and tls.server.x509.not_after : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "monitor.name"
+      ],
+      "label": "Website",
+      "limit": 50,
+      "operation": "terms"
+     }
+    ],
+    "title": "Certificates: when they expire",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 31
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and monitor.status : \"down\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "monitor.name"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "error.type"
+      ],
+      "label": "Why",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Why checks failed",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 31
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Checked from the Elk node every minute: a website is **up** when it answers (an error page such as 404 counts as an answer; 5xx and no answer do not) and its certificate is valid. Kibana's own **Uptime** app (Observability) shows the same checks with each one's history."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 45
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Uptime"
+}
