@@ -46,6 +46,13 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# Work from / : Kibana's and Elastic's tools, run as their own users, read the folder they are started in (from
+# root's home, which only root may enter, Kibana's keystore tool failed: EACCES on ./package.json). Paths given
+# are made whole first.
+SELF=$(readlink -f "$0" 2> /dev/null || echo "$0")
+[ -n "$FILES" ] && FILES=$(readlink -f "$FILES")
+[ -n "$PANELCERT" ] && PANELCERT=$(readlink -f "$PANELCERT")
+cd / || exit 1
 
 # ---- The screen, as every Sentora installer draws it (the same lines as the backup node installer)
 # ---- The screen, as the Sentora installer draws it: a title bar, one line per finished step with a
@@ -83,7 +90,7 @@ ui_ask() { # question default VAR
     read -r -e -p "  > " -i "$2" "$3" <&0 2>&3 || printf -v "$3" '%s' "$2"
 }
 UI_STEP=0
-UI_TOTAL=$(grep -c '^ *ui_step "' "$0" 2> /dev/null); [ "${UI_TOTAL:-0}" -gt 0 ] 2> /dev/null || UI_TOTAL=12
+UI_TOTAL=$(grep -c '^ *ui_step "' "$SELF" 2> /dev/null); [ "${UI_TOTAL:-0}" -gt 0 ] 2> /dev/null || UI_TOTAL=12
 UI_TITLE='' UI_STEP_START=0 UI_START=$(date +%s) UI_TICKER='' UI_LOGPOS=0 UI_NOTES='' UI_WORKING=''
 UI_TICKFILE=$(mktemp /tmp/sentora-elk-step.XXXXXX)
 UI_MAINPID=$$
@@ -475,11 +482,14 @@ KS=/usr/share/kibana/bin/kibana-keystore
 if [ ! -s "$CONF/kibana_system.pw" ]; then
     /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b -s > "$CONF/kibana_system.pw.new" 2>> "$LOG" && [ -s "$CONF/kibana_system.pw.new" ] || die "Could not set Kibana's own password."
     tr -d '\r\n' < "$CONF/kibana_system.pw.new" > "$CONF/kibana_system.pw"; rm -f "$CONF/kibana_system.pw.new"; chmod 600 "$CONF/kibana_system.pw"
-    tr -d '\n' < "$CONF/kibana_system.pw" | runuser -u kibana -- "$KS" add -x -f --stdin elasticsearch.password >> "$LOG" 2>&1
-    for k in xpack.security.encryptionKey xpack.encryptedSavedObjects.encryptionKey xpack.reporting.encryptionKey; do
-        openssl rand -hex 32 | tr -d '\n' | runuser -u kibana -- "$KS" add -x -f --stdin "$k" >> "$LOG" 2>&1
-    done
 fi
+# (every run: the keystore holds Kibana's password and its keys; what is missing is added, so a stopped install mends)
+KSHAS=$(runuser -u kibana -- "$KS" list 2>> "$LOG")
+printf '%s\n' "$KSHAS" | grep -qx elasticsearch.password || tr -d '\n' < "$CONF/kibana_system.pw" | runuser -u kibana -- "$KS" add -x -f --stdin elasticsearch.password >> "$LOG" 2>&1
+for k in xpack.security.encryptionKey xpack.encryptedSavedObjects.encryptionKey xpack.reporting.encryptionKey; do
+    printf '%s\n' "$KSHAS" | grep -qx "$k" || openssl rand -hex 32 | tr -d '\n' | runuser -u kibana -- "$KS" add -x -f --stdin "$k" >> "$LOG" 2>&1
+done
+runuser -u kibana -- "$KS" list 2>> "$LOG" | grep -qx elasticsearch.password || die "Kibana's keystore does not hold its password (see $LOG)."
 run systemctl daemon-reload
 run systemctl enable kibana
 run systemctl restart kibana || die "Kibana did not start (see journalctl -u kibana)."
@@ -568,7 +578,7 @@ TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-elk-node
 
 ui_step "Firewall (SSH, Kibana, and the panel on 6514)"
-if [ "$UPDATE" != 1 ] && [ ! -s "$CONF/panel-from" ]; then
+if [ ! -s "$CONF/panel-from" ]; then
     PHOST=$(cat "$CONF/panel-url"); PHOST=${PHOST#*://}; PHOST=${PHOST%%:*}
     PIP=$(getent ahostsv4 "$PHOST" 2> /dev/null | awk '{print $1; exit}')
     echo "${PIP:-any}" > "$CONF/panel-from"
@@ -588,7 +598,7 @@ else
 fi
 rm -f "$CONF/door.txt"
 mkdir -p /usr/local/lib/sentora-elk; chmod 700 /usr/local/lib/sentora-elk
-if [ -f "$0" ] && [ "$0" != /usr/local/lib/sentora-elk/installer ]; then cp "$0" /usr/local/lib/sentora-elk/installer; chmod 700 /usr/local/lib/sentora-elk/installer; fi
+if [ -f "$SELF" ] && [ "$SELF" != /usr/local/lib/sentora-elk/installer ]; then cp "$SELF" /usr/local/lib/sentora-elk/installer; chmod 700 /usr/local/lib/sentora-elk/installer; fi
 [ -n "$FILES" ] && echo "$FILES" > "$CONF/files-dir"
 
 ui_done

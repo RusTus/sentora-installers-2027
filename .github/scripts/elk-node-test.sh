@@ -81,12 +81,12 @@ say "Installing the Elk node"
 docker cp "$REPO/elk-node" "$NAME:/root/elk-node"
 START=$(date +%s)
 WRONG=$(panel_code sentora-elk "$(spki "$W/other.crt")")
-if in_box "bash /root/elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $WRONG --files /root/elk-node" > "$OUT/wrong-code.txt" 2>&1; then
+if in_box "cd /root && bash elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $WRONG --files elk-node" > "$OUT/wrong-code.txt" 2>&1; then
     bad "the installer went on with the wrong panel code"
 else
     grep -q "not the panel you meant" "$OUT/wrong-code.txt" && ! in_box 'test -e /etc/sentora-elk/ca.crt' && ok "a wrong panel code stops it before anything is changed" || bad "wrong code: $(tail -2 "$OUT/wrong-code.txt")"
 fi
-in_box "bash /root/elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $CODE --files /root/elk-node" > "$OUT/install-screen.txt" 2>&1
+in_box "cd /root && bash elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $CODE --files elk-node" > "$OUT/install-screen.txt" 2>&1
 RC=$?
 echo "  install: rc $RC in $(( $(date +%s) - START )) s"; tail -16 "$OUT/install-screen.txt" | sed 's/^/  | /'
 [ $RC -eq 0 ] && ok "the installer finished" || { bad "the installer stopped (rc $RC)"; tail -40 "$OUT/install-screen.txt"; exit 1; }
@@ -197,8 +197,8 @@ in_box 'sentora-elk-node status' > "$OUT/status.txt" 2>&1; grep -q "Logs kept: *
 in_box 'sentora-elk-node password' > "$OUT/password.txt" 2>&1
 NEWPW=$(sed -n 's/.*password: \([A-Za-z0-9]*\).*/\1/p' "$OUT/password.txt")
 [ -n "$NEWPW" ] && [ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 200 ] && ok "a new Kibana password works" || bad "sentora-elk-node password: $(cat "$OUT/password.txt")"
-in_box "bash /root/elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $CODE --files /root/elk-node" > "$OUT/again.txt" 2>&1 && bad "a second install went on" || { grep -q "already an Elk node" "$OUT/again.txt" && ok "a second install is refused (use --update)" || bad "second install: $(tail -2 "$OUT/again.txt")"; }
-in_box "bash /root/elk-node/sentora2027-elk-node --update --files /root/elk-node" > "$OUT/update.txt" 2>&1 && ok "--update finished" || bad "--update stopped: $(tail -5 "$OUT/update.txt")"
+in_box "cd /root && bash elk-node/sentora2027-elk-node --panel https://$PIP --panel-code $CODE --files elk-node" > "$OUT/again.txt" 2>&1 && bad "a second install went on" || { grep -q "already an Elk node" "$OUT/again.txt" && ok "a second install is refused (use --update)" || bad "second install: $(tail -2 "$OUT/again.txt")"; }
+in_box "cd /root && bash elk-node/sentora2027-elk-node --update --files elk-node" > "$OUT/update.txt" 2>&1 && ok "--update finished" || bad "--update stopped: $(tail -5 "$OUT/update.txt")"
 [ "$(in_box 'sentora-elk-node key' | head -1)" = "$NODEKEY" ] && ok "the node key is the same after the update" || bad "the update changed the node key"
 es https://127.0.0.1:9200/_ilm/policy/sentora-logs | grep -q '"min_age":"7d"' && ok "the update kept the retention" || bad "the update reset the retention"
 [ "$(curl -sk -u "sentora-admin:$NEWPW" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 200 ] && ok "the update kept the Kibana login" || bad "the update broke the Kibana login"
