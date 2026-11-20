@@ -1,0 +1,282 @@
+#!/usr/bin/python3 -I
+"""Sentora Elk node: alerts for the panel (the service sentora-elk-alerts, its own user).
+
+Every 5 minutes it asks Elasticsearch (user sentora_alerts: read only) what needs a look: a website down, a
+certificate running out, a full disk, mail piling up, a burst of failed logins or of requests the web firewall
+stopped, many bounces, a busy CPU, and the panel's logs gone quiet. The answer is kept in /var/lib/sentora-elk-alerts/
+alerts.json and served on port 6515 to the panel's certificate only (mutual TLS, both sides pinned, as on 6514): the
+panel's daemon fetches it, shows each alert as a notice to the administrators and mails them.
+
+    sentora-elk-alerts.py serve     the service (checks every 5 minutes, answers on 6515)
+    sentora-elk-alerts.py check     one check now; prints the alerts
+
+Settings (each optional) in /etc/sentora-elk-alerts/limits.json, e.g. {"disk_pct": 85}: see LIMITS.
+Written by RusTus, 2026-11-20. GPL-3.0.
+"""
+import base64
+import datetime
+import json
+import os
+import socket
+import socketserver
+import ssl
+import sys
+import threading
+import time
+import urllib.request
+
+CONF = "/etc/sentora-elk-alerts"
+STATE = "/var/lib/sentora-elk-alerts"
+ES = "https://127.0.0.1:9200"
+PORT = 6515
+EVERY = 300
+LIMITS = {
+    "down_checks": 3,        # a website: failed checks in a row (one a minute) before it counts as down
+    "cert_days": 14,         # a certificate: days left before a warning (an outage under 3)
+    "disk_pct": 90,          # disk used, % (system or websites)
+    "mail_queue": 200,       # mails waiting to go
+    "cpu_pct": 90,           # CPU busy, % on average over the last 15 minutes
+    "failed_logins": 100,    # failed logins (SSH, panel, mail, FTP) in 15 minutes
+    "waf_blocked": 200,      # requests the web firewall stopped in 15 minutes
+    "bounces": 50,           # mails bounced in an hour
+    "quiet_minutes": 30,     # no log line from the panel for this long (while there were lines the day before)
+}
+
+
+def limits():
+    out = dict(LIMITS)
+    try:
+        with open(os.path.join(CONF, "limits.json")) as f:
+            mine = json.load(f)
+        for k, v in mine.items() if isinstance(mine, dict) else ():
+            if k in out and isinstance(v, (int, float)) and v > 0:
+                out[k] = v
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def es(path, body):
+    with open(os.path.join(CONF, "es.pw")) as f:
+        pw = f.read().strip()
+    ctx = ssl.create_default_context(cafile=os.path.join(CONF, "http_ca.crt"))
+    req = urllib.request.Request(ES + path, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": "Basic " + base64.b64encode(("sentora_alerts:" + pw).encode()).decode()})
+    with urllib.request.urlopen(req, context=ctx, timeout=30) as r:
+        return json.load(r)
+
+
+def count(index, since, filters, must_not=()):
+    q = {"bool": {"filter": [{"range": {"@timestamp": {"gte": since}}}] + list(filters), "must_not": list(must_not)}}
+    return es("/" + index + "/_count?ignore_unavailable=true&allow_no_indices=true", {"query": q}).get("count", 0)
+
+
+def latest_health(field):
+    """The newest value of a health figure, per panel (the last 15 minutes)."""
+    r = es("/logs-sentora-*/_search?ignore_unavailable=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"sentora.log": "health"}}, {"exists": {"field": field}}, {"range": {"@timestamp": {"gte": "now-15m"}}}]}},
+        "aggs": {"p": {"terms": {"field": "sentora.panel", "size": 20},
+                       "aggs": {"t": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": [field]}},
+                                "a": {"avg": {"field": field}}}}}})
+    out = {}
+    for b in r.get("aggregations", {}).get("p", {}).get("buckets", []):
+        src = b["t"]["hits"]["hits"][0]["_source"] if b["t"]["hits"]["hits"] else {}
+        v = src
+        for part in field.split("."):
+            v = v.get(part) if isinstance(v, dict) else None
+        out[b["key"]] = (v, b["a"]["value"])
+    return out
+
+
+def per_panel(index, since, filters, must_not=()):
+    r = es("/" + index + "/_search?ignore_unavailable=true", {"size": 0, "query": {"bool": {
+        "filter": [{"range": {"@timestamp": {"gte": since}}}] + list(filters), "must_not": list(must_not)}},
+        "aggs": {"p": {"terms": {"field": "sentora.panel", "size": 20}}}})
+    return {b["key"]: b["doc_count"] for b in r.get("aggregations", {}).get("p", {}).get("buckets", [])}
+
+
+def check():
+    L = limits()
+    found = []  # (id, level, title, text, board)
+
+    # websites down: the last N checks of a website all failed
+    n = int(L["down_checks"])
+    r = es("/heartbeat-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"tags": "sentora-site"}}, {"range": {"@timestamp": {"gte": "now-%dm" % (n + 10)}}}]}},
+        "aggs": {"m": {"terms": {"field": "monitor.name", "size": 2000},
+                       "aggs": {"t": {"top_hits": {"size": n, "sort": [{"@timestamp": "desc"}],
+                                                   "_source": ["monitor.status", "error.message", "error.type"]}}}}}})
+    for b in r.get("aggregations", {}).get("m", {}).get("buckets", []):
+        hits = [h["_source"] for h in b["t"]["hits"]["hits"]]
+        if len(hits) >= n and all(h.get("monitor", {}).get("status") == "down" for h in hits):
+            why = str((hits[0].get("error") or {}).get("message") or (hits[0].get("error") or {}).get("type") or "no answer")[:200]
+            found.append(("site-down:" + b["key"], "outage", b["key"] + " is down",
+                          "The Elk node could not reach %s in its last %d checks (one a minute): %s." % (b["key"], n, why), "sentora-uptime"))
+
+    # certificates running out
+    r = es("/heartbeat-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"tags": "sentora-site"}}, {"range": {"@timestamp": {"gte": "now-2h"}}}, {"exists": {"field": "tls.server.x509.not_after"}}]}},
+        "aggs": {"m": {"terms": {"field": "monitor.name", "size": 2000}, "aggs": {"e": {"max": {"field": "tls.server.x509.not_after"}}}}}})
+    now = time.time()
+    for b in r.get("aggregations", {}).get("m", {}).get("buckets", []):
+        exp = b["e"].get("value")
+        if exp is None:
+            continue
+        days = (exp / 1000 - now) / 86400
+        if days < L["cert_days"]:
+            when = datetime.datetime.fromtimestamp(exp / 1000, datetime.timezone.utc).strftime("%Y-%m-%d")
+            found.append(("cert:" + b["key"], "outage" if days < 3 else "warning", b["key"] + "'s certificate runs out",
+                          "The certificate of %s expires on %s (in %d day%s). Renew it in the panel (SSL / Let's Encrypt)."
+                          % (b["key"], when, max(0, int(days)), "" if int(days) == 1 else "s"), "sentora-uptime"))
+
+    # the panel's own figures
+    for panel, (v, _) in latest_health("sentora.health.disk_root_used_pct").items():
+        if v is not None and v >= L["disk_pct"]:
+            found.append(("disk-root:" + panel, "warning", panel + ": the system disk is %d%% full" % v,
+                          "The system disk of %s is %.1f%% full (the alert starts at %d%%)." % (panel, v, L["disk_pct"]), "sentora-health"))
+    for panel, (v, _) in latest_health("sentora.health.disk_sites_used_pct").items():
+        if v is not None and v >= L["disk_pct"]:
+            found.append(("disk-sites:" + panel, "warning", panel + ": the websites' disk is %d%% full" % v,
+                          "The disk with the websites on %s is %.1f%% full (the alert starts at %d%%)." % (panel, v, L["disk_pct"]), "sentora-health"))
+    for panel, (v, _) in latest_health("sentora.health.mail_queue").items():
+        if v is not None and v >= L["mail_queue"]:
+            found.append(("mailq:" + panel, "warning", panel + ": %d mails waiting to go" % v,
+                          "%d mails are waiting in the mail queue of %s (the alert starts at %d): look at Mail delivery for why."
+                          % (v, panel, L["mail_queue"]), "sentora-delivery"))
+    for panel, (_, avg) in latest_health("sentora.health.cpu_pct").items():
+        if avg is not None and avg >= L["cpu_pct"]:
+            found.append(("cpu:" + panel, "warning", panel + ": the CPU is busy",
+                          "The CPU of %s was %.0f%% busy on average over the last 15 minutes." % (panel, avg), "sentora-health"))
+
+    # bursts: failed logins, the web firewall, bounces
+    for panel, c in per_panel("logs-sentora-*", "now-15m", [{"term": {"event.outcome": "failure"}}, {"exists": {"field": "event.action"}}],
+                              [{"prefix": {"event.action": "waf-"}}]).items():
+        if c >= L["failed_logins"]:
+            found.append(("logins:" + panel, "warning", panel + ": %d failed logins in 15 minutes" % c,
+                          "%d failed logins (SSH, the panel, mail, FTP) on %s in the last 15 minutes: someone may be guessing passwords."
+                          % (c, panel), "sentora-security"))
+    for panel, c in per_panel("logs-sentora-*", "now-15m", [{"term": {"event.action": "waf-blocked"}}]).items():
+        if c >= L["waf_blocked"]:
+            found.append(("waf:" + panel, "warning", panel + ": the web firewall stopped %d requests" % c,
+                          "The web firewall stopped %d requests to the websites on %s in the last 15 minutes." % (c, panel), "sentora-firewall"))
+    for panel, c in per_panel("logs-sentora-*", "now-1h", [{"term": {"sentora.mail.status": "bounced"}}]).items():
+        if c >= L["bounces"]:
+            found.append(("bounces:" + panel, "warning", panel + ": %d mails bounced in an hour" % c,
+                          "%d mails from %s bounced in the last hour: a mailbox may be sending spam, or the server may be on a block list."
+                          % (c, panel), "sentora-delivery"))
+
+    # the panel's logs gone quiet (rsyslog stopped forwarding); its health lines come another way and do not count
+    m = int(L["quiet_minutes"])
+    before = per_panel("logs-sentora-*", "now-1d", [], [{"term": {"sentora.log": "health"}}])
+    recent = per_panel("logs-sentora-*", "now-%dm" % m, [], [{"term": {"sentora.log": "health"}}])
+    for panel, c in before.items():
+        if c > 0 and recent.get(panel, 0) == 0:
+            found.append(("quiet:" + panel, "warning", panel + ": no logs for %d minutes" % m,
+                          "The Elk node has had no log line from %s for %d minutes. On the panel: systemctl status rsyslog." % (panel, m),
+                          "sentora-overview"))
+    return found
+
+
+def save(found):
+    os.makedirs(STATE, exist_ok=True)
+    path = os.path.join(STATE, "alerts.json")
+    try:
+        with open(path) as f:
+            old = {a["id"]: a for a in json.load(f).get("alerts", [])}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        old = {}
+    now = int(time.time())
+    alerts = [{"id": i, "level": lv, "title": t, "text": x, "board": bd, "since": int(old.get(i, {}).get("since", now))}
+              for i, lv, t, x, bd in found[:200]]
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"time": now, "ok": True, "alerts": alerts}, f)
+    os.replace(tmp, path)
+    return alerts
+
+
+def failed(why):
+    path = os.path.join(STATE, "alerts.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {"alerts": []}
+    d.update({"time": int(time.time()), "ok": False, "error": str(why)[:300]})
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, path)
+
+
+def loop():
+    while True:
+        try:
+            save(check())
+        except Exception as e:  # (the checks go on next time; the panel sees ok false)
+            failed(e)
+        time.sleep(EVERY)
+
+
+class Answer(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.settimeout(10)
+        try:
+            conn = self.server.tls.wrap_socket(self.request, server_side=True)
+        except (OSError, ssl.SSLError):
+            return  # (no certificate, or not the panel's)
+        try:
+            with open(os.path.join(STATE, "alerts.json"), "rb") as f:
+                data = f.read(1 << 20)
+        except OSError:
+            data = b'{"ok": false, "error": "no check yet", "alerts": []}'
+        try:
+            conn.sendall(data)
+            conn.unwrap()
+        except (OSError, ssl.SSLError):
+            pass
+        finally:
+            conn.close()
+
+
+class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 16
+
+
+class Server6(Server):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
+def serve():
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls.load_cert_chain(os.path.join(CONF, "node.crt"), os.path.join(CONF, "node.key"))
+    tls.verify_mode = ssl.CERT_REQUIRED
+    tls.load_verify_locations(os.path.join(CONF, "panel.crt"))  # the panel's own certificate, and only it
+    threading.Thread(target=loop, daemon=True).start()
+    try:
+        srv = Server6(("::", PORT), Answer)  # IPv6 and IPv4
+    except OSError:
+        srv = Server(("0.0.0.0", PORT), Answer)  # (a system without IPv6)
+    srv.tls = tls
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    what = sys.argv[1] if len(sys.argv) > 1 else ""
+    if what == "serve":
+        serve()
+    elif what == "check":
+        for a in save(check()):
+            print("%-8s %s: %s" % (a["level"], a["title"], a["text"]))
+        print("(no alerts)" if not json.load(open(os.path.join(STATE, "alerts.json")))["alerts"] else "")
+    else:
+        print(__doc__)
+        sys.exit(2)

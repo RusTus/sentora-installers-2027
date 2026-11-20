@@ -97,6 +97,7 @@ class elk
             'ftp' => array('FTP', 'Uploads and other file changes over FTP.'),
             'dns' => array('DNS', 'BIND\'s log.'),
             'health' => array('Server health', 'CPU, memory, disk, network, Apache, MySQL and the mail queue, every 5 minutes.'),
+            'alerts' => array('Alerts', 'What the node finds that needs a look (a website down, a certificate running out, a full disk, a burst of failed logins...): a notice in the panel and a mail to the administrators.'),
         );
     }
 
@@ -112,9 +113,12 @@ class elk
             return array_keys(self::Groups());
         }
         $parts = explode(',', $v);
-        // (a choice saved before "Server health" was there (no "v2" in it) gets it too, unless nothing was chosen)
-        if (!in_array('v2', $parts, true) && $v !== 'none') {
-            $parts[] = 'health';
+        // (a choice saved before a group was there gets it too, unless nothing was chosen: "v2" knew Server health, "v3" Alerts)
+        if (!in_array('v3', $parts, true) && $v !== 'none') {
+            $parts[] = 'alerts';
+            if (!in_array('v2', $parts, true)) {
+                $parts[] = 'health';
+            }
         }
         return array_values(array_intersect(array_keys(self::Groups()), $parts));
     }
@@ -307,7 +311,7 @@ class elk
     static function SaveGroups(array $groups)
     {
         $g = array_values(array_intersect(array_keys(self::Groups()), $groups));
-        $g[] = 'v2';
+        $g[] = 'v3';
         self::Save(self::S_GROUPS, implode(',', $g));
     }
 
@@ -1153,6 +1157,14 @@ class elk
      */
     static function Remove()
     {
+        // the alerts' notices go with it
+        $al = json_decode((string) @file_get_contents(self::STATE_DIR . '/alerts.json'), true);
+        foreach (is_array($al) && isset($al['sent']) && is_array($al['sent']) ? array_keys($al['sent']) : array() as $id) {
+            if (class_exists('ctrl_notices')) {
+                ctrl_notices::Withdraw('elk-alert-' . md5($id), 0);
+            }
+        }
+        @unlink(self::STATE_DIR . '/alerts.json');
         $st = self::State();
         $user = self::RsyslogUser();
         foreach ((array) (isset($st['acl']) ? $st['acl'] : array()) as $p) {

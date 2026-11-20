@@ -543,6 +543,45 @@ run systemctl enable heartbeat-elastic
 run systemctl restart heartbeat-elastic || echo "WARNING: Heartbeat did not start (journalctl -u heartbeat-elastic)"
 note "The panel sends its list of websites within the hour; the checks follow within 5 minutes (sentora-elk-node monitors)."
 
+ui_step "Alerts for the panel (port 6515: the panel's certificate only)"
+# Elasticsearch: a user that may only read Sentora's logs and the uptime results
+printf '%s' '{"indices":[{"names":["logs-sentora-*","heartbeat-*"],"privileges":["read"]}]}' > "$CONF/files/role-alerts.json"
+esapi PUT /_security/role/sentora_alerts_reader "$CONF/files/role-alerts.json" | grep -q '"role"' || die "Could not make the alerts' role."
+[ -s "$CONF/alerts.pw" ] || { pw > "$CONF/alerts.pw"; chmod 600 "$CONF/alerts.pw"; }
+printf '{"password":"%s","roles":["sentora_alerts_reader"],"full_name":"Alerts for the panel (read only)"}' "$(cat "$CONF/alerts.pw")" > "$CONF/files/u.json"
+esapi PUT /_security/user/sentora_alerts "$CONF/files/u.json" | grep -q '"created"' || die "Could not make the alerts' user."
+rm -f "$CONF/files/u.json"
+# its own user, its own copy of what it needs (root's files stay root's)
+id sentora-elk-alerts > /dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sentora-elk-alerts
+AL=/etc/sentora-elk-alerts
+mkdir -p "$AL"; chown root:sentora-elk-alerts "$AL"; chmod 750 "$AL"
+install -m 640 -o root -g sentora-elk-alerts "$CONF/alerts.pw" "$AL/es.pw"
+install -m 640 -o root -g sentora-elk-alerts "$CONF/http_ca.crt" "$AL/http_ca.crt"
+install -m 640 -o root -g sentora-elk-alerts "$CONF/panel.crt" "$AL/panel.crt"
+cat "$CONF/node.crt" "$CONF/ca.crt" > "$AL/node.crt.new" && install -m 640 -o root -g sentora-elk-alerts "$AL/node.crt.new" "$AL/node.crt"; rm -f "$AL/node.crt.new"
+install -m 640 -o root -g sentora-elk-alerts "$CONF/node.key" "$AL/node.key"
+mkdir -p /usr/local/lib/sentora-elk
+get alerts/sentora-elk-alerts.py /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new || die "Could not get the alerts service."
+python3 -I -m py_compile /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new || die "The alerts service is damaged."
+install -m 755 -o root -g root /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new /usr/local/lib/sentora-elk/sentora-elk-alerts.py
+rm -f /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new; rm -rf /usr/local/lib/sentora-elk/__pycache__
+printf '%s\n' '[Unit]' "Description=Sentora Elk node: alerts for the panel (port 6515, the panel's certificate only)" \
+    'After=network-online.target elasticsearch.service' 'Wants=network-online.target' \
+    '[Service]' 'User=sentora-elk-alerts' 'Group=sentora-elk-alerts' \
+    'ExecStart=/usr/bin/python3 -I /usr/local/lib/sentora-elk/sentora-elk-alerts.py serve' \
+    'StateDirectory=sentora-elk-alerts' 'StateDirectoryMode=0750' 'Restart=always' 'RestartSec=10' \
+    'NoNewPrivileges=yes' 'ProtectSystem=strict' 'ProtectHome=yes' 'PrivateTmp=yes' 'PrivateDevices=yes' \
+    'ProtectKernelTunables=yes' 'ProtectKernelModules=yes' 'ProtectKernelLogs=yes' 'ProtectControlGroups=yes' 'ProtectClock=yes' \
+    'ProtectHostname=yes' 'RestrictNamespaces=yes' 'RestrictRealtime=yes' 'RestrictSUIDSGID=yes' 'LockPersonality=yes' \
+    'MemoryDenyWriteExecute=yes' 'CapabilityBoundingSet=' 'AmbientCapabilities=' 'SystemCallArchitectures=native' \
+    'RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' 'UMask=0027' 'MemoryMax=256M' \
+    '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/sentora-elk-alerts.service
+chmod 644 /etc/systemd/system/sentora-elk-alerts.service
+run systemctl daemon-reload
+run systemctl enable sentora-elk-alerts
+run systemctl restart sentora-elk-alerts || echo "WARNING: the alerts service did not start (journalctl -u sentora-elk-alerts)"
+note "Checked every 5 minutes; the panel fetches them for its notices and mail (limits: $AL/limits.json, sentora-elk-node alerts)."
+
 ui_step "Sentora's dashboards"
 printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-logs"' || die "Kibana refused the data view (see $LOG)."
@@ -579,6 +618,7 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #   sentora-elk-node panel-from LIST   the panel's address as this server sees it ("any": the certificate only)
 #   sentora-elk-node firewall          make the firewall rules again from those two lists
 #   sentora-elk-node monitors          the uptime checks made again from the panel's list of websites
+#   sentora-elk-node alerts            check for alerts now and show them (the panel fetches them every 5 minutes)
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
@@ -587,7 +627,7 @@ es() { curl -sS --cacert $C/http_ca.crt -u "elastic:$(cat $C/elastic.pw)" -H 'Co
 ip_list() { local a; for a in "$@"; do [ "$a" = any ] || [[ "$a" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?$ ]] || { echo "Not an address or network: $a"; exit 2; }; done; }
 case "${1:-status}" in
     status)
-        for s in elasticsearch logstash kibana heartbeat-elastic; do printf '%-18s %s\n' "$s" "$(systemctl is-active $s)"; done
+        for s in elasticsearch logstash kibana heartbeat-elastic sentora-elk-alerts; do printf '%-18s %s\n' "$s" "$(systemctl is-active $s)"; done
         echo "Websites watched: $(grep -c '"type": "http"' /etc/heartbeat/monitors.d/sentora-sites.yml 2> /dev/null || echo 0)"
         echo "Logs kept:     $(cat $C/retention) days"
         es "https://127.0.0.1:9200/_data_stream/logs-sentora-*/_stats?human" 2> /dev/null | python3 -I -c 'import json,sys
@@ -619,10 +659,10 @@ except Exception: print("Stored:        nothing yet")'
         for p in $ports; do ufw allow "$p/tcp" > /dev/null; done
         for r in $(ufw status numbered 2> /dev/null | grep sentora-elk | sed -n 's/^\[ *\([0-9]*\)\].*/\1/p' | sort -rn); do ufw --force delete "$r" > /dev/null; done
         for a in $(cat $C/kibana-from); do if [ "$a" = any ]; then ufw allow 443/tcp comment sentora-elk-kibana; else ufw allow from "$a" to any port 443 proto tcp comment sentora-elk-kibana; fi; done > /dev/null
-        for a in $(cat $C/panel-from); do if [ "$a" = any ]; then ufw allow 6514/tcp comment sentora-elk-panel; else ufw allow from "$a" to any port 6514 proto tcp comment sentora-elk-panel; fi; done > /dev/null
+        for a in $(cat $C/panel-from); do for p in 6514 6515; do if [ "$a" = any ]; then ufw allow $p/tcp comment sentora-elk-panel; else ufw allow from "$a" to any port $p proto tcp comment sentora-elk-panel; fi; done; done > /dev/null
         if ! ufw status 2> /dev/null | grep -q '^Status: active'; then ufw default deny incoming > /dev/null; ufw default allow outgoing > /dev/null; ufw --force enable > /dev/null; fi
         ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
-        echo "Firewall: SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 from $(cat $C/panel-from)." ;;
+        echo "Firewall: SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 and alerts 6515 from $(cat $C/panel-from)." ;;
     monitors)
         # the panel's list of websites (kept by Logstash) -> Heartbeat's checks; written only when it changed
         python3 -I -c '
@@ -650,13 +690,15 @@ if new != old:
     os.replace(tmp, dst)
     print("%d website(s) checked every minute" % len(mon))
 ' ;;
+    alerts)
+        runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk/sentora-elk-alerts.py check ;;
     update) exec bash /usr/local/lib/sentora-elk/installer --update ;;
-    *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-elk-node
 
-ui_step "Firewall (SSH, Kibana, and the panel on 6514)"
+ui_step "Firewall (SSH, Kibana, and the panel on 6514 and 6515)"
 if [ ! -s "$CONF/panel-from" ]; then
     PHOST=$(cat "$CONF/panel-url"); PHOST=${PHOST#*://}; PHOST=${PHOST%%:*}
     PIP=$(getent ahostsv4 "$PHOST" 2> /dev/null | awk '{print $1; exit}')
@@ -667,13 +709,20 @@ out=$(/usr/local/sbin/sentora-elk-node firewall 2>&1) && note "$out" || echo "WA
 if command -v aa-status > /dev/null 2>&1 && aa-status --enabled 2> /dev/null; then note "AppArmor is on: nothing was widened."; fi
 
 ui_step "Checking: the panel's door, the logins"
-for s in elasticsearch logstash kibana; do systemctl is-active --quiet "$s" || echo "WARNING: $s is not running (journalctl -u $s)"; done
+for s in elasticsearch logstash kibana sentora-elk-alerts; do systemctl is-active --quiet "$s" || echo "WARNING: $s is not running (journalctl -u $s)"; done
 wait_for 180 bash -c 'echo > /dev/tcp/127.0.0.1/6514' || echo "WARNING: Logstash does not listen on 6514 yet (journalctl -u logstash)"
 # a connection without the panel's certificate must be turned away
 if printf '{"message":"x"}\n' | timeout 10 openssl s_client -connect 127.0.0.1:6514 -CAfile "$CONF/ca.crt" -verify_return_error -quiet > "$CONF/door.txt" 2>&1 && ! grep -qi 'alert\|error' "$CONF/door.txt"; then
     echo "WARNING: port 6514 took a connection without the panel's certificate"
 else
     note "Port 6514 turns away anyone without the panel's certificate."
+fi
+wait_for 30 bash -c 'echo > /dev/tcp/127.0.0.1/6515' || echo "WARNING: the alerts service does not listen on 6515 (journalctl -u sentora-elk-alerts)"
+timeout 10 openssl s_client -connect 127.0.0.1:6515 -CAfile "$CONF/ca.crt" -quiet < /dev/null > "$CONF/door.txt" 2>&1
+if grep -q '"alerts"' "$CONF/door.txt"; then
+    echo "WARNING: port 6515 answered without the panel's certificate"
+else
+    note "Port 6515 (alerts) answers the panel's certificate only."
 fi
 rm -f "$CONF/door.txt"
 mkdir -p /usr/local/lib/sentora-elk; chmod 700 /usr/local/lib/sentora-elk

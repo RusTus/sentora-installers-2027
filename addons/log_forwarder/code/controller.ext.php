@@ -13,6 +13,7 @@
 
 require_once dirname(__FILE__) . '/logforwarder.php';
 require_once dirname(__FILE__) . '/elk.php';
+require_once dirname(__FILE__) . '/alerts.php';
 
 class module_controller extends ctrl_module
 {
@@ -379,6 +380,7 @@ class module_controller extends ctrl_module
             'open' => '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
             'trash' => '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="m6 7 1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>',
             'plus' => '<path d="M12 5v14M5 12h14"/>',
+            'bell' => '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
             'refresh' => '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
             'save' => '<path d="M5 21h14a2 2 0 0 0 2-2V8l-5-5H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/><path d="M7 3v5h8"/><path d="M7 21v-7h10v7"/>',
         );
@@ -592,6 +594,14 @@ class module_controller extends ctrl_module
                 . '<form method="post" action="./?module=log_forwarder&action=ElkRemove" class="ek-inline" onsubmit="return confirm(' . self::h(json_encode(ui_language::translate('Remove the Elk node? The panel stops sending to it; its logs stay on the node.'))) . ');">'
                 . $tok . '<button type="submit" class="btn btn-default btn-sm">' . self::ElkIcon('trash') . ' ' . self::t('Remove') . '</button></form>'
                 . '</div></div>';
+            if (elk::Paired() && in_array('alerts', elk::Chosen(), true)) {
+                $al = elk_alerts::State();
+                $nAl = isset($al['alerts']) && is_array($al['alerts']) ? count($al['alerts']) : 0;
+                $out .= '<p class="ek-muted ek-after">' . self::ElkIcon('bell') . ' ' . (!$al ? self::t('Alerts: the first check comes with the panel\'s next run.')
+                    : (empty($al['reach']) ? self::t('Alerts: the node does not answer on port 6515 yet. On the node, as root: sentora-elk-node update')
+                    : ($nAl ? self::h(str_replace('%n', (string) $nAl, ui_language::translate('Alerts: %n now, each one a notice at the top of the panel and mailed to the administrators.')))
+                    : self::t('Alerts: nothing needs a look.')))) . '</p>';
+            }
             if (elk::Paired()) {
                 $out .= '<p class="ek-muted ek-after">' . self::t('Kibana asks for its own login: sentora-admin, with the password the node\'s installer showed (sentora-elk-node password on the node makes a new one). The browser warns once: the certificate is the node\'s own.') . '</p>';
             }

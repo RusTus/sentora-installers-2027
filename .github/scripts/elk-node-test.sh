@@ -152,6 +152,17 @@ n=0; for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_
 [ "${n:-0}" -gt 0 ] && ok "the panel's CPU, memory and MySQL figures arrived" || bad "no health figures on the node: $(es "'https://127.0.0.1:9200/logs-sentora-*/_search?q=sentora.log:health&size=2'" | head -c 600)"
 es "'https://127.0.0.1:9200/logs-sentora-*/_mapping/field/sentora.health.cpu_pct'" | grep -q '"type":"double"' && ok "the figures are numbers (double)" || bad "sentora.health.cpu_pct is not a double"
 in_box 'sentora-elk-node panel-from '"$PIP $GW" > /dev/null 2>&1 && ok "panel-from takes two addresses (the runner sends test lines too)" || bad "panel-from with two addresses"
+# alerts: the node's service on 6515 (the panel's certificate only); a low disk limit makes one, the panel shows it, then it clears
+in_box 'systemctl is-active --quiet sentora-elk-alerts' && ok "the alerts service runs" || bad "the alerts service does not run: $(in_box 'journalctl -u sentora-elk-alerts -n 20 --no-pager' | tail -5)"
+in_box 'echo "{\"disk_pct\": 1}" > /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > "$OUT/alerts-check.txt" 2>&1
+grep -q "disk is" "$OUT/alerts-check.txt" && ok "a low disk limit makes an alert on the node" || bad "no disk alert: $(cat "$OUT/alerts-check.txt" | head -5)"
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc LIKE \"elk-alert-%\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-panel.txt" 2>&1
+grep -q "alerts: [1-9]" "$OUT/alerts-panel.txt" && ! grep -q "notices:0" "$OUT/alerts-panel.txt" && ok "the panel fetched the alert and shows it as a notice" || bad "panel alerts: $(cat "$OUT/alerts-panel.txt")"
+in_box 'rm -f /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > /dev/null 2>&1
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc LIKE \"elk-alert-%\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-clear.txt" 2>&1
+grep -q "notices:0" "$OUT/alerts-clear.txt" && ok "the notice went when the alert cleared" || bad "alerts did not clear: $(cat "$OUT/alerts-clear.txt")"
+( sleep 3 ) | timeout 15 openssl s_client -connect "$IP:6515" -CAfile "$W/node-ca.crt" -cert "$W/other.crt" -key "$W/other.key" -quiet > "$OUT/alerts-stranger.txt" 2>&1
+grep -q '"alerts"' "$OUT/alerts-stranger.txt" && bad "6515 answered another certificate" || ok "6515 turns away another certificate"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"
 SENT=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)
