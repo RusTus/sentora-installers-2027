@@ -22,6 +22,7 @@ DASHBOARDS = [
     ("sentora-security", "Security"),
     ("sentora-firewall", "Web firewall"),
     ("sentora-panel", "Panel and server"),
+    ("sentora-health", "Server health"),
 ]
 
 
@@ -34,7 +35,7 @@ NAMES = {"sentora.domain": "Website", "url.path": "Page", "source.ip": "Address"
          "sentora.status_class": "Answer", "rule.id": "Rule", "rule.name": "What it looks for", "sentora.waf.attack": "Attack",
          "email.to.domain": "Receiving domain", "email.from.address": "Sender", "sentora.mail.reason": "Reason",
          "sentora.mail.spam_rules": "Spam rule", "monitor.name": "Website", "monitor.status": "Status", "error.type": "Why",
-         "url.full": "Address checked"}
+         "url.full": "Address checked", "host.name": "Panel"}
 
 
 def q(kql):
@@ -346,6 +347,52 @@ BOARDS["sentora-uptime"] = build("sentora-uptime", "Uptime", [
     [(48, 3, note("Checked from the Elk node every minute: a website is **up** when it answers (an error page such as 404 counts as "
                   "an answer; 5xx and no answer do not) and its certificate is valid. Kibana's own **Uptime** app (Observability) "
                   "shows the same checks with each one's history."))],
+])
+
+# ---- Server health: the panel's own figures (Log Forwarder 207+, every daemon run: 5 minutes), one line per panel
+HEALTH = 'sentora.log : "health"'
+
+
+def avg(title, field, label, fmt=None):
+    m = {"type": "primary", "operation": "average", "field": "sentora.health." + field, "label": label,
+         "format": fmt or {"type": "number", "decimals": 1}}
+    return {"type": "metric", "title": title, "data_source": DV, "query": q(HEALTH), "metrics": [m]}
+
+
+def lines(title, ys, fmt=None, per_panel=True):
+    """A line chart over time of sentora.health figures: ys = [(field, label)]; one line per panel when one figure."""
+    y = []
+    for f, label in ys:
+        d = {"operation": "average", "field": "sentora.health." + f, "label": label}
+        if fmt:
+            d["format"] = fmt
+        y.append(d)
+    layer = {"type": "line", "data_source": DV, "x": {"operation": "date_histogram", "field": "@timestamp"}, "y": y}
+    if per_panel and len(ys) == 1:
+        layer["breakdown_by"] = {"operation": "terms", "fields": ["host.name"], "limit": 10, "label": "Panel",
+                                 "rank_by": {"type": "alphabetical", "direction": "asc"}}
+    return {"type": "xy", "title": title, "query": q(HEALTH), "layers": [layer],
+            "legend": {"visibility": "visible", "position": "right"}}
+
+
+BYTES = {"type": "bytes"}
+BOARDS["sentora-health"] = build("sentora-health", "Server health", [
+    [(12, 5, avg("CPU busy", "cpu_pct", "% (average)")),
+     (12, 5, avg("Memory used", "mem_used_pct", "% (average)")),
+     (12, 5, avg("Disk used (websites)", "disk_sites_used_pct", "% (average)")),
+     (12, 5, avg("Mail waiting to go", "mail_queue", "mails (average)"))],
+    [(24, 12, lines("CPU busy (%)", [("cpu_pct", "CPU %")])),
+     (24, 12, lines("Load (1 minute)", [("load1", "Load")]))],
+    [(24, 12, lines("Memory and swap used (%)", [("mem_used_pct", "Memory %"), ("swap_used_pct", "Swap %")])),
+     (24, 12, lines("Disk used (%)", [("disk_root_used_pct", "System %"), ("disk_sites_used_pct", "Websites %")]))],
+    [(24, 12, lines("Network (bytes a second)", [("net_rx_bps", "In"), ("net_tx_bps", "Out")], BYTES)),
+     (24, 12, lines("Apache: requests a second", [("apache_rps", "Requests/s")]))],
+    [(24, 12, lines("Apache workers", [("apache_busy", "Busy"), ("apache_idle", "Idle")])),
+     (24, 12, lines("MySQL: queries a second and connections", [("mysql_qps", "Queries/s"), ("mysql_threads", "Connections")]))],
+    [(24, 12, lines("MySQL: slow queries a minute", [("mysql_slow_per_min", "Slow/min")])),
+     (24, 12, lines("Mail waiting to go", [("mail_queue", "Mails")]))],
+    [(48, 3, note("Sent by the panel on every daemon run (5 minutes) when **Server health** is ticked on Log Forwarder's page. "
+                  "CPU and network are the averages since the run before; with several panels each has its own line."))],
 ])
 
 if __name__ == "__main__":

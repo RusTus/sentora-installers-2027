@@ -49,6 +49,11 @@
       "destination": "sentora-panel",
       "label": "Panel and server",
       "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-health",
+      "label": "Server health",
+      "type": "dashboardLink"
      }
     ]
    },

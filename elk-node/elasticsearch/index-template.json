@@ -49,6 +49,73 @@
             },
             "status_class": {
               "type": "keyword"
+            },
+            "health": {
+              "properties": {
+                "cpu_pct": {
+                  "type": "double"
+                },
+                "load1": {
+                  "type": "double"
+                },
+                "load5": {
+                  "type": "double"
+                },
+                "load15": {
+                  "type": "double"
+                },
+                "cpus": {
+                  "type": "double"
+                },
+                "mem_total": {
+                  "type": "double"
+                },
+                "mem_used_pct": {
+                  "type": "double"
+                },
+                "swap_used_pct": {
+                  "type": "double"
+                },
+                "disk_root_used_pct": {
+                  "type": "double"
+                },
+                "disk_root_free": {
+                  "type": "double"
+                },
+                "disk_sites_used_pct": {
+                  "type": "double"
+                },
+                "disk_sites_free": {
+                  "type": "double"
+                },
+                "net_rx_bps": {
+                  "type": "double"
+                },
+                "net_tx_bps": {
+                  "type": "double"
+                },
+                "apache_busy": {
+                  "type": "double"
+                },
+                "apache_idle": {
+                  "type": "double"
+                },
+                "apache_rps": {
+                  "type": "double"
+                },
+                "mysql_threads": {
+                  "type": "double"
+                },
+                "mysql_qps": {
+                  "type": "double"
+                },
+                "mysql_slow_per_min": {
+                  "type": "double"
+                },
+                "mail_queue": {
+                  "type": "double"
+                }
+              }
             }
           }
         },

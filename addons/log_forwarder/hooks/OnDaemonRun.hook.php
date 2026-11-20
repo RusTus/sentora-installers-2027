@@ -12,6 +12,7 @@
  */
 require_once dirname(__FILE__) . '/../code/logforwarder.php';
 require_once dirname(__FILE__) . '/../code/elk.php';
+require_once dirname(__FILE__) . '/../code/health.php';
 
 echo fs_filehandler::NewLine() . "START Log Forwarder" . fs_filehandler::NewLine();
 if (ui_module::CheckModuleEnabled('Log Forwarder')) {
@@ -23,6 +24,10 @@ if (ui_module::CheckModuleEnabled('Log Forwarder')) {
         echo $logForwarderLine . fs_filehandler::NewLine();
     }
     foreach (elk::After(log_forwarder::$installed) as $logForwarderLine) {
+        echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
+    }
+    // the server's health (CPU, memory, disk, Apache, MySQL, mail queue), when chosen
+    if (($logForwarderLine = elk_health::Run()) !== '') {
         echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
     }
     // older access logs asked for on the page ("Bring in older logs")

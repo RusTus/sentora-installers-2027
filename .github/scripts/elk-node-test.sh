@@ -110,7 +110,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -145,6 +145,12 @@ in_box 'sentora-elk-node monitors > /dev/null; grep -q "\"name\": \"panel.elktes
 n=0; for _ in $(seq 1 40); do n=$(es "'https://127.0.0.1:9200/heartbeat-*/_count?q=monitor.name:panel.elktest.example'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${n:-0}" -gt 0 ] && break; sleep 5; done
 [ "${n:-0}" -gt 0 ] && ok "Heartbeat checked the panel's website ($n)" || bad "Heartbeat stored no check of the panel's website"
 es "'https://127.0.0.1:9200/logs-sentora-*/_count?q=sentora.log:sites'" | grep -q '"count":0' && ok "the list of websites is not stored among the logs" || bad "the list of websites was stored among the logs"
+# server health: two runs (the second has the rates: CPU, network, queries); then the figures on the node
+pphp 'require_once "modules/log_forwarder/code/health.php"; echo elk_health::Run(), "\n"; $f = elk::STATE_DIR . "/health-last.json"; $j = json_decode(file_get_contents($f), true); $j["t"] -= 300; file_put_contents($f, json_encode($j)); echo elk_health::Run(), "\n";' > "$OUT/health.txt" 2>&1
+[ "$(grep -c 'server health sent' "$OUT/health.txt")" = 2 ] && ok "the panel sent its health twice" || bad "server health: $(cat "$OUT/health.txt")"
+n=0; for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_refresh > /dev/null 2>&1; n=$(es "'https://127.0.0.1:9200/logs-sentora-*/_count' -d '{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"sentora.panel\":\"panel.elktest.example\"}},{\"exists\":{\"field\":\"sentora.health.cpu_pct\"}},{\"exists\":{\"field\":\"sentora.health.mem_used_pct\"}},{\"exists\":{\"field\":\"sentora.health.mysql_threads\"}}]}}}'" | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${n:-0}" -gt 0 ] && break; sleep 3; done
+[ "${n:-0}" -gt 0 ] && ok "the panel's CPU, memory and MySQL figures arrived" || bad "no health figures on the node: $(es "'https://127.0.0.1:9200/logs-sentora-*/_search?q=sentora.log:health&size=2'" | head -c 600)"
+es "'https://127.0.0.1:9200/logs-sentora-*/_mapping/field/sentora.health.cpu_pct'" | grep -q '"type":"double"' && ok "the figures are numbers (double)" || bad "sentora.health.cpu_pct is not a double"
 in_box 'sentora-elk-node panel-from '"$PIP $GW" > /dev/null 2>&1 && ok "panel-from takes two addresses (the runner sends test lines too)" || bad "panel-from with two addresses"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"

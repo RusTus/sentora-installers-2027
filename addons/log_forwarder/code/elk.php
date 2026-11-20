@@ -96,6 +96,7 @@ class elk
             'panel' => array('The panel', 'Panel pages and errors, failed panel logins, what root did for the panel, the daemon, the problems log.'),
             'ftp' => array('FTP', 'Uploads and other file changes over FTP.'),
             'dns' => array('DNS', 'BIND\'s log.'),
+            'health' => array('Server health', 'CPU, memory, disk, network, Apache, MySQL and the mail queue, every 5 minutes.'),
         );
     }
 
@@ -110,7 +111,12 @@ class elk
         if ($v === '') {
             return array_keys(self::Groups());
         }
-        return array_values(array_intersect(array_keys(self::Groups()), explode(',', $v)));
+        $parts = explode(',', $v);
+        // (a choice saved before "Server health" was there (no "v2" in it) gets it too, unless nothing was chosen)
+        if (!in_array('v2', $parts, true) && $v !== 'none') {
+            $parts[] = 'health';
+        }
+        return array_values(array_intersect(array_keys(self::Groups()), $parts));
     }
 
     /**
@@ -301,7 +307,8 @@ class elk
     static function SaveGroups(array $groups)
     {
         $g = array_values(array_intersect(array_keys(self::Groups()), $groups));
-        self::Save(self::S_GROUPS, $g ? implode(',', $g) : 'none');
+        $g[] = 'v2';
+        self::Save(self::S_GROUPS, implode(',', $g));
     }
 
     /**

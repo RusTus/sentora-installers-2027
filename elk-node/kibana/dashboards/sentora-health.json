@@ -1,0 +1,723 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-uptime",
+      "label": "Uptime",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-health",
+      "label": "Server health",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.health.cpu_pct",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "% (average)",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "CPU busy",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.health.mem_used_pct",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "% (average)",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Memory used",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.health.disk_sites_used_pct",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "% (average)",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Disk used (websites)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.health.mail_queue",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "mails (average)",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Mail waiting to go",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "host.name"
+       ],
+       "label": "Panel",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.cpu_pct",
+        "label": "CPU %",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "CPU busy (%)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "host.name"
+       ],
+       "label": "Panel",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.load1",
+        "label": "Load",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Load (1 minute)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.mem_used_pct",
+        "label": "Memory %",
+        "operation": "average"
+       },
+       {
+        "field": "sentora.health.swap_used_pct",
+        "label": "Swap %",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Memory and swap used (%)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.disk_root_used_pct",
+        "label": "System %",
+        "operation": "average"
+       },
+       {
+        "field": "sentora.health.disk_sites_used_pct",
+        "label": "Websites %",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Disk used (%)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.net_rx_bps",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "In",
+        "operation": "average"
+       },
+       {
+        "field": "sentora.health.net_tx_bps",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Out",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Network (bytes a second)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 31
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "host.name"
+       ],
+       "label": "Panel",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.apache_rps",
+        "label": "Requests/s",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Apache: requests a second",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 31
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.apache_busy",
+        "label": "Busy",
+        "operation": "average"
+       },
+       {
+        "field": "sentora.health.apache_idle",
+        "label": "Idle",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Apache workers",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 43
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.mysql_qps",
+        "label": "Queries/s",
+        "operation": "average"
+       },
+       {
+        "field": "sentora.health.mysql_threads",
+        "label": "Connections",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "MySQL: queries a second and connections",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 43
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "host.name"
+       ],
+       "label": "Panel",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.mysql_slow_per_min",
+        "label": "Slow/min",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "MySQL: slow queries a minute",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 55
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "host.name"
+       ],
+       "label": "Panel",
+       "limit": 10,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "asc",
+        "type": "alphabetical"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.health.mail_queue",
+        "label": "Mails",
+        "operation": "average"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Mail waiting to go",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 55
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Sent by the panel on every daemon run (5 minutes) when **Server health** is ticked on Log Forwarder's page. CPU and network are the averages since the run before; with several panels each has its own line."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 67
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Server health"
+}
