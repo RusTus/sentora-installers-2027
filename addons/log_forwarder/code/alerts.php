@@ -54,6 +54,7 @@ class elk_alerts
         }
         $out['ok'] = $got['ok'];
         $out['alerts'] = $got['alerts'];
+        $out['sources'] = $got['sources'];
         $node = elk::Node();
         $host = filter_var($node['addr'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $node['addr'] . ']' : $node['addr'];
         $sent = array();
@@ -133,7 +134,13 @@ class elk_alerts
                 'title' => $clean($a['title'], 110), 'text' => $clean(isset($a['text']) ? $a['text'] : '', 600), 'board' => $board,
                 'since' => isset($a['since']) ? (int) $a['since'] : time());
         }
-        return array('ok' => !empty($d['ok']), 'alerts' => $alerts);
+        $src = array();
+        foreach (array('fortigate', 'veeam', 'm365') as $k) {
+            if (isset($d['sources'][$k]) && in_array($d['sources'][$k], array('on', 'off'), true)) {
+                $src[$k] = $d['sources'][$k];
+            }
+        }
+        return array('ok' => !empty($d['ok']), 'alerts' => $alerts, 'sources' => $src);
     }
 
     /**

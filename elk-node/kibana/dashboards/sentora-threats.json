@@ -1,0 +1,435 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"ips\"",
+     "language": "kql"
+    },
+    "title": "Attacks stopped (IPS)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"virus\"",
+     "language": "kql"
+    },
+    "title": "Viruses stopped",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"dns\" and fortigate.threat : *",
+     "language": "kql"
+    },
+    "title": "Botnet look-ups blocked",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"admin-login\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed admin logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"ips\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "fortigate.threat"
+      ],
+      "label": "Threat",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Attacks",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Times",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "fortigate.subtype : (\"ips\" or \"anomaly\") or (event.category : \"admin-login\" and event.outcome : \"failure\")",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where attacks come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"virus\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "fortigate.threat"
+      ],
+      "label": "Threat",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Viruses",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 0,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"dns\" and fortigate.threat : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "fortigate.threat"
+      ],
+      "label": "Threat",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Botnet look-ups, by machine",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 16,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"admin-login\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "event.outcome"
+      ],
+      "label": "Result",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Admin logins",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "fortigate.subtype"
+       ],
+       "label": "Kind",
+       "limit": 4,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-fortigate",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Times",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "fortigate.subtype : (\"ips\" or \"virus\" or \"dns\" or \"anomaly\") and fortigate.threat : *",
+     "language": "kql"
+    },
+    "title": "Threats over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: FortiGate: threats"
+}

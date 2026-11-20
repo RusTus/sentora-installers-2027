@@ -1,0 +1,634 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\"",
+     "language": "kql"
+    },
+    "title": "Sign-ins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed sign-ins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\"",
+     "language": "kql"
+    },
+    "title": "People signing in",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "m365.issue.id",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"service-issue\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Microsoft problems open",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Sign-ins",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "m365.kind : \"signin\"",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where people sign in from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "m365.reason"
+      ],
+      "label": "Why",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Failed sign-ins and why",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "m365.app"
+      ],
+      "label": "App",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Sign-ins",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\"",
+     "language": "kql"
+    },
+    "title": "Apps signed in to",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 0,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "m365.mfa"
+      ],
+      "label": "m365.mfa",
+      "limit": 2,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Sign-ins",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and m365.interactive : true",
+     "language": "kql"
+    },
+    "title": "With MFA",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 16,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Sign-ins",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and not source.geo.country_iso_code : \"US\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.geo.country_iso_code"
+      ],
+      "label": "Country",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Sign-ins from abroad (not US)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-m365",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "m365.teams.private_chat",
+        "label": "Chat messages",
+        "operation": "sum"
+       },
+       {
+        "field": "m365.teams.team_chat",
+        "label": "Channel messages",
+        "operation": "sum"
+       },
+       {
+        "field": "m365.teams.calls",
+        "label": "Calls",
+        "operation": "sum"
+       },
+       {
+        "field": "m365.teams.meetings",
+        "label": "Meetings",
+        "operation": "sum"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "m365.kind : \"teams-day\"",
+     "language": "kql"
+    },
+    "title": "Teams per day",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-m365",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "m365.mail.sent",
+        "label": "Sent",
+        "operation": "sum"
+       },
+       {
+        "field": "m365.mail.received",
+        "label": "Received",
+        "operation": "sum"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "m365.kind : \"mail-day\"",
+     "language": "kql"
+    },
+    "title": "Mail per day",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "m365.teams.private_chat",
+      "label": "Chats",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "m365.teams.calls",
+      "label": "Calls",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "m365.teams.meetings",
+      "label": "Meetings",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"teams-user\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Person",
+      "limit": 50,
+      "operation": "terms"
+     }
+    ],
+    "title": "Teams by person (last 7 days)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 45
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "m365.mail.sent",
+      "label": "Sent",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "m365.mail.received",
+      "label": "Received",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "m365.mail.read",
+      "label": "Read",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"mail-user\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Person",
+      "limit": 50,
+      "operation": "terms"
+     }
+    ],
+    "title": "Mail by person (last 7 days)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 45
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Seen",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"service-issue\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "m365.issue.service"
+      ],
+      "label": "Service",
+      "limit": 20,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "m365.issue.title"
+      ],
+      "label": "Problem",
+      "limit": 20,
+      "operation": "terms"
+     }
+    ],
+    "title": "Microsoft 365 problems open now",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 48,
+    "x": 0,
+    "y": 59
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Read from Microsoft Graph every 5 minutes (sign-ins, service problems) and every 6 hours (Teams and mail, Microsoft's daily reports, a day or two behind) by sentora-elk-node m365. Sign-ins need Entra ID P1 or P2."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 69
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Microsoft 365"
+}

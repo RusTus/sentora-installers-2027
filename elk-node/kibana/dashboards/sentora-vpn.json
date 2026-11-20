@@ -1,0 +1,434 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "Connected now (last 15 minutes)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "language": "kql"
+    },
+    "title": "Connections",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed VPN logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "language": "kql"
+    },
+    "title": "People who connected",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Updates",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 25,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 25,
+      "operation": "terms"
+     }
+    ],
+    "title": "Connected in the last 15 minutes",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Lines",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "event.category : \"vpn\"",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where VPN users connect from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "event.action"
+       ],
+       "label": "What",
+       "limit": 2,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-fortigate",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Times",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-down\")",
+     "language": "kql"
+    },
+    "title": "Connections over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Failed VPN logins",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : \"tunnel-down\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Data over VPN, by person",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "fortigate.vpn.tunnel"
+      ],
+      "label": "Tunnel",
+      "limit": 4,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Connections",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "language": "kql"
+    },
+    "title": "Kind of tunnel",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 33
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: FortiGate: VPN and FortiClient"
+}

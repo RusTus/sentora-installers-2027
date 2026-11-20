@@ -432,6 +432,184 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
                   "cart pages are the ones to watch."))],
 ])
 
+# ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
+# Their own links bar; "Overview" leads back to the panel's boards.
+SOURCES = [("sentora-overview", "Panel: Overview"), ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"),
+           ("sentora-threats", "FortiGate: threats"), ("sentora-veeam", "Veeam backups"), ("sentora-m365", "Microsoft 365"),
+           ("sentora-shop", "Online store")]
+FGT = {"type": "data_view_reference", "ref_id": "sentora-fortigate"}
+VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
+M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
+NAMES.update({"url.domain": "Site", "fortigate.category": "Category", "network.application": "App", "fortigate.appcat": "Kind of app",
+              "fortigate.threat": "Threat", "fortigate.vpn.tunnel": "Tunnel", "source.geo.country_name": "Country", "source.geo.country_iso_code": "Country", "observer.name": "Device",
+              "veeam_job.name": "Job", "veeam_job.why": "Why", "m365.reason": "Why", "veeam_job.result": "Result", "host.name": "Machine", "m365.app": "App", "error.message": "Why",
+              "m365.issue.service": "Service", "m365.issue.title": "Problem", "m365.client_app": "Client", "fortigate.subtype": "Kind",
+              "sentora.shop.status": "Status", "sentora.shop.country": "Country", "sentora.shop.sku": "Product", "sentora.search.term": "Searched for",
+              "sentora.shop.term": "Searched for", "sentora.shop.product": "Product", "sentora.shop.status": "Status"})
+
+
+def on(dv, cfg):
+    """The same chart on another data view."""
+    if "layers" in cfg:
+        for layer in cfg["layers"]:
+            layer["data_source"] = dv
+    else:
+        cfg["data_source"] = dv
+    return cfg
+
+
+def build_src(did, title, rows):
+    b = build(did, title, rows)
+    b["panels"][0]["config"] = {"layout": "horizontal", "links": [{"type": "dashboardLink", "destination": d, "label": t} for d, t in SOURCES]}
+    return b
+
+
+def sum_table(title, dv, kql, rows, field, label, limit=15, fmt=None):
+    m = {"operation": "sum", "field": field, "label": label}
+    if fmt:
+        m["format"] = fmt
+    return {"type": "data_table", "title": title, "data_source": dv, "query": q(kql), "metrics": [m, {"operation": "count", "label": "Lines"}],
+            "rows": [{"operation": "terms", "fields": [f], "limit": limit, "label": NAMES.get(f, f),
+                      "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}} for f in rows]}
+
+
+WEBF = 'fortigate.subtype : ("webfilter" or "forward") and url.domain : *'
+BOARDS["sentora-fortigate"] = build_src("sentora-fortigate", "FortiGate: where people go", [
+    [(12, 5, on(FGT, metric("Sites visited", WEBF, "", {"operation": "unique_count", "field": "url.domain"}))),
+     (12, 5, on(FGT, metric("People", WEBF + " and user.name : *", "", {"operation": "unique_count", "field": "user.name"}))),
+     (12, 5, on(FGT, metric("Sites blocked", 'fortigate.subtype : "webfilter" and event.outcome : "failure"', ""))),
+     (12, 5, on(FGT, metric("Data moved", "network.bytes : *", "", {"operation": "sum", "field": "network.bytes", "format": {"type": "bytes"}})))],
+    [(24, 14, on(FGT, table("Most visited sites", WEBF, ["url.domain"], 20, "Visits"))),
+     (24, 14, on(FGT, table("Who went where", WEBF + " and user.name : *", ["user.name", "url.domain"], 20, "Visits")))],
+    [(16, 12, on(FGT, pie("Web categories", 'fortigate.category : * and fortigate.subtype : "webfilter"', "fortigate.category", 8, "Visits"))),
+     (16, 12, on(FGT, table("Blocked sites", 'fortigate.subtype : "webfilter" and event.outcome : "failure"', ["url.domain", "fortigate.category"], 15, "Times"))),
+     (16, 12, on(FGT, table("Blocked, by person", 'fortigate.subtype : "webfilter" and event.outcome : "failure" and user.name : *', ["user.name"], 15, "Times")))],
+    [(24, 14, sum_table("Bandwidth by person", FGT, "network.bytes : * and user.name : *", ["user.name"], "network.bytes", "Data", 15, {"type": "bytes"})),
+     (24, 14, sum_table("Apps", FGT, "network.application : *", ["network.application"], "network.bytes", "Data", 15, {"type": "bytes"}))],
+    [(48, 12, on(FGT, bars("Web traffic over time, by category", 'fortigate.category : *', "fortigate.category", 8, "Visits")))],
+    [(48, 3, note("From the FortiGate's logs (sentora-elk-node fortigate). Sites come from the web filter and from traffic logs with a "
+                  "host name; a web filter profile in monitor mode on the outgoing policy logs every site without blocking any."))],
+])
+
+VPNQ = 'event.category : "vpn"'
+BOARDS["sentora-vpn"] = build_src("sentora-vpn", "FortiGate: VPN and FortiClient", [
+    [(12, 5, on(FGT, metric("Connected now (last 15 minutes)", VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats") and @timestamp >= "now-15m"', "",
+                            {"operation": "unique_count", "field": "user.name"}))),
+     (12, 5, on(FGT, metric("Connections", VPNQ + ' and event.action : "tunnel-up"', ""))),
+     (12, 5, on(FGT, metric("Failed VPN logins", VPNQ + ' and event.outcome : "failure"', ""))),
+     (12, 5, on(FGT, metric("People who connected", VPNQ + ' and event.action : "tunnel-up"', "", {"operation": "unique_count", "field": "user.name"})))],
+    [(24, 14, on(FGT, table("Connected in the last 15 minutes", VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats") and @timestamp >= "now-15m"',
+                            ["user.name", "source.ip"], 25, "Updates"))),
+     (24, 14, on(FGT, world("Where VPN users connect from", VPNQ, "Lines")))],
+    [(24, 12, on(FGT, bars("Connections over time", VPNQ + ' and event.action : ("tunnel-up" or "tunnel-down")', "event.action", 2, "Times"))),
+     (24, 12, on(FGT, table("Failed VPN logins", VPNQ + ' and event.outcome : "failure"', ["user.name", "source.ip"], 15, "Times")))],
+    [(24, 12, sum_table("Data over VPN, by person", FGT, VPNQ + ' and event.action : "tunnel-down"', ["user.name"], "network.bytes", "Data", 15, {"type": "bytes"})),
+     (24, 12, on(FGT, pie("Kind of tunnel", VPNQ + ' and event.action : "tunnel-up"', "fortigate.vpn.tunnel", 4, "Connections")))],
+])
+
+BOARDS["sentora-threats"] = build_src("sentora-threats", "FortiGate: threats", [
+    [(12, 5, on(FGT, metric("Attacks stopped (IPS)", 'fortigate.subtype : "ips"', ""))),
+     (12, 5, on(FGT, metric("Viruses stopped", 'fortigate.subtype : "virus"', ""))),
+     (12, 5, on(FGT, metric("Botnet look-ups blocked", 'fortigate.subtype : "dns" and fortigate.threat : *', ""))),
+     (12, 5, on(FGT, metric("Failed admin logins", 'event.category : "admin-login" and event.outcome : "failure"', "")))],
+    [(24, 14, on(FGT, table("Attacks", 'fortigate.subtype : "ips"', ["fortigate.threat"], 15, "Times"))),
+     (24, 14, on(FGT, world("Where attacks come from", 'fortigate.subtype : ("ips" or "anomaly") or (event.category : "admin-login" and event.outcome : "failure")', "Times")))],
+    [(16, 12, on(FGT, table("Viruses", 'fortigate.subtype : "virus"', ["fortigate.threat", "user.name"], 15, "Times"))),
+     (16, 12, on(FGT, table("Botnet look-ups, by machine", 'fortigate.subtype : "dns" and fortigate.threat : *', ["source.ip", "fortigate.threat"], 15, "Times"))),
+     (16, 12, on(FGT, table("Admin logins", 'event.category : "admin-login"', ["user.name", "event.outcome", "source.ip"], 15, "Times")))],
+    [(48, 12, on(FGT, bars("Threats over time", 'fortigate.subtype : ("ips" or "virus" or "dns" or "anomaly") and fortigate.threat : *', "fortigate.subtype", 4, "Times")))],
+])
+
+FIN = 'event.action : "job-finished"'
+BOARDS["sentora-veeam"] = build_src("sentora-veeam", "Veeam backups", [
+    [(12, 5, on(VEEAM, metric("Jobs run", FIN, ""))),
+     (12, 5, on(VEEAM, metric("Failed", FIN + ' and veeam_job.result : "Failed"', ""))),
+     (12, 5, on(VEEAM, metric("With warnings", FIN + ' and veeam_job.result : "Warning"', ""))),
+     (12, 5, on(VEEAM, metric("Data moved", "veeam_job.transferred_gb : *", "", {"operation": "sum", "field": "veeam_job.transferred_gb", "label": "GB"})))],
+    [(32, 12, on(VEEAM, bars("Job results over time", FIN, "veeam_job.result", 3, "Jobs"))),
+     (16, 12, on(VEEAM, pie("Results", FIN, "veeam_job.result", 3, "Jobs")))],
+    [(24, 14, {"type": "data_table", "title": "Each job: last run and its result", "data_source": VEEAM, "query": q(FIN),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "Last run"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "veeam_job.result", "label": "Last result"},
+                           {"operation": "average", "field": "veeam_job.duration_min", "label": "Minutes (average)", "format": {"type": "number", "decimals": 0}}],
+               "rows": [{"operation": "terms", "fields": ["veeam_job.name"], "limit": 50, "label": "Job"}]}),
+     (24, 14, on(VEEAM, table("Failed or warned, and why", FIN + ' and veeam_job.result : ("Failed" or "Warning")', ["veeam_job.name", "veeam_job.why"], 15, "Times")))],
+    [(24, 12, on(VEEAM, table("Malware detection", 'event.action : "malware-detected"', ["host.name"], 15, "Times"))),
+     (24, 12, on(VEEAM, table("Console logins", 'event.action : "console-login"', ["user.name"], 15, "Times")))],
+    [(48, 3, note("From Veeam Backup & Replication's events (sentora-elk-node veeam). A failed job is also an alert in the panel."))],
+])
+
+SIGN = 'm365.kind : "signin"'
+BOARDS["sentora-m365"] = build_src("sentora-m365", "Microsoft 365", [
+    [(12, 5, on(M365, metric("Sign-ins", SIGN, ""))),
+     (12, 5, on(M365, metric("Failed sign-ins", SIGN + ' and event.outcome : "failure"', ""))),
+     (12, 5, on(M365, metric("People signing in", SIGN, "", {"operation": "unique_count", "field": "user.name"}))),
+     (12, 5, on(M365, metric("Microsoft problems open", 'm365.kind : "service-issue" and @timestamp >= "now-2h"', "",
+                             {"operation": "unique_count", "field": "m365.issue.id"})))],
+    [(24, 14, on(M365, world("Where people sign in from", SIGN, "Sign-ins"))),
+     (24, 14, on(M365, table("Failed sign-ins and why", SIGN + ' and event.outcome : "failure"', ["user.name", "m365.reason"], 15, "Times")))],
+    [(16, 12, on(M365, pie("Apps signed in to", SIGN, "m365.app", 8, "Sign-ins"))),
+     (16, 12, on(M365, pie("With MFA", SIGN + " and m365.interactive : true", "m365.mfa", 2, "Sign-ins"))),
+     (16, 12, on(M365, table("Sign-ins from abroad (not US)", SIGN + ' and not source.geo.country_iso_code : "US"', ["source.geo.country_iso_code", "user.name"], 15, "Sign-ins")))],
+    [(24, 12, {"type": "xy", "title": "Teams per day", "query": q('m365.kind : "teams-day"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": M365, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "sum", "field": "m365.teams.private_chat", "label": "Chat messages"},
+                                 {"operation": "sum", "field": "m365.teams.team_chat", "label": "Channel messages"},
+                                 {"operation": "sum", "field": "m365.teams.calls", "label": "Calls"},
+                                 {"operation": "sum", "field": "m365.teams.meetings", "label": "Meetings"}]}]}),
+     (24, 12, {"type": "xy", "title": "Mail per day", "query": q('m365.kind : "mail-day"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": M365, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "sum", "field": "m365.mail.sent", "label": "Sent"},
+                                 {"operation": "sum", "field": "m365.mail.received", "label": "Received"}]}]})],
+    [(24, 14, {"type": "data_table", "title": "Teams by person (last 7 days)", "data_source": M365, "query": q('m365.kind : "teams-user"'),
+               "metrics": [{"operation": "last_value", "time_field": "@timestamp", "field": "m365.teams.private_chat", "label": "Chats"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "m365.teams.calls", "label": "Calls"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "m365.teams.meetings", "label": "Meetings"}],
+               "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 50, "label": "Person"}]}),
+     (24, 14, {"type": "data_table", "title": "Mail by person (last 7 days)", "data_source": M365, "query": q('m365.kind : "mail-user"'),
+               "metrics": [{"operation": "last_value", "time_field": "@timestamp", "field": "m365.mail.sent", "label": "Sent"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "m365.mail.received", "label": "Received"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "m365.mail.read", "label": "Read"}],
+               "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 50, "label": "Person"}]})],
+    [(48, 10, on(M365, table("Microsoft 365 problems open now", 'm365.kind : "service-issue" and @timestamp >= "now-2h"', ["m365.issue.service", "m365.issue.title"], 20, "Seen")))],
+    [(48, 3, note("Read from Microsoft Graph every 5 minutes (sign-ins, service problems) and every 6 hours (Teams and mail, Microsoft's "
+                  "daily reports, a day or two behind) by sentora-elk-node m365. Sign-ins need Entra ID P1 or P2."))],
+])
+
+SHOP = {"type": "data_view_reference", "ref_id": "sentora-shop"}
+ORD = 'sentora.shop.kind : "order" and not sentora.shop.state : ("canceled" or "closed")'
+MONEY = {"type": "number", "decimals": 2}
+BOARDS["sentora-shop"] = build_src("sentora-shop", "Online store", [
+    [(12, 5, on(SHOP, metric("Orders", ORD, ""))),
+     (12, 5, on(SHOP, metric("Sales", ORD, "", {"operation": "sum", "field": "sentora.shop.base_total", "format": MONEY}))),
+     (12, 5, on(SHOP, metric("Average order", ORD, "", {"operation": "average", "field": "sentora.shop.base_total", "format": MONEY}))),
+     (12, 5, on(DV, metric("Searches on the site", "sentora.search.term : *", "")))],
+    [(32, 12, {"type": "xy", "title": "Sales over time", "query": q(ORD), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "sum", "field": "sentora.shop.base_total", "label": "Sales", "format": MONEY}],
+                           "breakdown_by": {"operation": "terms", "fields": ["sentora.shop.country"], "limit": 6, "label": "Country"}}]}),
+     (16, 12, on(SHOP, pie("Order status", 'sentora.shop.kind : "order"', "sentora.shop.status", 8, "Orders")))],
+    [(24, 14, sum_table("Best-selling products", SHOP, 'sentora.shop.kind : "item" and not sentora.shop.status : ("canceled" or "closed")',
+                        ["sentora.shop.product"], "sentora.shop.qty", "Sold", 20)),
+     (24, 14, sum_table("Sales by country", SHOP, ORD + " and sentora.shop.country : *", ["sentora.shop.country"], "sentora.shop.base_total", "Sales", 20, MONEY))],
+    [(16, 14, on(DV, table("What visitors search for (from the visits)", "sentora.search.term : *", ["sentora.search.term"], 20, "Searches"))),
+     (16, 14, {"type": "data_table", "title": "Magento's searches: most searched", "data_source": SHOP, "query": q('sentora.shop.kind : "search"'),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"},
+                           {"operation": "max", "field": "sentora.shop.results", "label": "Results"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 20, "label": "Searched for",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
+     (16, 14, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q('sentora.shop.kind : "search" and sentora.shop.results : 0'),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 20, "label": "Searched for",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
+    [(24, 12, on(DV, bars("Store visits over time (people and bots)", WEB + " and sentora.domain : *", "sentora.visitor", 2, "Visits"))),
+     (24, 12, on(DV, world("Where searchers come from", "sentora.search.term : *", "Searches")))],
+    [(48, 3, note("Orders, products and Magento's search list come from the store's database on the panel (Log Forwarder > Elk node > "
+                  "Online store); no customer names, e-mail or street addresses. Searches \"from the visits\" are read from the web logs. "
+                  "Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."))],
+])
+BOARDS["sentora-shop"]["time_range"] = {"from": "now-30d", "to": "now"}
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = os.path.join(here, "dashboards")

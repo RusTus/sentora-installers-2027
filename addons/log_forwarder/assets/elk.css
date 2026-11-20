@@ -58,6 +58,9 @@
 .ek-group { display: flex; gap: 10px; align-items: flex-start; font-weight: normal; margin: 0; padding: 8px 10px; border: 1px solid var(--ek-line); border-radius: 6px; cursor: pointer; }
 .ek-group input { margin-top: 3px; flex: none; }
 .ek-group > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+div.ek-group { cursor: default; }
+.ek-src-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ek-group .ek-cmd { display: block; margin-top: 4px; padding: 4px 6px; font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
 /* the commands on the node */
 .ek-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ek-table td { padding: 7px 8px; border-bottom: 1px solid var(--ek-line); vertical-align: top; }

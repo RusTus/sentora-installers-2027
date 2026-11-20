@@ -14,6 +14,7 @@
 require_once dirname(__FILE__) . '/logforwarder.php';
 require_once dirname(__FILE__) . '/elk.php';
 require_once dirname(__FILE__) . '/alerts.php';
+require_once dirname(__FILE__) . '/shop.php';
 
 class module_controller extends ctrl_module
 {
@@ -457,6 +458,93 @@ class module_controller extends ctrl_module
         exit;
     }
 
+    /**
+     * "Online store": a Magento store on this panel, its orders and searches to the node's Online store board.
+     *
+     * @return string HTML.
+     */
+    static function ElkShop()
+    {
+        if (!elk::Paired()) {
+            return '';
+        }
+        $stores = elk_shop::Stores();
+        $on = elk::Setting(elk_shop::S_SITE);
+        $st = elk_shop::State();
+        $out = '<div class="ek-card"><h3>' . self::t('Online store') . '</h3>'
+            . '<p class="ek-muted ek-after-top">' . self::t('A Magento store on this panel: its orders, best-selling products and what customers search for (also the searches that found nothing), on the node\'s Online store board. Read from the store\'s own database every 5 minutes; no customer names, e-mail or street addresses are sent.') . '</p>';
+        if (!$stores && $on === '') {
+            return $out . '<p class="ek-muted">' . self::t('No Magento store was found in this panel\'s websites.') . '</p></div>';
+        }
+        $opts = '<option value="">' . self::t('None') . '</option>';
+        foreach (array_keys($stores) as $site) {
+            $opts .= '<option value="' . self::h($site) . '"' . ($site === $on ? ' selected' : '') . '>' . self::h($site) . '</option>';
+        }
+        $out .= '<form method="post" action="./?module=log_forwarder&action=ElkShop" class="ek-form ek-import">' . runtime_csfr::Token()
+            . '<label>' . self::t('Store') . '<select name="inShop">' . $opts . '</select></label>'
+            . '<div><button type="submit" class="btn btn-primary">' . self::ElkIcon('save') . ' ' . self::t('Save') . '</button></div></form>';
+        if ($on !== '') {
+            if (!empty($st['error'])) {
+                $out .= '<p><span class="ek-pill is-bad">' . self::t('Not sent') . '</span> ' . self::h($on) . ': ' . self::h($st['error']) . '</p>';
+            } elseif (!empty($st['time'])) {
+                $out .= '<p><span class="ek-pill is-ok">' . self::t('Sending') . '</span> ' . self::h($on) . ': '
+                    . self::h(str_replace(array('%o', '%s'), array((string) (int) ($st['orders'] ?? 0), (string) (int) ($st['searches'] ?? 0)), ui_language::translate('%o orders and %s searches sent so far.'))) . '</p>';
+            } else {
+                $out .= '<p><span class="ek-pill is-wait">' . self::t('Checking') . '</span> ' . self::t('the first orders go with the panel\'s next run (the last year, 500 orders a run).') . '</p>';
+            }
+        }
+        return $out . '</div>';
+    }
+
+    static function doElkShop()
+    {
+        runtime_csfr::Protect();
+        if (!log_forwarder::IsAdmin(self::Uid())) {
+            return;
+        }
+        global $controller;
+        $f = $controller->GetAllControllerRequests('FORM');
+        $site = strtolower(trim((string) ($f['inShop'] ?? '')));
+        if ($site !== '' && !isset(elk_shop::Stores()[$site])) {
+            self::$elkMsg = ui_language::translate('No Magento store was found in that website.');
+            self::$elkKind = 'bad';
+            return;
+        }
+        elk::Save(elk_shop::S_SITE, $site);
+        self::ElkRunNow();
+        header('location: ./?module=log_forwarder&elk=shop#elk');
+        exit;
+    }
+
+    /**
+     * "More sources": what else the node can show (a FortiGate, Veeam, Microsoft 365), whether each is on (the node
+     * says, with its alerts), and the command that switches it on.
+     *
+     * @return string HTML.
+     */
+    static function ElkSources()
+    {
+        if (!elk::Paired()) {
+            return '';
+        }
+        $al = elk_alerts::State();
+        $src = isset($al['sources']) && is_array($al['sources']) ? $al['sources'] : array();
+        $rows = array(
+            'fortigate' => array('FortiGate', 'Sites people visit, VPN and FortiClient users, threats.', 'sentora-elk-node fortigate FORTIGATE-ADDRESS'),
+            'veeam' => array('Veeam Backup & Replication', 'Backup jobs and their results; a failed job is an alert here.', 'sentora-elk-node veeam VEEAM-SERVER-ADDRESS'),
+            'm365' => array('Microsoft 365 / Entra', 'Sign-ins on a map, Teams and mail activity, Microsoft\'s open problems.', 'sentora-elk-node m365 TENANT-ID APP-ID'),
+        );
+        $out = '<div class="ek-card"><h3>' . self::t('More sources on the Elk node') . '</h3>'
+            . '<p class="ek-muted ek-after-top">' . self::t('Besides this panel, the Elk node can show these, each on its own dashboards. Each is switched on on the node, as root; the command then shows the steps for the other side.') . '</p><div class="ek-groups">';
+        foreach ($rows as $k => $r) {
+            $state = isset($src[$k]) ? (string) $src[$k] : '';
+            $pill = $state === '' ? '' : ($state === 'off' ? '<span class="ek-pill">' . self::t('Off') . '</span>' : '<span class="ek-pill is-ok">' . self::t('On') . '</span>');
+            $out .= '<div class="ek-group"><span><span class="ek-src-head"><b>' . self::t($r[0]) . '</b>' . $pill . '</span><span class="ek-muted">' . self::t($r[1]) . '</span>'
+                . '<code class="ek-cmd">' . self::h($r[2]) . '</code></span></div>';
+        }
+        return $out . '</div></div>';
+    }
+
     static function doElkImport()
     {
         runtime_csfr::Protect();
@@ -716,7 +804,7 @@ class module_controller extends ctrl_module
         }
         return '<section class="ek" id="elk"><h3 class="ek-title">' . self::ElkIcon('server') . self::t('Elk node: this server\'s logs in Kibana') . '</h3>'
             . '<p class="ek-muted ek-lead">' . self::t('Administrators: send this server\'s logs (websites, mail, logins, bans, FTP, DNS, the panel) to an Elk node of its own, with Elasticsearch, Logstash and Kibana and ready-made dashboards, the world map among them.') . '</p>'
-            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkGroups() . self::ElkImport() . self::ElkHelp() . '</section>';
+            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkGroups() . self::ElkShop() . self::ElkImport() . self::ElkSources() . self::ElkHelp() . '</section>';
     }
 
     /**

@@ -40,7 +40,15 @@ LIMITS = {
     "waf_blocked": 200,      # requests the web firewall stopped in 15 minutes
     "bounces": 50,           # mails bounced in an hour
     "quiet_minutes": 30,     # no log line from the panel for this long (while there were lines the day before)
+    "fgt_admin_fail": 5,     # failed admin logins on a FortiGate in 15 minutes
+    "fgt_vpn_fail": 20,      # failed VPN logins on a FortiGate in 15 minutes
 }
+
+
+def slug(v):
+    """An alert id part: lower case letters, digits, dots and dashes only."""
+    out = "".join(c if c.isalnum() or c in ".-" else "-" for c in str(v).lower())[:120].strip("-.")
+    return out or "x"
 
 
 def limits():
@@ -166,6 +174,24 @@ def check():
                           "%d mails from %s bounced in the last hour: a mailbox may be sending spam, or the server may be on a block list."
                           % (c, panel), "sentora-delivery"))
 
+    # other sources (when switched on): a Veeam job whose last run failed, bursts of failed logins on a FortiGate
+    r = es("/logs-veeam-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"event.action": "job-finished"}}, {"range": {"@timestamp": {"gte": "now-26h"}}}]}},
+        "aggs": {"j": {"terms": {"field": "veeam_job.name", "size": 500},
+                       "aggs": {"t": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["veeam_job.result", "message", "observer.name"]}}}}}})
+    for b in r.get("aggregations", {}).get("j", {}).get("buckets", []):
+        h = b["t"]["hits"]["hits"][0]["_source"] if b["t"]["hits"]["hits"] else {}
+        if (h.get("veeam_job") or {}).get("result") == "Failed":
+            found.append(("veeam:" + slug(b["key"]), "outage", "Veeam: " + b["key"][:80] + " failed",
+                          "The last run of the Veeam job %s on %s failed: %s" % (b["key"][:120], h.get("observer", {}).get("name", "?"), str(h.get("message", ""))[:300]),
+                          "sentora-veeam"))
+    for what, q, n_, board in (("admin logins on the FortiGate", {"term": {"event.category": "admin-login"}}, L["fgt_admin_fail"], "sentora-threats"),
+                               ("VPN logins", {"term": {"event.category": "vpn"}}, L["fgt_vpn_fail"], "sentora-vpn")):
+        c = count("logs-fortigate-*", "now-15m", [q, {"term": {"event.outcome": "failure"}}])
+        if c >= n_:
+            found.append(("fortigate:" + slug(what), "warning", "FortiGate: %d failed %s in 15 minutes" % (c, what),
+                          "%d failed %s in the last 15 minutes: someone may be guessing passwords." % (c, what), board))
+
     # the panel's logs gone quiet (rsyslog stopped forwarding); its health lines come another way and do not count
     m = int(L["quiet_minutes"])
     before = per_panel("logs-sentora-*", "now-1d", [], [{"term": {"sentora.log": "health"}}])
@@ -190,8 +216,13 @@ def save(found):
     alerts = [{"id": i, "level": lv, "title": t, "text": x, "board": bd, "since": int(old.get(i, {}).get("since", now))}
               for i, lv, t, x, bd in found[:200]]
     tmp = path + ".tmp"
+    try:
+        with open(os.path.join(CONF, "sources.json")) as f:
+            src = {k: v for k, v in json.load(f).items() if k in ("fortigate", "veeam", "m365") and v in ("on", "off")}
+    except (OSError, ValueError, AttributeError):
+        src = {}
     with open(tmp, "w") as f:
-        json.dump({"time": now, "ok": True, "alerts": alerts}, f)
+        json.dump({"time": now, "ok": True, "alerts": alerts, "sources": src}, f)
     os.replace(tmp, path)
     return alerts
 

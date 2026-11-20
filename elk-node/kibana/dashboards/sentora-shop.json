@@ -1,0 +1,593 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Orders",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Average order",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.search.term : *",
+     "language": "kql"
+    },
+    "title": "Searches on the site",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.shop.country"
+       ],
+       "label": "Country",
+       "limit": 6,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.shop.base_total",
+        "format": {
+         "decimals": 2,
+         "type": "number"
+        },
+        "label": "Sales",
+        "operation": "sum"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.shop.status"
+      ],
+      "label": "Status",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Orders",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\"",
+     "language": "kql"
+    },
+    "title": "Order status",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.qty",
+      "label": "Sold",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"item\" and not sentora.shop.status : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.product"
+      ],
+      "label": "Product",
+      "limit": 20,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Best-selling products",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "Sales",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\") and sentora.shop.country : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.country"
+      ],
+      "label": "Country",
+      "limit": 20,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Sales by country",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Searches",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.search.term : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.search.term"
+      ],
+      "label": "Searched for",
+      "limit": 20,
+      "operation": "terms"
+     }
+    ],
+    "title": "What visitors search for (from the visits)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.popularity",
+      "label": "Times",
+      "operation": "max"
+     },
+     {
+      "field": "sentora.shop.results",
+      "label": "Results",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"search\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.term"
+      ],
+      "label": "Searched for",
+      "limit": 20,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Magento's searches: most searched",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.popularity",
+      "label": "Times",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"search\" and sentora.shop.results : 0",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.term"
+      ],
+      "label": "Searched for",
+      "limit": 20,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Searches that found nothing",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.visitor"
+       ],
+       "label": "Visitor",
+       "limit": 2,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Visits",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.domain : *",
+     "language": "kql"
+    },
+    "title": "Store visits over time (people and bots)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 47
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Searches",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "sentora.search.term : *",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where searchers come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 47
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Orders, products and Magento's search list come from the store's database on the panel (Log Forwarder > Elk node > Online store); no customer names, e-mail or street addresses. Searches \"from the visits\" are read from the web logs. Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 59
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-30d",
+  "to": "now"
+ },
+ "title": "Sentora: Online store"
+}

@@ -14,6 +14,7 @@ require_once dirname(__FILE__) . '/../code/logforwarder.php';
 require_once dirname(__FILE__) . '/../code/elk.php';
 require_once dirname(__FILE__) . '/../code/health.php';
 require_once dirname(__FILE__) . '/../code/alerts.php';
+require_once dirname(__FILE__) . '/../code/shop.php';
 
 echo fs_filehandler::NewLine() . "START Log Forwarder" . fs_filehandler::NewLine();
 if (ui_module::CheckModuleEnabled('Log Forwarder')) {
@@ -33,6 +34,10 @@ if (ui_module::CheckModuleEnabled('Log Forwarder')) {
     }
     // the node's alerts: notices and mail to the administrators, when chosen
     if (($logForwarderLine = elk_alerts::Run()) !== '') {
+        echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
+    }
+    // an online store on the panel: its orders and searches, when one is chosen
+    if (($logForwarderLine = elk_shop::Run()) !== '') {
         echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
     }
     // older access logs asked for on the page ("Bring in older logs")

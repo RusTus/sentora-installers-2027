@@ -110,7 +110,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -164,6 +164,64 @@ pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run
 grep -q "notices:0" "$OUT/alerts-clear.txt" && ok "the notice went when the alert cleared" || bad "alerts did not clear: $(cat "$OUT/alerts-clear.txt")"
 ( sleep 3 ) | timeout 15 openssl s_client -connect "$IP:6515" -CAfile "$W/node-ca.crt" -cert "$W/other.crt" -key "$W/other.key" -quiet > "$OUT/alerts-stranger.txt" 2>&1
 grep -q '"alerts"' "$OUT/alerts-stranger.txt" && bad "6515 answered another certificate" || ok "6515 turns away another certificate"
+
+say "Other sources: a FortiGate, Veeam, Microsoft 365, an online store"
+cnt() { es "'https://127.0.0.1:9200/$1/_count' -d '$2'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'; }
+waitcnt() { # index query want
+    local n=0; for _ in $(seq 1 30); do es -X POST "https://127.0.0.1:9200/$1/_refresh" > /dev/null 2>&1; n=$(cnt "$1" "$2"); [ "${n:-0}" -ge "$3" ] && break; sleep 3; done; echo "${n:-0}"
+}
+# FortiGate: switched on for the runner's address (the runner plays the FortiGate), its certificate from the .p12 made for it
+in_box "sentora-elk-node fortigate $GW" > "$OUT/fortigate-on.txt" 2>&1 && ok "sentora-elk-node fortigate: switched on" || bad "fortigate on: $(tail -5 "$OUT/fortigate-on.txt")"
+P12PW=$(sed -n "s/.*import password (shown only now): \([A-Za-z0-9]*\).*/\1/p" "$OUT/fortigate-on.txt")
+grep -q "set certificate \"sentora-fortigate\"" "$OUT/fortigate-on.txt" && [ -n "$P12PW" ] && ok "it shows the FortiGate's steps and the certificate's password" || bad "fortigate steps: $(head -20 "$OUT/fortigate-on.txt")"
+in_box "openssl pkcs12 -in /root/sentora-fortigate.p12 -passin pass:$P12PW -nokeys -clcerts -out /tmp/fgt.crt && openssl pkcs12 -in /root/sentora-fortigate.p12 -passin pass:$P12PW -nocerts -nodes -out /tmp/fgt.key" > /dev/null 2>&1 \
+    && docker cp "$NAME:/tmp/fgt.crt" "$W/fgt.crt" && docker cp "$NAME:/tmp/fgt.key" "$W/fgt.key" && ok "the .p12 opens with that password" || bad "the FortiGate's .p12 does not open"
+for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6516 "' && break; sleep 3; done
+in_box 'ufw status | grep -q "6516/tcp.*ALLOW IN.*'"$GW"'"' && ok "the firewall lets only the FortiGate reach 6516" || bad "no 6516 rule for $GW: $(in_box 'ufw status | grep 651')"
+python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/fgt.crt" "$W/fgt.key" "$REPO/tests/elk/fortigate.txt" > "$OUT/fgt-send.txt" 2>&1
+n=$(waitcnt 'logs-fortigate-*' '{"query":{"match_all":{}}}' 14)
+[ "$n" = 14 ] && ok "the FortiGate's 14 lines arrived" || bad "FortiGate lines: $n of 14 ($(cat "$OUT/fgt-send.txt"); $(in_box 'journalctl -u rsyslog -n 5 --no-pager' | tail -3))"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"term":{"tags":"fortigate_unparsed"}}}')" = 0 ] && ok "all of them understood" || bad "FortiGate lines not understood"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"url.domain":"freegames.example"}},{"term":{"event.outcome":"failure"}},{"term":{"fortigate.category":"Games"}},{"term":{"user.name":"jsmith"}}]}}}')" = 1 ] \
+    && ok "a blocked site with its category and person" || bad "the blocked site was not read"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"event.category":"vpn"}},{"term":{"user.name":"tgarcia"}},{"term":{"event.action":"tunnel-up"}}]}}}')" = 1 ] \
+    && ok "a FortiClient VPN user" || bad "the FortiClient user was not read"
+python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/other.crt" "$W/other.key" "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
+python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" - - "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
+sleep 8; es -X POST 'https://127.0.0.1:9200/logs-fortigate-*/_refresh' > /dev/null 2>&1
+[ "$(cnt 'logs-fortigate-*' '{"query":{"match_all":{}}}')" = 14 ] && ok "6516 takes nothing without the FortiGate's certificate" || bad "6516 took lines from another certificate or none"
+# Veeam: its events over TLS on 6517 (no certificate of its own); a failed job becomes an alert
+in_box "sentora-elk-node veeam $GW" > "$OUT/veeam-on.txt" 2>&1 && grep -q "Event Forwarding" "$OUT/veeam-on.txt" && ok "sentora-elk-node veeam: switched on, with Veeam's steps" || bad "veeam on: $(tail -5 "$OUT/veeam-on.txt")"
+for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6517 "' && break; sleep 3; done
+python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6517 "$W/node-ca.crt" - - "$REPO/tests/elk/veeam.txt" > "$OUT/veeam-send.txt" 2>&1
+n=$(waitcnt 'logs-veeam-*' '{"query":{"match_all":{}}}' 7)
+[ "$n" = 7 ] && ok "Veeam's 7 events arrived" || bad "Veeam events: $n of 7 ($(cat "$OUT/veeam-send.txt"))"
+[ "$(cnt 'logs-veeam-*' '{"query":{"bool":{"filter":[{"term":{"veeam_job.name":"Offsite Copy"}},{"term":{"veeam_job.result":"Failed"}}]}}}')" = 1 ] && ok "a failed job with its name and result" || bad "the failed job was not read"
+in_box 'sentora-elk-node alerts' | grep -q "Veeam: Offsite Copy failed" && ok "the failed Veeam job is an alert" || bad "no alert for the failed Veeam job"
+in_box 'sentora-elk-node sources' > "$OUT/sources.txt" 2>&1; grep -q "^fortigate *on" "$OUT/sources.txt" && grep -q "^veeam *on" "$OUT/sources.txt" && ok "sentora-elk-node sources lists them" || bad "sources: $(cat "$OUT/sources.txt")"
+# Microsoft 365: the reader against the test's stand-in for Microsoft (login, Graph, reports)
+docker cp "$REPO/tests/elk/fakegraph.py" "$NAME:/root/fakegraph.py"
+in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout fg.key -out fg.crt -subj /CN=localhost -addext subjectAltName=DNS:localhost -days 2 2> /dev/null; install -m 644 fg.crt /usr/local/share/fg-test.crt; (python3 -I fakegraph.py 18443 fg.crt fg.key > /dev/null 2>&1 &)'
+printf 'test-secret\n' | docker exec -i "$NAME" sentora-elk-node m365 11111111-2222-3333-4444-555555555555 66666666-7777-8888-9999-000000000000 > "$OUT/m365-on.txt" 2>&1
+in_box 'systemctl stop sentora-elk-reader; runuser -u sentora-elk-reader -- env SENTORA_TEST_LOGIN=https://localhost:18443 SENTORA_TEST_GRAPH=https://localhost:18443 SENTORA_TEST_CA=/usr/local/share/fg-test.crt /usr/bin/python3 -I /usr/local/lib/sentora-elk-reader/sentora-elk-reader.py check' > "$OUT/m365-check.txt" 2>&1
+grep -q "2 sign-in(s) read, 2 new" "$OUT/m365-check.txt" && grep -q "6 row(s), 6 new" "$OUT/m365-check.txt" && grep -q "1 open" "$OUT/m365-check.txt" && ok "the reader read sign-ins, Teams and mail reports, service health" || bad "m365: $(cat "$OUT/m365-on.txt" "$OUT/m365-check.txt" | tail -6)"
+n=$(waitcnt 'logs-m365-*' '{"query":{"match_all":{}}}' 9)
+[ "$n" = 9 ] && ok "Microsoft 365's 9 documents are in" || bad "m365 documents: $n of 9"
+[ "$(cnt 'logs-m365-*' '{"query":{"bool":{"filter":[{"term":{"m365.kind":"signin"}},{"term":{"event.outcome":"failure"}},{"exists":{"field":"source.geo.location"}}]}}}')" = 1 ] && ok "a failed sign-in with its place" || bad "the failed sign-in was not read"
+in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/m365.json' | grep -q "^root:sentora-elk-reader 640$" && ok "the app's secret is root's and the reader's only" || bad "m365.json: $(in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/m365.json')"
+in_box 'cat /etc/sentora-elk-reader/m365.json' | grep -q test-secret && ! grep -q test-secret "$OUT/m365-on.txt" && ok "the secret is kept and never shown" || bad "the secret was shown or not kept"
+# the panel sees which are on (with the alerts)
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; elk_alerts::Run(); echo json_encode(elk_alerts::State()["sources"] ?? null), "\n";' > "$OUT/panel-sources.txt" 2>&1
+grep -q '"fortigate":"on"' "$OUT/panel-sources.txt" && ok "the panel's page knows the FortiGate is on" || bad "panel sources: $(cat "$OUT/panel-sources.txt")"
+# an online store on the panel: orders, products and Magento's searches, without customers' names, e-mail or addresses
+docker cp "$REPO/tests/elk/fakeshop.php" "$PNAME:/root/fakeshop.php"; docker exec "$PNAME" php /root/fakeshop.php > "$OUT/fakeshop.txt" 2>&1
+pphp 'require_once "modules/log_forwarder/code/shop.php"; print_r(array_keys(elk_shop::Stores())); elk::Save(elk_shop::S_SITE, "shop.test"); echo elk_shop::Run(), "\n"; echo "[", elk_shop::Run(), "]\n";' > "$OUT/shop.txt" 2>&1
+grep -q "store shop.test: 40 order(s), 5 search(es) sent" "$OUT/shop.txt" && grep -q "^\[\]$" "$OUT/shop.txt" && ok "the store's 40 orders and 5 searches were sent once" || bad "store: $(cat "$OUT/fakeshop.txt" "$OUT/shop.txt" | tail -8)"
+n=$(waitcnt 'sentora-shop' '{"query":{"match_all":{}}}' 85)
+[ "$n" = 85 ] && ok "the node keeps 40 orders, 40 product lines, 5 searches" || bad "store documents: $n of 85"
+[ "$(cnt 'sentora-shop' '{"query":{"query_string":{"query":"*example.com* OR *Main*"}}}')" = 0 ] && ok "no customer e-mail or street address on the node" || bad "customer details reached the node"
+[ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.kind":"search"}},{"term":{"sentora.shop.results":0}}]}}}')" = 2 ] && ok "the searches that found nothing" || bad "no searches that found nothing"
+[ "$(cnt 'logs-sentora-*' '{"query":{"term":{"sentora.search.term":"band saw blade"}}}')" -ge 1 ] && ok "search words read from the visits" || bad "no search words from the access log"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"
 SENT=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)

@@ -1,0 +1,55 @@
+{
+  "index_patterns": [
+    "logs-veeam-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "_meta": {
+    "description": "Sentora Elk node: Veeam Backup & Replication's events (sentora-elk-node veeam)"
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0,
+      "index.default_pipeline": "logs@default-pipeline"
+    },
+    "mappings": {
+      "properties": {
+        "veeam": {
+          "type": "flattened",
+          "ignore_above": 2048
+        },
+        "veeam_job": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            },
+            "session": {
+              "type": "keyword"
+            },
+            "type": {
+              "type": "keyword"
+            },
+            "result": {
+              "type": "keyword"
+            },
+            "duration_min": {
+              "type": "double"
+            },
+            "transferred_gb": {
+              "type": "double"
+            },
+            "why": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  }
+}

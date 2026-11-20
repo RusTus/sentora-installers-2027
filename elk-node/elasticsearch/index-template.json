@@ -119,6 +119,13 @@
             },
             "response_ms": {
               "type": "double"
+            },
+            "search": {
+              "properties": {
+                "term": {
+                  "type": "keyword"
+                }
+              }
             }
           }
         },

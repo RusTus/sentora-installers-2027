@@ -1,0 +1,445 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\"",
+     "language": "kql"
+    },
+    "title": "Jobs run",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : \"Failed\"",
+     "language": "kql"
+    },
+    "title": "Failed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : \"Warning\"",
+     "language": "kql"
+    },
+    "title": "With warnings",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "veeam_job.transferred_gb",
+      "label": "GB",
+      "operation": "sum",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "veeam_job.transferred_gb : *",
+     "language": "kql"
+    },
+    "title": "Data moved",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "veeam_job.result"
+       ],
+       "label": "Result",
+       "limit": 3,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-veeam",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Jobs",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "event.action : \"job-finished\"",
+     "language": "kql"
+    },
+    "title": "Job results over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "veeam_job.result"
+      ],
+      "label": "Result",
+      "limit": 3,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Jobs",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\"",
+     "language": "kql"
+    },
+    "title": "Results",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "@timestamp",
+      "label": "Last run",
+      "operation": "max"
+     },
+     {
+      "field": "veeam_job.result",
+      "label": "Last result",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "veeam_job.duration_min",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "Minutes (average)",
+      "operation": "average"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "veeam_job.name"
+      ],
+      "label": "Job",
+      "limit": 50,
+      "operation": "terms"
+     }
+    ],
+    "title": "Each job: last run and its result",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : (\"Failed\" or \"Warning\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "veeam_job.name"
+      ],
+      "label": "Job",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "veeam_job.why"
+      ],
+      "label": "Why",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Failed or warned, and why",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"malware-detected\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "host.name"
+      ],
+      "label": "Machine",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Malware detection",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"console-login\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Console logins",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "From Veeam Backup & Replication's events (sentora-elk-node veeam). A failed job is also an alert in the panel."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 45
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Veeam backups"
+}

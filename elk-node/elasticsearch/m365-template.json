@@ -1,0 +1,132 @@
+{
+  "index_patterns": [
+    "logs-m365-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "_meta": {
+    "description": "Sentora Elk node: Microsoft 365 / Entra (sentora-elk-node m365)"
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "m365": {
+          "properties": {
+            "kind": {
+              "type": "keyword"
+            },
+            "app": {
+              "type": "keyword"
+            },
+            "client_app": {
+              "type": "keyword"
+            },
+            "conditional_access": {
+              "type": "keyword"
+            },
+            "risk": {
+              "type": "keyword"
+            },
+            "details": {
+              "type": "keyword",
+              "ignore_above": 512
+            },
+            "mfa": {
+              "type": "boolean"
+            },
+            "interactive": {
+              "type": "boolean"
+            },
+            "teams": {
+              "properties": {
+                "team_chat": {
+                  "type": "double"
+                },
+                "private_chat": {
+                  "type": "double"
+                },
+                "calls": {
+                  "type": "double"
+                },
+                "meetings": {
+                  "type": "double"
+                },
+                "posts": {
+                  "type": "double"
+                },
+                "last_active": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "mail": {
+              "properties": {
+                "sent": {
+                  "type": "double"
+                },
+                "received": {
+                  "type": "double"
+                },
+                "read": {
+                  "type": "double"
+                },
+                "last_active": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "issue": {
+              "properties": {
+                "id": {
+                  "type": "keyword"
+                },
+                "title": {
+                  "type": "keyword"
+                },
+                "service": {
+                  "type": "keyword"
+                },
+                "classification": {
+                  "type": "keyword"
+                },
+                "status": {
+                  "type": "keyword"
+                },
+                "since": {
+                  "type": "keyword"
+                },
+                "impact": {
+                  "type": "keyword",
+                  "ignore_above": 1024
+                }
+              }
+            },
+            "reason": {
+              "type": "keyword"
+            }
+          }
+        },
+        "source": {
+          "properties": {
+            "geo": {
+              "properties": {
+                "location": {
+                  "type": "geo_point"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

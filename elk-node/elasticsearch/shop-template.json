@@ -1,0 +1,111 @@
+{
+  "index_patterns": [
+    "sentora-shop"
+  ],
+  "priority": 250,
+  "_meta": {
+    "description": "Sentora Elk node: an online store's orders, products and searches (Log Forwarder 210+), one copy each"
+  },
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.number_of_shards": 1
+    },
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "message": {
+          "type": "keyword"
+        },
+        "host": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            }
+          }
+        },
+        "sentora": {
+          "properties": {
+            "log": {
+              "type": "keyword"
+            },
+            "panel": {
+              "type": "keyword"
+            },
+            "domain": {
+              "type": "keyword"
+            },
+            "shop": {
+              "properties": {
+                "kind": {
+                  "type": "keyword"
+                },
+                "number": {
+                  "type": "keyword"
+                },
+                "state": {
+                  "type": "keyword"
+                },
+                "status": {
+                  "type": "keyword"
+                },
+                "total": {
+                  "type": "double"
+                },
+                "base_total": {
+                  "type": "double"
+                },
+                "qty": {
+                  "type": "double"
+                },
+                "currency": {
+                  "type": "keyword"
+                },
+                "items": {
+                  "type": "double"
+                },
+                "guest": {
+                  "type": "boolean"
+                },
+                "country": {
+                  "type": "keyword"
+                },
+                "region": {
+                  "type": "keyword"
+                },
+                "order": {
+                  "type": "long"
+                },
+                "sku": {
+                  "type": "keyword"
+                },
+                "product": {
+                  "type": "keyword"
+                },
+                "term": {
+                  "type": "keyword"
+                },
+                "results": {
+                  "type": "double"
+                },
+                "popularity": {
+                  "type": "double"
+                }
+              }
+            }
+          }
+        },
+        "event": {
+          "properties": {
+            "dataset": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  }
+}
