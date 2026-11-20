@@ -89,7 +89,7 @@ class elk
     static function Groups()
     {
         return array(
-            'websites' => array('Websites', 'Every hosted website\'s visits and errors (Apache).'),
+            'websites' => array('Websites', 'Every hosted website\'s visits and errors, and how long each page took (Apache).'),
             'mail' => array('Mail', 'Postfix (sent, bounced, refused), spam scores (SpamAssassin), Dovecot (mailbox logins), webmail logins.'),
             'logins' => array('Server logins', 'SSH logins and sudo, FTP logins.'),
             'bans' => array('Bans', 'fail2ban: addresses found and banned, by jail.'),
@@ -655,6 +655,9 @@ class elk
                 $add($logs . '/domains/' . $user . '/' . $name . '-access.log', 'web-access', $user, $name);
                 $add($logs . '/domains/' . $user . '/' . $name . '-error.log', 'web-error', $user, $name);
             }
+            // how long each request took, every website in one file (the panel's Apache writes it while
+            // apache_timing_log is 'true': see Timing())
+            $add($logs . '/domains/_timing/sites-access.log', 'web-timing');
         }
         if (in_array('panel', $groups, true)) {
             $add($logs . '/sentora-access.log', 'panel-access');
@@ -787,6 +790,25 @@ class elk
     }
 
     /**
+     * Root: the panel's Apache writes how long each request took (one log for all websites, read for the Website
+     * speed board) while the websites go to the node, and stops when they do not. A panel whose core does not know
+     * the setting yet simply has no such log (nothing else changes).
+     *
+     * @return string '' or what it did.
+     */
+    static function Timing()
+    {
+        global $zdbh;
+        $want = self::Paired() && in_array('websites', self::Chosen(), true) ? 'true' : '';
+        if (self::Setting('apache_timing_log') === $want) {
+            return '';
+        }
+        self::Save('apache_timing_log', $want);
+        $zdbh->exec("UPDATE x_settings SET so_value_tx = 'true' WHERE so_name_vc = 'apache_changed'");
+        return $want === 'true' ? 'Apache now notes how long each page takes (for the Website speed board).' : 'Apache no longer notes how long each page takes.';
+    }
+
+    /**
      * Root, every daemon run, before Log Forwarder writes rsyslog's settings: the panel's certificate, the node paired when
      * one was added on the page, rsyslog installed when the node is to get lines.
      *
@@ -810,6 +832,10 @@ class elk
             $say[] = self::Pair();
         } elseif (self::Paired() && @file_get_contents(self::DIR . '/node-ca.crt') !== $n['ca']) {
             self::WriteFile(self::DIR . '/node-ca.crt', $n['ca'], 0644, self::RsyslogGroup());
+        }
+        $timing = self::Timing();
+        if ($timing !== '') {
+            $say[] = $timing;
         }
         $old = self::State();
         if (self::Paired() && self::Chosen() && self::Missing() && time() - (int) ($old['install_tried'] ?? 0) > 3600) {
@@ -1165,6 +1191,10 @@ class elk
             }
         }
         @unlink(self::STATE_DIR . '/alerts.json');
+        if (self::Setting('apache_timing_log') === 'true') {
+            self::Save('apache_timing_log', '');
+            $GLOBALS['zdbh']->exec("UPDATE x_settings SET so_value_tx = 'true' WHERE so_name_vc = 'apache_changed'");
+        }
         $st = self::State();
         $user = self::RsyslogUser();
         foreach ((array) (isset($st['acl']) ? $st['acl'] : array()) as $p) {

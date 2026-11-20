@@ -170,3 +170,8 @@ web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 22:04:19.483254 2026] [securit
 web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 22:10:00.100000 2026] [security2:error] [pid 3291:tid 3335] [client 185.220.101.4:58471] ModSecurity: Access denied with code 403 (phase 2). Operator GE matched 5 at TX:blocking_inbound_anomaly_score. [file "/etc/sentora/panel/etc/modsecurity/coreruleset/rules/REQUEST-949-BLOCKING-EVALUATION.conf"] [line "233"] [id "949110"] [msg "Inbound Anomaly Score Exceeded (Total Score: 10)"] [ver "OWASP_CRS/4.25.2"] [tag "anomaly-evaluation"] [tag "OWASP_CRS"] [hostname "vmx6a3b07.test"] [uri "/wp-login.php"] [unique_id "awDD45SJb3BfOdSdN0622AAAQhh"]
 mail			spamd[2211]: spamd: result: Y 12 - BAYES_99,HTML_MESSAGE,URIBL_BLACK scantime=0.4,size=2345,user=box@vmx6a3b07.test,uid=5000,required_score=5.0,rhost=localhost,raddr=127.0.0.1,rport=40000,mid=<abc@spam.test>,bayes=1.000000,autolearn=no
 mail			spamd[2212]: spamd: result: . 0 - BAYES_00,HTML_MESSAGE scantime=0.2,size=1200,user=info@vmx6a3b07.test,uid=5000,required_score=5.0,rhost=localhost,raddr=127.0.0.1,rport=40001,mid=<ok@friend.test>,autolearn=ham
+web-timing			2026-11-20T22:54:46+0000 vmx6a3b07.test 302 903 247 GET "/"
+web-timing			2026-11-20T22:54:46+0000 vmx6a3b07.test 302 822 252 GET "/shop/"
+web-timing			2026-11-20T22:54:46+0000 vmx6a3b07.test 302 954 256 GET "/cart"
+web-timing			2026-11-20T22:54:46+0000 vmx6a3b07.test 302 698 259 GET "/wp-login.php"
+web-timing			2026-11-20T20:09:24+0000 vmx6a3b07.test 200 2543210 51234 POST "/checkout/pay"

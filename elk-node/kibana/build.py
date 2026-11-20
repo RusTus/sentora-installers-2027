@@ -23,6 +23,7 @@ DASHBOARDS = [
     ("sentora-firewall", "Web firewall"),
     ("sentora-panel", "Panel and server"),
     ("sentora-health", "Server health"),
+    ("sentora-speed", "Website speed"),
 ]
 
 
@@ -393,6 +394,42 @@ BOARDS["sentora-health"] = build("sentora-health", "Server health", [
      (24, 12, lines("Mail waiting to go", [("mail_queue", "Mails")]))],
     [(48, 3, note("Sent by the panel on every daemon run (5 minutes) when **Server health** is ticked on Log Forwarder's page. "
                   "CPU and network are the averages since the run before; with several panels each has its own line."))],
+])
+
+# ---- Website speed: how long each page took (the panel's Apache timing log, kind web-timing; Log Forwarder 209+)
+TIMED = 'sentora.log : "web-timing"'
+MS = {"type": "number", "decimals": 0}
+
+
+def ms_table(title, kql, rows, limit=15):
+    return {"type": "data_table", "title": title, "data_source": DV, "query": q(kql),
+            "metrics": [{"operation": "average", "field": "sentora.response_ms", "label": "Average ms", "format": MS},
+                        {"operation": "percentile", "field": "sentora.response_ms", "percentile": 95, "label": "95% within ms", "format": MS},
+                        {"operation": "count", "label": "Requests"}],
+            "rows": [{"operation": "terms", "fields": [f], "limit": limit, "label": NAMES.get(f, f),
+                      "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}} for f in rows]}
+
+
+BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
+    [(12, 5, {"type": "metric", "title": "Half the pages within", "data_source": DV, "query": q(TIMED),
+              "metrics": [{"type": "primary", "operation": "median", "field": "sentora.response_ms", "label": "ms", "format": MS}]}),
+     (12, 5, {"type": "metric", "title": "95 in 100 pages within", "data_source": DV, "query": q(TIMED),
+              "metrics": [{"type": "primary", "operation": "percentile", "field": "sentora.response_ms", "percentile": 95, "label": "ms", "format": MS}]}),
+     (12, 5, metric("Slow pages (over 2 seconds)", TIMED + " and sentora.response_ms >= 2000", "")),
+     (12, 5, metric("Server errors (5xx)", TIMED + ' and sentora.status_class : "5xx"', ""))],
+    [(48, 12, {"type": "xy", "title": "How long pages take, by website (average, ms)", "query": q(TIMED),
+               "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "line", "data_source": DV, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "average", "field": "sentora.response_ms", "label": "ms", "format": MS}],
+                           "breakdown_by": {"operation": "terms", "fields": ["sentora.domain"], "limit": 8, "label": "Website",
+                                            "rank_by": {"type": "alphabetical", "direction": "asc"}}}]})],
+    [(24, 14, ms_table("Slowest pages", TIMED, ["url.path"])),
+     (24, 14, ms_table("Slowest websites", TIMED, ["sentora.domain"]))],
+    [(24, 12, bars("Slow pages over time (over 2 seconds)", TIMED + " and sentora.response_ms >= 2000", "sentora.domain", 6, "Pages")),
+     (24, 12, table("Pages with server errors (5xx)", TIMED + ' and sentora.status_class : "5xx"', ["sentora.domain", "url.path"], 15, "Errors"))],
+    [(48, 3, note("How long the server took for each request, from the panel's Apache (the time until the last byte went out). "
+                  "Pages are shown without what follows the ?, so no search words or tokens are kept. For a shop: the checkout and "
+                  "cart pages are the ones to watch."))],
 ])
 
 if __name__ == "__main__":

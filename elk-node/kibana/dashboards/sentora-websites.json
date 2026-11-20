@@ -54,6 +54,11 @@
       "destination": "sentora-health",
       "label": "Server health",
       "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-speed",
+      "label": "Website speed",
+      "type": "dashboardLink"
      }
     ]
    },
