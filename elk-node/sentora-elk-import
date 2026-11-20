@@ -1,0 +1,169 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Sentora Elk node: send one website's OLDER access logs to the panel's Elk node (a one-off, by hand). The Elk node
+ * gets new lines live from the moment it was added; this fills in the weeks the panel still keeps from before that
+ * (the current log and the rotated ones: about three weeks). Each visit keeps its own date, so it lands on the
+ * dashboards and the world map at the time it happened. Lines from the time the node was already getting them live
+ * are left out (no doubles), and a site imported once is not imported again unless asked.
+ *
+ * Run as root on the PANEL (it uses the panel's certificate for the Elk node, the same connection as Log Forwarder):
+ *
+ *   php sentora-elk-import example.com              send what the panel still has of example.com's access log
+ *   php sentora-elk-import example.com --days 7     only the last 7 days of it
+ *   php sentora-elk-import example.com --dry-run    count only, send nothing
+ *   php sentora-elk-import example.com --again      import a site that was imported before (it doubles those lines)
+ *
+ * In Kibana, set the time range to "Last 30 days" (top right) to see the older visits.
+ *
+ * Written by RusTus, 2026-11-20
+ */
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+$args = array_slice($argv, 1);
+$site = '';
+$days = 0;
+$dry = false;
+$again = false;
+for ($i = 0; $i < count($args); $i++) {
+    $a = $args[$i];
+    if ($a === '--days' && isset($args[$i + 1]) && ctype_digit($args[$i + 1])) {
+        $days = (int) $args[++$i];
+    } elseif ($a === '--dry-run') {
+        $dry = true;
+    } elseif ($a === '--again') {
+        $again = true;
+    } elseif ($a !== '' && $a[0] !== '-' && $site === '') {
+        $site = strtolower($a);
+    } else {
+        fwrite(STDERR, "Unknown: $a\nUse: php sentora-elk-import <website> [--days N] [--dry-run] [--again]\n");
+        exit(2);
+    }
+}
+$stop = function ($m) { fwrite(STDERR, "STOPPED: $m\n"); exit(1); };
+if ($site === '' || !preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', $site)) {
+    $stop("Which website? php sentora-elk-import example.com");
+}
+if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+    $stop('Run this as root (sudo php sentora-elk-import ...).');
+}
+$root = '/etc/sentora/panel/';
+if (!is_file($root . 'dryden/loader.inc.php')) {
+    $stop('This is not a Sentora panel server (no ' . $root . '): run it on the panel.');
+}
+chdir($root);
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+if (!is_file('modules/log_forwarder/code/elk.php')) {
+    $stop('Log Forwarder 203 or newer is not installed on this panel (Admin > Repo Browser).');
+}
+require_once 'modules/log_forwarder/code/elk.php';
+if (!elk::Paired()) {
+    $stop('No Elk node is paired yet: add it first (Advanced > Log Forwarder, Elk node), then run this.');
+}
+$node = elk::Node();
+// from when the node got lines live: the time it was paired
+$live = preg_match('/^ok (\d+)/', $node['pairing'], $m) ? (int) $m[1] : time();
+$from = $days > 0 ? time() - $days * 86400 : 0;
+
+// the website and its account
+global $zdbh;
+$q = $zdbh->prepare("SELECT a.ac_user_vc FROM x_vhosts v JOIN x_accounts a ON a.ac_id_pk = v.vh_acc_fk
+    WHERE LOWER(v.vh_name_vc) = :n AND v.vh_deleted_ts IS NULL AND a.ac_deleted_ts IS NULL");
+$q->execute(array(':n' => $site));
+$user = (string) $q->fetchColumn();
+if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $user)) {
+    $stop("No website $site on this panel.");
+}
+$logs = rtrim((string) ctrl_options::GetSystemOption('log_dir'), '/');
+$logs = $logs !== '' ? $logs : '/var/sentora/logs';
+$base = $logs . '/domains/' . $user . '/' . $site . '-access.log';
+$files = array();
+foreach (array_merge(array($base), (array) glob($base . '.*')) as $f) {
+    if (is_file($f) && !is_link($f) && preg_match('/-access\.log(\.\d+(\.gz)?)?$/', $f)) {
+        $files[] = $f;
+    }
+}
+if (!$files) {
+    $stop("$site has no access log on this panel ($base).");
+}
+// oldest first: the highest rotation number first, the current file last
+usort($files, function ($a, $b) {
+    $n = function ($f) { return preg_match('/\.log\.(\d+)/', $f, $m) ? (int) $m[1] : 0; };
+    return $n($b) <=> $n($a);
+});
+$mark = elk::STATE_DIR . '/imported-' . $site;
+if (is_file($mark) && !$again && !$dry) {
+    $stop("$site was imported before (" . trim((string) file_get_contents($mark)) . "): --again sends it once more (those lines twice).");
+}
+
+// the connection: the panel's certificate, the node checked against its pinned authority and its name
+$conn = null;
+if (!$dry) {
+    $ctx = stream_context_create(array('ssl' => array('local_cert' => elk::DIR . '/panel.crt', 'local_pk' => elk::DIR . '/panel.key',
+        'cafile' => elk::DIR . '/node-ca.crt', 'verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => elk::NODE_NAME, 'allow_self_signed' => false)));
+    $host = filter_var($node['addr'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $node['addr'] . ']' : $node['addr'];
+    $conn = @stream_socket_client('tls://' . $host . ':' . elk::PORT, $no, $str, 15, STREAM_CLIENT_CONNECT, $ctx);
+    if ($conn === false) {
+        $stop('The Elk node at ' . $node['addr'] . ' did not answer on port ' . elk::PORT . " ($str).");
+    }
+}
+$panel = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
+$sent = 0;
+$skipped = 0;
+$first = $last = null;
+foreach ($files as $f) {
+    $h = substr($f, -3) === '.gz' ? @gzopen($f, 'rb') : @fopen($f, 'rb');
+    if ($h === false) {
+        echo "  could not read $f\n";
+        continue;
+    }
+    $n = 0;
+    while (($line = (substr($f, -3) === '.gz' ? gzgets($h, 65536) : fgets($h, 65536))) !== false) {
+        $line = rtrim($line, "\r\n");
+        if ($line === '' || !preg_match('/\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]/', $line, $m)) {
+            continue;
+        }
+        $t = DateTime::createFromFormat('d/M/Y:H:i:s O', $m[1]);
+        if ($t === false) {
+            continue;
+        }
+        $ts = $t->getTimestamp();
+        // already sent live, or older than asked: left out
+        if ($ts >= $live || $ts < $from) {
+            $skipped++;
+            continue;
+        }
+        $first = $first === null ? $ts : min($first, $ts);
+        $last = $last === null ? $ts : max($last, $ts);
+        $n++;
+        $sent++;
+        if ($conn) {
+            $json = json_encode(array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z', $ts), 'sentora_host' => $panel, 'sentora_log' => 'web-access',
+                'sentora_account' => $user, 'sentora_domain' => $site, 'message' => mb_substr($line, 0, 32768)), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n";
+            if (@fwrite($conn, $json) === false) {
+                $stop("The connection to the Elk node broke after $sent lines.");
+            }
+        }
+        if ($sent % 5000 === 0) {
+            echo "  ... $sent lines\n";
+        }
+    }
+    substr($f, -3) === '.gz' ? gzclose($h) : fclose($h);
+    echo '  ' . basename($f) . ": $n line(s)\n";
+}
+if ($conn) {
+    // a moment for the node to read what was sent before the connection closes
+    sleep(3);
+    fclose($conn);
+}
+$range = $first === null ? 'nothing older than when the node started' : (date('Y-m-d H:i', $first) . ' to ' . date('Y-m-d H:i', $last));
+if ($dry) {
+    echo "Would send $sent visit(s) of $site ($range); $skipped left out (already sent live, or outside --days).\n";
+} else {
+    elk::WriteFile($mark, date('Y-m-d H:i') . ": $sent lines, $range\n", 0640, 'sentora');
+    echo "Sent $sent visit(s) of $site to the Elk node ($range); $skipped left out (already sent live, or outside --days).\n";
+    echo "In Kibana, set the time range (top right) to \"Last 30 days\" to see them.\n";
+}
