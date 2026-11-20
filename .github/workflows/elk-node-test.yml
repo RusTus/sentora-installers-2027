@@ -11,8 +11,8 @@ on:
     branches: [master2027]
     paths:
       - elk-node/**
-      - addons/elk/**
-      - sentora-repo/elk.zpp
+      - addons/log_forwarder/**
+      - sentora-repo/log_forwarder.zpp
       - tests/elk/**
       - .github/scripts/elk-node-test.sh
       - .github/workflows/elk-node-test.yml

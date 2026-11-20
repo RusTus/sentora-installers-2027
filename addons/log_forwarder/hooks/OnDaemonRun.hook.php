@@ -25,6 +25,10 @@ if (ui_module::CheckModuleEnabled('Log Forwarder')) {
     foreach (elk::After(log_forwarder::$installed) as $logForwarderLine) {
         echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
     }
+    // older access logs asked for on the page ("Bring in older logs")
+    foreach (elk::RunImports() as $logForwarderLine) {
+        echo 'Elk node: ' . $logForwarderLine . fs_filehandler::NewLine();
+    }
 } elseif (is_file(log_forwarder::CONF) || is_file(elk::CONF)) {
     log_forwarder::Remove();
     elk::Remove();

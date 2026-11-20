@@ -43,6 +43,7 @@ class elk
     const S_PAIRING = 'elk_pairing';
     const S_GROUPS = 'elk_groups';
     const S_CHECK = 'elk_check';
+    const S_IMPORT = 'elk_import';
 
     // ---------------------------------------------------------------------------------------------
     // Settings
@@ -856,6 +857,228 @@ class elk
         $n = self::Node();
         return array($plan ? ('sending ' . count($files) . ' log file(s)' . ($plan['streams'] ? ' and the mail and login lines' : '') . ' to ' . $n['addr'] . '.')
             : (self::Paired() ? 'paired; nothing chosen to send.' : ($n['addr'] !== '' ? 'waiting to pair with ' . $n['addr'] . '.' : 'no Elk node.')));
+    }
+
+    /**
+     * The websites whose older access logs can be sent (name => account), for the page.
+     *
+     * @return array<string, string>
+     */
+    static function Sites()
+    {
+        global $zdbh;
+        $out = array();
+        $q = $zdbh->query("SELECT LOWER(v.vh_name_vc), a.ac_user_vc FROM x_vhosts v JOIN x_accounts a ON a.ac_id_pk = v.vh_acc_fk
+            WHERE v.vh_deleted_ts IS NULL AND a.ac_deleted_ts IS NULL AND v.vh_type_in IN (1, 2) ORDER BY v.vh_name_vc");
+        foreach ($q->fetchAll(PDO::FETCH_NUM) as $r) {
+            if (preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/', (string) $r[0]) && preg_match('/^[A-Za-z0-9_-]{1,64}$/', (string) $r[1])) {
+                $out[(string) $r[0]] = (string) $r[1];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The imports done (site => what happened), from the marks the import leaves.
+     *
+     * @return array<string, string>
+     */
+    static function Imported()
+    {
+        $out = array();
+        foreach ((array) glob(self::STATE_DIR . '/imported-*') as $f) {
+            $out[substr(basename($f), 9)] = trim((string) @file_get_contents($f));
+        }
+        return $out;
+    }
+
+    /**
+     * The page: ask the daemon to send a website's older access logs (one request per site at a time).
+     *
+     * @param string $site
+     * @param int $days 0: all the panel keeps.
+     * @return string '' or what is wrong.
+     */
+    static function QueueImport($site, $days)
+    {
+        $site = strtolower(trim((string) $site));
+        if (!isset(self::Sites()[$site])) {
+            return 'Choose one of this panel\'s websites.';
+        }
+        if (isset(self::Imported()[$site])) {
+            return 'That website\'s older logs were sent before.';
+        }
+        $q = json_decode(self::Setting(self::S_IMPORT), true);
+        $q = is_array($q) ? $q : array();
+        $q[$site] = array('days' => max(0, min(365, (int) $days)), 'asked' => time());
+        self::Save(self::S_IMPORT, json_encode($q));
+        return '';
+    }
+
+    /**
+     * The imports asked for on the page and not done yet (site => days).
+     *
+     * @return array<string, int>
+     */
+    static function Queued()
+    {
+        $q = json_decode(self::Setting(self::S_IMPORT), true);
+        $out = array();
+        foreach (is_array($q) ? $q : array() as $site => $x) {
+            $out[(string) $site] = (int) (is_array($x) ? ($x['days'] ?? 0) : 0);
+        }
+        return $out;
+    }
+
+    /**
+     * Root: send what the panel still keeps of one website's access log (the current file and the rotated ones, about
+     * three weeks) to the Elk node, each visit at its own date. Lines from after the node was paired (already sent
+     * live) and older than $days are left out; a site imported once is not again unless $again. Used by the daemon (the
+     * page's "Bring in older logs") and by elk-node/sentora-elk-import.
+     *
+     * @param string $site
+     * @param int $days 0: all.
+     * @param bool $again
+     * @param bool $dry Count only.
+     * @param callable|null $say Progress lines.
+     * @return array{ok: bool, text: string, sent: int}
+     */
+    static function Import($site, $days = 0, $again = false, $dry = false, $say = null)
+    {
+        $say = $say ?: function ($l) {};
+        $fail = function ($t) { return array('ok' => false, 'text' => $t, 'sent' => 0); };
+        $site = strtolower((string) $site);
+        $sites = self::Sites();
+        if (!isset($sites[$site])) {
+            return $fail("No website $site on this panel.");
+        }
+        if (!self::Paired()) {
+            return $fail('No Elk node is paired yet.');
+        }
+        $mark = self::STATE_DIR . '/imported-' . $site;
+        if (is_file($mark) && !$again && !$dry) {
+            return $fail("$site was imported before (" . trim((string) file_get_contents($mark)) . ').');
+        }
+        $node = self::Node();
+        $live = preg_match('/^ok (\d+)/', $node['pairing'], $m) ? (int) $m[1] : time();
+        $from = $days > 0 ? time() - $days * 86400 : 0;
+        $user = $sites[$site];
+        $logs = rtrim((string) ctrl_options::GetSystemOption('log_dir'), '/');
+        $base = ($logs !== '' ? $logs : '/var/sentora/logs') . '/domains/' . $user . '/' . $site . '-access.log';
+        $files = array();
+        foreach (array_merge(array($base), (array) glob($base . '.*')) as $f) {
+            if (is_file($f) && !is_link($f) && preg_match('/-access\.log(\.\d+(\.gz)?)?$/', $f)) {
+                $files[] = $f;
+            }
+        }
+        if (!$files) {
+            return $fail("$site has no access log on this panel.");
+        }
+        usort($files, function ($a, $b) {
+            $n = function ($f) { return preg_match('/\.log\.(\d+)/', $f, $m) ? (int) $m[1] : 0; };
+            return $n($b) <=> $n($a);
+        });
+        $conn = null;
+        if (!$dry) {
+            $ctx = stream_context_create(array('ssl' => array('local_cert' => self::DIR . '/panel.crt', 'local_pk' => self::DIR . '/panel.key',
+                'cafile' => self::DIR . '/node-ca.crt', 'verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => self::NODE_NAME, 'allow_self_signed' => false)));
+            $host = filter_var($node['addr'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $node['addr'] . ']' : $node['addr'];
+            $conn = @stream_socket_client('tls://' . $host . ':' . self::PORT, $no, $str, 15, STREAM_CLIENT_CONNECT, $ctx);
+            if ($conn === false) {
+                return $fail('The Elk node at ' . $node['addr'] . ' did not answer on port ' . self::PORT . " ($str).");
+            }
+        }
+        $panel = preg_replace('/[^A-Za-z0-9.-]/', '', (string) ctrl_options::GetSystemOption('sentora_domain'));
+        $sent = $skipped = 0;
+        $first = $last = null;
+        foreach ($files as $f) {
+            $gz = substr($f, -3) === '.gz';
+            $h = $gz ? @gzopen($f, 'rb') : @fopen($f, 'rb');
+            if ($h === false) {
+                $say('could not read ' . basename($f));
+                continue;
+            }
+            $n = 0;
+            while (($line = ($gz ? gzgets($h, 65536) : fgets($h, 65536))) !== false) {
+                $line = rtrim($line, "\r\n");
+                if ($line === '' || !preg_match('/\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]/', $line, $mm)) {
+                    continue;
+                }
+                $t = DateTime::createFromFormat('d/M/Y:H:i:s O', $mm[1]);
+                if ($t === false) {
+                    continue;
+                }
+                $ts = $t->getTimestamp();
+                if ($ts >= $live || $ts < $from) {
+                    $skipped++;
+                    continue;
+                }
+                $first = $first === null ? $ts : min($first, $ts);
+                $last = $last === null ? $ts : max($last, $ts);
+                $n++;
+                $sent++;
+                if ($conn && @fwrite($conn, json_encode(array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z', $ts), 'sentora_host' => $panel, 'sentora_log' => 'web-access',
+                        'sentora_account' => $user, 'sentora_domain' => $site, 'message' => mb_substr($line, 0, 32768)), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n") === false) {
+                    $gz ? gzclose($h) : fclose($h);
+                    return $fail("The connection to the Elk node broke after $sent lines.");
+                }
+                if ($sent % 50000 === 0) {
+                    $say("... $sent lines");
+                }
+            }
+            $gz ? gzclose($h) : fclose($h);
+            $say(basename($f) . ": $n line(s)");
+        }
+        if ($conn) {
+            // (a moment for the node to read what was sent before the connection closes)
+            sleep(3);
+            fclose($conn);
+        }
+        $range = $first === null ? 'nothing older than when the node started' : (date('Y-m-d H:i', $first) . ' to ' . date('Y-m-d H:i', $last));
+        if (!$dry) {
+            self::WriteFile($mark, date('Y-m-d H:i') . ": $sent visits, $range\n", 0640, 'sentora');
+        }
+        return array('ok' => true, 'sent' => $sent, 'text' => ($dry ? 'Would send ' : 'Sent ') . "$sent visit(s) of $site ($range); $skipped left out (already sent live, or outside the days asked).");
+    }
+
+    /**
+     * Root, every daemon run: the imports asked for on the page (each once; the request is taken first, so a
+     * failure is not repeated every run: the page says what happened).
+     *
+     * @return string[]
+     */
+    static function RunImports()
+    {
+        $out = array();
+        $queued = self::Queued();
+        if (!$queued || !self::Paired()) {
+            return $out;
+        }
+        self::Save(self::S_IMPORT, '');
+        foreach ($queued as $site => $days) {
+            $r = self::Import($site, $days);
+            if (!$r['ok']) {
+                self::WriteFile(self::STATE_DIR . '/import-failed-' . $site, date('Y-m-d H:i') . ': ' . $r['text'] . "\n", 0640, 'sentora');
+            } else {
+                @unlink(self::STATE_DIR . '/import-failed-' . $site);
+            }
+            $out[] = 'older logs: ' . $r['text'];
+        }
+        return $out;
+    }
+
+    /**
+     * Imports that could not be done (site => why), for the page.
+     *
+     * @return array<string, string>
+     */
+    static function ImportFailed()
+    {
+        $out = array();
+        foreach ((array) glob(self::STATE_DIR . '/import-failed-*') as $f) {
+            $out[substr(basename($f), 14)] = trim((string) @file_get_contents($f));
+        }
+        return $out;
     }
 
     /**

@@ -455,6 +455,25 @@ class module_controller extends ctrl_module
         exit;
     }
 
+    static function doElkImport()
+    {
+        runtime_csfr::Protect();
+        if (!log_forwarder::IsAdmin(self::Uid())) {
+            return;
+        }
+        global $controller;
+        $f = $controller->GetAllControllerRequests('FORM');
+        $err = elk::QueueImport((string) ($f['inSite'] ?? ''), (int) ($f['inDays'] ?? 0));
+        if ($err !== '') {
+            self::$elkMsg = ui_language::translate($err);
+            self::$elkKind = 'bad';
+            return;
+        }
+        self::ElkRunNow();
+        header('location: ./?module=log_forwarder&elk=import#elk');
+        exit;
+    }
+
     static function doElkCheck()
     {
         runtime_csfr::Protect();
@@ -485,7 +504,8 @@ class module_controller extends ctrl_module
             foreach (array('added' => 'The Elk node was added: the panel checks its key now (this page shows the result in a moment).',
                 'removed' => 'The Elk node was removed: the panel stops sending to it. Its logs stay on the node.',
                 'saved' => 'Saved: the panel sends the chosen logs from its next run (within a minute or two).',
-                'checked' => 'Checked again.') as $g => $text) {
+                'checked' => 'Checked again.',
+                'import' => 'The panel sends that website\'s older logs now (a big log takes a few minutes; this card shows when it is done).') as $g => $text) {
                 if ($g0 === $g) {
                     $m = ui_language::translate($text);
                 }
@@ -628,6 +648,53 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * "Bring in older logs": a website's access log from before the node was added (about three weeks), sent once by
+     * the daemon, each visit at its own date.
+     *
+     * @return string HTML.
+     */
+    static function ElkImport()
+    {
+        if (!elk::Paired()) {
+            return '';
+        }
+        $done = elk::Imported();
+        $failed = elk::ImportFailed();
+        $queued = elk::Queued();
+        $sites = array_keys(elk::Sites());
+        $out = '<div class="ek-card"><h3>' . self::t('Bring in older logs') . '</h3>'
+            . '<p class="ek-muted ek-after-top">' . self::t('The Elk node gets lines as they are written from the moment it was added. A website\'s visits from before (what the panel still keeps: about three weeks) can be sent once; each visit lands at its own date. In Kibana, choose a longer time range (top right) to see them.') . '</p>';
+        $open = array_values(array_diff($sites, array_keys($done), array_keys($queued)));
+        if ($open) {
+            $opts = '';
+            foreach ($open as $site) {
+                $opts .= '<option value="' . self::h($site) . '">' . self::h($site) . '</option>';
+            }
+            $out .= '<form method="post" action="./?module=log_forwarder&action=ElkImport" class="ek-form ek-import">' . runtime_csfr::Token()
+                . '<label>' . self::t('Website') . '<select name="inSite">' . $opts . '</select></label>'
+                . '<label>' . self::t('How far back') . '<select name="inDays"><option value="0">' . self::t('All the panel keeps') . '</option>'
+                . '<option value="7">' . self::t('The last 7 days') . '</option><option value="14">' . self::t('The last 14 days') . '</option></select></label>'
+                . '<div><button type="submit" class="btn btn-primary">' . self::ElkIcon('plus') . ' ' . self::t('Send its older logs') . '</button></div></form>';
+        }
+        $rows = '';
+        foreach ($queued as $site => $d) {
+            $rows .= '<tr><td>' . self::h($site) . '</td><td><span class="ek-pill is-wait">' . self::t('Sending') . '</span> ' . self::t('within a few minutes') . '</td></tr>';
+        }
+        foreach ($failed as $site => $why) {
+            if (!isset($done[$site]) && !isset($queued[$site])) {
+                $rows .= '<tr><td>' . self::h($site) . '</td><td><span class="ek-pill is-bad">' . self::t('Not sent') . '</span> ' . self::h($why) . '</td></tr>';
+            }
+        }
+        foreach ($done as $site => $what) {
+            $rows .= '<tr><td>' . self::h($site) . '</td><td><span class="ek-pill is-ok">' . self::t('Sent') . '</span> ' . self::h($what) . '</td></tr>';
+        }
+        if ($rows !== '') {
+            $out .= '<table class="ek-table ek-imports">' . $rows . '</table>';
+        }
+        return $out . '</div>';
+    }
+
+    /**
      * The whole Elk node section (template <@ Elk @>): administrators only.
      *
      * @return string HTML.
@@ -639,7 +706,7 @@ class module_controller extends ctrl_module
         }
         return '<section class="ek" id="elk"><h3 class="ek-title">' . self::ElkIcon('server') . self::t('Elk node: this server\'s logs in Kibana') . '</h3>'
             . '<p class="ek-muted ek-lead">' . self::t('Administrators: send this server\'s logs (websites, mail, logins, bans, FTP, DNS, the panel) to an Elk node of its own, with Elasticsearch, Logstash and Kibana and ready-made dashboards, the world map among them.') . '</p>'
-            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkGroups() . self::ElkHelp() . '</section>';
+            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkGroups() . self::ElkImport() . self::ElkHelp() . '</section>';
     }
 
     /**
