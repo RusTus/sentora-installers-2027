@@ -1,0 +1,599 @@
+#!/usr/bin/env bash
+# Sentora Elk Node installer: makes this server the log server of a Sentora-2027 panel, with the Elastic
+# stack (Elasticsearch, Logstash, Kibana 9) and Sentora's dashboards. The panel's Elk add-on sends its logs
+# here (websites, the panel, mail, logins, FTP, DNS, fail2ban); its administrators read them in Kibana.
+# Runs on Ubuntu 26.04 (more systems later). Run it as root on a server of its own (not the panel's),
+# with at least 4 GB of memory (8 GB or more is better) and room for the logs:
+#
+#   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/elk-node/sentora2027-elk-node -o sentora2027-elk-node
+#   sudo bash sentora2027-elk-node
+#
+# Installed like every Sentora node: it asks for the panel's address, fetches the panel's certificate for
+# its logs and shows the panel's code: answer y only when it is the code on the panel's page (Admin > Elk).
+# It ends with this node's key (SE1-XXXX-XXXX-XXXX-XXXX) and the Kibana login: paste the key, with this
+# server's address, in the panel's "Add the Elk node". From then on the panel's lines come over TLS, and
+# only the panel's own certificate is let in (the panel checks this node's certificate the same way).
+#
+# Options:  --panel URL        the panel's address (asked for when not given)
+#           --panel-code C     the panel's code (asked to check when not given; for scripts)
+#           --panel-cert FILE  the panel's certificate from a file instead of the panel (tests)
+#           --files DIR        Sentora's Logstash rules, templates and dashboards from DIR (tests)
+#           --retention DAYS   how long the logs are kept (default 30)
+#           --update           bring an installed Elk node up to date (logs, logins and keys are kept)
+#
+# Afterwards:  sentora-elk-node status            the services, the logs kept, the disk
+#              sentora-elk-node key               this node's key again, for the panel
+#              sentora-elk-node password          a new password for Kibana's sentora-admin login
+#              sentora-elk-node retention DAYS    keep the logs DAYS days
+#              sentora-elk-node kibana-from LIST  who may open Kibana: "any", or addresses/networks
+#              sentora-elk-node panel-from ADDR   the panel's address as this server sees it (the firewall)
+# Log: /var/log/sentora2027-elk-node.log
+set -u
+LOG=/var/log/sentora2027-elk-node.log
+RAW_BASE=https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/elk-node
+PANEL='' PANELCODE='' PANELCERT='' FILES='' RETENTION='' UPDATE=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --panel) PANEL=${2:-}; shift ;;
+        --panel-code) PANELCODE=${2:-}; shift ;;
+        --panel-cert) PANELCERT=${2:-}; shift ;;
+        --files) FILES=${2:-}; shift ;;
+        --retention) RETENTION=${2:-}; shift ;;
+        --update) UPDATE=1 ;;
+        -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
+    esac
+    shift
+done
+
+# ---- The screen, as every Sentora installer draws it (the same lines as the backup node installer)
+# ---- The screen, as the Sentora installer draws it: a title bar, one line per finished step with a
+# progress bar below it that a small ticker keeps moving (so a long step never looks hung); the details
+# go to the log. Plain lines when the output is not a terminal (tests, scripts).
+exec 3>&1 4>&2
+UI_TTY=0
+[ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && UI_TTY=1
+if [ $UI_TTY -eq 1 ]; then
+    C_RESET=$'\e[0m'; C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'
+    C_GREEN=$'\e[32m'; C_YELLOW=$'\e[33m'; C_RED=$'\e[31m'; C_CYAN=$'\e[36m'; C_WHITE=$'\e[97m'
+    BG_TITLE=$'\e[44m'; BG_OK=$'\e[42m'; BG_WARN=$'\e[43m'
+else
+    C_RESET=''; C_BOLD=''; C_DIM=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_CYAN=''; C_WHITE=''; BG_TITLE=''; BG_OK=''; BG_WARN=''
+fi
+UI_UTF8=0
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) UI_UTF8=1 ;; esac
+UI_TICK='[ OK ]'; UI_WARNSIGN='[ !! ]'; UI_CROSS='[FAIL]'
+UI_SPIN=('|' '/' '-' '\')
+if [ $UI_UTF8 -eq 1 ]; then UI_FULL=$'\xe2\x96\x88'; UI_EMPTY=$'\xe2\x96\x91'; else UI_FULL='#'; UI_EMPTY='.'; fi
+ui_cols() { local c; c=$(tput cols 2> /dev/null); [ "${c:-0}" -ge 40 ] 2> /dev/null && echo "$c" || echo 80; }
+ui_bar() { # background text
+    local pad=$(( $(ui_cols) - ${#2} )); [ $pad -lt 0 ] && pad=0
+    printf '%s%s%s%*s%s\n' "$1" "$C_BOLD$C_WHITE" "$2" "$pad" '' "$C_RESET" >&3
+}
+ui_banner() { # subtitle
+    [ $UI_TTY -eq 1 ] && clear >&3
+    ui_bar "$BG_TITLE" "  Sentora-2027 Elk Node  -  ${UI_WHAT:-Installer}"
+    [ -n "$1" ] && printf '%s  %s%s\n' "$C_DIM" "$1" "$C_RESET" >&3
+    echo >&3
+}
+ui_heading() { printf '\n%s%s  %s  %s\n\n' "$BG_TITLE" "$C_BOLD$C_WHITE" "$1" "$C_RESET" >&3; }
+ui_ask() { # question default VAR
+    printf '\n  %s%s%s\n' "$C_BOLD$C_CYAN" "$1" "$C_RESET" >&3
+    read -r -e -p "  > " -i "$2" "$3" <&0 2>&3 || printf -v "$3" '%s' "$2"
+}
+UI_STEP=0
+UI_TOTAL=$(grep -c '^ *ui_step "' "$0" 2> /dev/null); [ "${UI_TOTAL:-0}" -gt 0 ] 2> /dev/null || UI_TOTAL=12
+UI_TITLE='' UI_STEP_START=0 UI_START=$(date +%s) UI_TICKER='' UI_LOGPOS=0 UI_NOTES='' UI_WORKING=''
+UI_TICKFILE=$(mktemp /tmp/sentora-elk-step.XXXXXX)
+UI_MAINPID=$$
+ui_repeat() { local i out=''; for ((i = 0; i < $2; i++)); do out+="$1"; done; printf '%s' "$out"; }
+ui_draw() { # spinner-frame
+    local cols width pct filled elapsed total room title times
+    cols=$(ui_cols); width=$(( cols / 4 )); [ $width -lt 10 ] && width=10; [ $width -gt 30 ] && width=30
+    pct=$(( (UI_STEP - 1) * 100 / UI_TOTAL )); [ $pct -gt 99 ] && pct=99
+    filled=$(( pct * width / 100 ))
+    elapsed=$(( $(date +%s) - UI_STEP_START )); total=$(( $(date +%s) - UI_START ))
+    times=$(printf '%d:%02d  (total %d:%02d)' $(( elapsed / 60 )) $(( elapsed % 60 )) $(( total / 60 )) $(( total % 60 )))
+    room=$(( cols - width - 16 - ${#UI_STEP} - ${#UI_TOTAL} - ${#times} - 4 ))
+    title="$UI_TITLE"; [ ${#title} -gt $room ] && title="${title:0:$(( room - 3 ))}..."
+    printf '\r\e[K %s%s%s%s%s %3d%%  %d/%d  %s%s%s %-*s %s%s%s' "$C_GREEN" "$(ui_repeat "$UI_FULL" "$filled")" "$C_DIM" "$(ui_repeat "$UI_EMPTY" $(( width - filled )))" "$C_RESET" \
+        "$pct" "$UI_STEP" "$UI_TOTAL" "$C_CYAN" "$1" "$C_RESET" "$room" "$title" "$C_DIM" "$times" "$C_RESET" >&3
+}
+ui_ticker_stop() {
+    [ -n "$UI_TICKER" ] || return 0
+    echo 0 > "$UI_TICKFILE" 2> /dev/null
+    kill "$UI_TICKER" 2> /dev/null
+    local _; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$UI_TICKER" 2> /dev/null || break; sleep 0.05; done
+    kill -0 "$UI_TICKER" 2> /dev/null && kill -9 "$UI_TICKER" 2> /dev/null
+    UI_TICKER=''
+}
+ui_end_step() {
+    ui_ticker_stop
+    [ -z "$UI_TITLE" ] && return 0
+    local took=$(( $(date +%s) - UI_STEP_START )) found='' mark color size
+    size=$(stat -c %s "$LOG" 2> /dev/null || echo 0)
+    if [ "$size" -gt "$UI_LOGPOS" ]; then
+        found=$(tail -c +$(( UI_LOGPOS + 1 )) "$LOG" | grep -E '^(WARNING|ERROR)' | head -5)
+        UI_LOGPOS=$size
+    fi
+    if [ -n "$found" ]; then mark="$UI_WARNSIGN"; color="$C_YELLOW"; else mark="$UI_TICK"; color="$C_GREEN"; fi
+    [ $UI_TTY -eq 1 ] && printf '\r\e[K' >&3
+    printf '  %s%s%s %s %s(%d:%02d)%s\n' "$color" "$mark" "$C_RESET" "$UI_TITLE" "$C_DIM" $(( took / 60 )) $(( took % 60 )) "$C_RESET" >&3
+    if [ -n "$UI_NOTES" ]; then printf '%s' "$UI_NOTES" | while IFS= read -r w; do printf '         %s%s%s\n' "$C_DIM" "$w" "$C_RESET" >&3; done; fi
+    if [ -n "$found" ]; then printf '%s\n' "$found" | while IFS= read -r w; do printf '         %s%s%s\n' "$C_YELLOW" "${w:0:$(( $(ui_cols) - 12 ))}" "$C_RESET" >&3; done; fi
+    UI_TITLE='' UI_NOTES=''
+}
+ui_step() { # title
+    ui_end_step
+    UI_STEP=$(( UI_STEP + 1 )); [ $UI_STEP -gt $UI_TOTAL ] && UI_TOTAL=$UI_STEP
+    UI_TITLE="$1"; UI_STEP_START=$(date +%s)
+    echo "$(date '+%F %T') -- $1" >> "$LOG"
+    if [ $UI_TTY -eq 1 ]; then
+        echo "$UI_STEP" > "$UI_TICKFILE"
+        ( trap 'exit 0' TERM; i=0; while [ "$(cat "$UI_TICKFILE" 2> /dev/null)" = "$UI_STEP" ] && kill -0 "$UI_MAINPID" 2> /dev/null; do
+            ui_draw "${UI_SPIN[$(( i % ${#UI_SPIN[@]} ))]}"; i=$(( i + 1 )); sleep 0.25; done ) &
+        UI_TICKER=$!
+    else
+        printf -- '-- [%d/%d] %s\n' "$UI_STEP" "$UI_TOTAL" "$1" >&3
+    fi
+}
+ui_done() {
+    ui_end_step
+    if [ $UI_TTY -eq 1 ]; then
+        local width total; width=$(( $(ui_cols) / 4 )); [ $width -lt 10 ] && width=10; [ $width -gt 30 ] && width=30
+        total=$(( $(date +%s) - UI_START ))
+        printf '\r\e[K %s%s%s 100%%  %sall %d steps done in %d:%02d%s\n\n' "$C_GREEN" "$(ui_repeat "$UI_FULL" "$width")" "$C_RESET" "$C_BOLD" "$UI_STEP" $(( total / 60 )) $(( total % 60 )) "$C_RESET" >&3
+    fi
+}
+# stopped early: said on the screen, with the end of the log
+ui_exit() {
+    local rc=$?
+    ui_ticker_stop
+    rm -f "$UI_TICKFILE"
+    if [ -n "$UI_WORKING" ] && [ $rc -ne 0 ]; then
+        [ $UI_TTY -eq 1 ] && printf '\r\e[K' >&3
+        printf '\n' >&3
+        ui_bar "$BG_WARN" "  Stopped at: ${UI_TITLE:-the start}"
+        printf '\n  %s%s%s\n\n%s' "$C_BOLD" "${UI_WHY:-}" "$C_RESET" "$C_DIM" >&3
+        tail -n 12 "$LOG" 2> /dev/null | sed 's/^/  /' >&3
+        printf '%s\n  The whole log: %s\n\n' "$C_RESET" "$LOG" >&3
+    fi
+}
+trap ui_exit EXIT
+# a line for the screen (and the log); a note shown under the step when it ends; a stop
+say() { echo "$*" >&3; echo "$(date '+%F %T') $*" >> "$LOG"; }
+note() { echo "$(date '+%F %T') $*" >> "$LOG"; UI_NOTES+="$*"$'\n'; }
+die() {
+    echo "$(date '+%F %T') STOPPED: $*" >> "$LOG"
+    if [ -n "$UI_WORKING" ]; then UI_WHY="$*"; else echo "STOPPED: $*" >&3; fi
+    exit 1
+}
+run() { "$@" >> "$LOG" 2>&1; }
+
+# ---- The node framework's codes (the same as the panel's sys_nodes class and every Sentora node's
+# installer; NODES.md in this repository): base32 without I, O, 0 and 1.
+# BEGIN node codes
+b32hex() { # hex-digits letters: the first letters of base32 of the hex
+    local hex=$1 n=$2 a=ABCDEFGHJKLMNPQRSTUVWXYZ23456789 out='' half v i
+    for half in 0 10; do
+        [ ${#out} -ge "$n" ] && break
+        v=$((16#${hex:$half:10}))
+        for i in 7 6 5 4 3 2 1 0; do out=$out${a:$(( (v >> (i * 5)) & 31 )):1}; done
+    done
+    echo "${out:0:$n}"
+}
+panel_code() { # node-type public-key: the panel's code, XXXX-XXXX
+    local c; c=$(b32hex "$(printf '%s|%s' "$1" "$2" | sha256sum | cut -c1-20)" 8); echo "${c:0:4}-${c:4:4}"
+}
+ssh_key_code() { # public-key-file: the 16 letters of a node's key
+    b32hex "$(awk '{print $2}' "$1" | base64 -d | sha256sum | cut -c1-20)" 16
+}
+node_key() { # prefix public-key-file: PREFIX-XXXX-XXXX-XXXX-XXXX
+    local c; c=$(ssh_key_code "$2"); echo "$1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}"
+}
+fetch_panel() { # url: the panel's answer (a self-signed panel is fine: the person checks the code)
+    local out
+    if command -v curl > /dev/null 2>&1; then
+        out=$(curl -fsS --max-time 20 --proto =https,http "$1" 2> /dev/null) || out=$(curl -fsSk --max-time 20 --proto =https,http "$1" 2> /dev/null) || return 1
+    elif command -v wget > /dev/null 2>&1; then
+        out=$(wget -qO- -T 20 "$1" 2> /dev/null) || out=$(wget -qO- -T 20 --no-check-certificate "$1" 2> /dev/null) || return 1
+    else
+        return 1
+    fi
+    printf '%s' "$out"
+}
+# END node codes
+
+[ "$(id -u)" -eq 0 ] || die "Run this as root."
+[ -r /etc/os-release ] || die "This system does not say what it is (/etc/os-release)."
+. /etc/os-release
+case "${ID:-}:${VERSION_ID:-}" in
+    ubuntu:26.04) FAMILY=deb ;;
+    *) die "An Elk node runs on Ubuntu 26.04 for now (this is ${PRETTY_NAME:-unknown}); more systems will follow." ;;
+esac
+# ---- What differs between systems: set here once (as the panel keeps its in x_settings). A new system: a new case.
+case "$FAMILY" in
+    deb)
+        PKG_INSTALL="apt-get -y -o Dpkg::Options::=--force-confold install"
+        PACKAGES="ca-certificates curl gnupg openssl ufw chrony python3"
+        CHRONY_SERVICE=chrony ;;
+esac
+# Elastic's own package source (9.x) and the key it signs with
+ELASTIC_REPO=https://artifacts.elastic.co/packages/9.x/apt
+ELASTIC_KEY_URL=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+ELASTIC_KEY_FPR=46095ACC8548582C1A2699A9D27D666CD88E42B4
+CONF=/etc/sentora-elk
+LSD=/etc/logstash/sentora
+ES=https://127.0.0.1:9200
+ADMIN_USER=sentora-admin
+NODE_CN=sentora-elk-node
+if [ -e /etc/sentora/.installing ] || [ -d /etc/sentora/panel ] || [ -d /etc/zpanel ]; then die "This is a Sentora panel server: the Elk node must be a server of its own."; fi
+[ "$UPDATE" = 1 ] && [ ! -f "$CONF/ca.crt" ] && die "--update: there is no Elk node here yet (run the installer without --update)."
+[ "$UPDATE" != 1 ] && [ -f "$CONF/ca.crt" ] && die "This server is already an Elk node: sentora2027-elk-node --update brings it up to date (its logs and logins are kept)."
+MEM_MB=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+[ "${MEM_MB:-0}" -ge 3500 ] || die "This server has ${MEM_MB} MB of memory: the Elastic stack needs at least 4 GB (8 GB or more is better)."
+if [ -n "$RETENTION" ]; then [[ "$RETENTION" =~ ^[0-9]{1,4}$ ]] && [ "$RETENTION" -ge 1 ] && [ "$RETENTION" -le 3650 ] || die "--retention: days, 1 to 3650."; fi
+# (a key's code: the first 16 letters of base32 of the SHA-256 of a certificate's public key, as DER)
+der_key_code() { # certificate-file
+    b32hex "$(openssl x509 -in "$1" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | cut -c1-20)" 16
+}
+spki_b64() { openssl x509 -in "$1" -noout -pubkey | openssl pkey -pubin -outform DER | base64 -w0; }
+if [ "$UPDATE" != 1 ]; then
+    CERTTMP=$(mktemp)
+    if [ -n "$PANELCERT" ]; then
+        cp "$PANELCERT" "$CERTTMP" 2> /dev/null || die "No certificate at $PANELCERT."
+        [ -n "$PANEL" ] || PANEL=https://panel.invalid
+    else
+        if [ -z "$PANEL" ]; then
+            ui_banner "Makes this server the log server (Elasticsearch, Logstash, Kibana) of your Sentora panel"
+            ui_heading "Your panel"
+            printf '  Where is your Sentora panel? Its IP address or its name, as this server can reach it\n  (for example 172.16.1.250 or panel.example.com).\n' >&3
+            ui_ask "The panel's address" "" PANEL
+        fi
+        PANEL=$(printf '%s' "$PANEL" | tr -d '\r' | sed 's/^ *//; s/ *$//')
+        case "$PANEL" in https://*|http://*) ;; *) PANEL="https://$PANEL" ;; esac
+        PANEL=${PANEL%/}
+        [[ "$PANEL" =~ ^https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$ ]] || die "That is not a panel address (an IP address or name, like 172.16.1.250)."
+        fetch_panel "$PANEL/modules/elk/code/node.php?cert=1" > "$CERTTMP" || true
+        [ -s "$CERTTMP" ] || die "Could not get the panel's certificate from $PANEL: is it the panel's address, reachable from here (HTTPS), and is the Elk add-on installed there (Admin > Repo Browser)?"
+    fi
+    openssl x509 -in "$CERTTMP" -noout 2> /dev/null && [ "$(grep -c 'BEGIN CERTIFICATE' "$CERTTMP")" = 1 ] || die "$PANEL did not answer with a certificate: is the Elk add-on installed on that panel?"
+    CODE=$(panel_code sentora-elk "$(spki_b64 "$CERTTMP")")
+    if [ -n "$PANELCODE" ]; then
+        [ "$(printf '%s' "$PANELCODE" | tr a-z A-Z | tr -d ' ')" = "$CODE" ] || die "The panel's code is $CODE, not $PANELCODE: this is not the panel you meant (or something in between answers for it). Nothing was changed."
+    else
+        ui_heading "Check the panel's code"
+        printf '  The panel at %s has the code:\n\n      %s%s%s\n\n  In the panel: Admin > Elk shows its code.\n' "$PANEL" "$C_BOLD$C_GREEN" "$CODE" "$C_RESET" >&3
+        ans=''
+        ui_ask "Is it the same code? (y/n)" "" ans
+        case "$ans" in y|Y|yes|Yes|YES) ;; *) die "Not the same code: nothing was changed. Check the panel's address (and that nothing in between answers for it), then run this again." ;; esac
+    fi
+fi
+[ "$UPDATE" = 1 ] || : > "$LOG"
+touch "$LOG"; chmod 600 "$LOG"
+UI_LOGPOS=$(stat -c %s "$LOG" 2> /dev/null || echo 0)
+[ "$UPDATE" = 1 ] && UI_WHAT=Update
+ui_banner "$(hostname)  -  ${PRETTY_NAME}  -  ${MEM_MB} MB memory"
+echo "$(date '+%F %T') Sentora Elk Node $([ "$UPDATE" = 1 ] && echo update || echo installer), ${PRETTY_NAME}" >> "$LOG"
+UI_WORKING=1
+exec >> "$LOG" 2>&1
+export DEBIAN_FRONTEND=noninteractive
+umask 077
+mkdir -p "$CONF"; chmod 700 "$CONF"
+pw() { openssl rand -base64 33 | tr -dc 'A-Za-z0-9' | cut -c1-24; }
+# a file of Sentora's (Logstash rules, templates, dashboards): from --files, or downloaded
+get() { # path-under-elk-node destination
+    if [ -n "$FILES" ]; then cp "$FILES/$1" "$2"; else curl -fsSL --proto =https --proto-redir =https --retry 3 "${SELK_RAW_BASE:-$RAW_BASE}/$1" -o "$2"; fi
+}
+# Elasticsearch's and Kibana's APIs as the built-in superuser (its password only in $CONF, root's)
+esapi() { # method path [body-file]
+    local a=(-sS --cacert "$CONF/http_ca.crt" -u "elastic:$(cat "$CONF/elastic.pw")" -H 'Content-Type: application/json' -X "$1" "$ES$2")
+    [ -n "${3:-}" ] && a+=(--data-binary "@$3")
+    curl "${a[@]}"
+}
+kbapi() { # method path [body-file]
+    local a=(-sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "elastic:$(cat "$CONF/elastic.pw")" -H 'kbn-xsrf: sentora' -H 'elastic-api-version: 2023-10-31' -H 'Content-Type: application/json' -X "$1" "https://$NODE_CN$2")
+    [ -n "${3:-}" ] && a+=(--data-binary "@$3")
+    curl "${a[@]}"
+}
+export -f esapi kbapi; export CONF ES NODE_CN
+wait_for() { # seconds command...
+    local end=$(( $(date +%s) + $1 )); shift
+    while [ "$(date +%s)" -lt "$end" ]; do "$@" > /dev/null 2>&1 && return 0; sleep 3; done
+    return 1
+}
+
+ui_step "Packages: clock, firewall, tools"
+run apt-get update || die "Could not read the package lists (see $LOG)."
+# shellcheck disable=SC2086
+run $PKG_INSTALL $PACKAGES || die "Could not install the packages (see $LOG)."
+run systemctl enable --now "$CHRONY_SERVICE"
+
+ui_step "Elastic's package source (its signing key checked)"
+KEYTMP=$(mktemp -d)
+curl -fsSL --proto =https "$ELASTIC_KEY_URL" -o "$KEYTMP/key.asc" || die "Could not download Elastic's signing key."
+FPR=$(gpg --batch --with-colons --show-keys "$KEYTMP/key.asc" 2> /dev/null | awk -F: '$1 == "fpr" {print $10; exit}')
+[ "$FPR" = "$ELASTIC_KEY_FPR" ] || die "Elastic's signing key is not the expected one ($FPR): nothing was installed."
+gpg --batch --yes --dearmor -o /usr/share/keyrings/elastic-9.gpg "$KEYTMP/key.asc" || die "Could not keep Elastic's signing key."
+chmod 644 /usr/share/keyrings/elastic-9.gpg; rm -rf "$KEYTMP"
+echo "deb [signed-by=/usr/share/keyrings/elastic-9.gpg] $ELASTIC_REPO stable main" > /etc/apt/sources.list.d/elastic-9.x.list
+chmod 644 /etc/apt/sources.list.d/elastic-9.x.list
+run apt-get update || die "Could not read Elastic's package list (see $LOG)."
+
+ui_step "Elasticsearch, Logstash and Kibana"
+# (the packages print a first password for the built-in user: it is replaced below, and this log is root's)
+run $PKG_INSTALL elasticsearch logstash kibana || die "Could not install the Elastic stack (see $LOG)."
+note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana 2> /dev/null)"
+# Elasticsearch maps its files into memory: the kernel must allow enough maps
+echo 'vm.max_map_count = 262144' > /etc/sysctl.d/90-sentora-elk.conf; chmod 644 /etc/sysctl.d/90-sentora-elk.conf
+run sysctl -p /etc/sysctl.d/90-sentora-elk.conf
+[ "$(cat /proc/sys/vm/max_map_count)" -ge 262144 ] || note "vm.max_map_count is $(cat /proc/sys/vm/max_map_count) (a container may not change it): Elasticsearch runs on this one machine only, so it still starts."
+
+ui_step "Certificates (this node's own, and the panel's)"
+if [ ! -f "$CONF/ca.crt" ]; then
+    # a small authority of this node's own: only it signs this node's certificates; its key stays here
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/ca.key" -out "$CONF/ca.crt" -days 7300 \
+        -subj "/CN=Sentora Elk node CA $(hostname -s)" -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" || die "Could not make this node's certificate authority."
+fi
+ADDR=$(hostname -I 2> /dev/null | awk '{print $1}')
+# the certificate the panel sees on port 6514 (the panel checks the name, signed by this node's authority)
+if [ ! -f "$CONF/node.crt" ]; then
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/node.key" -out "$CONF/node.csr" -subj "/CN=$NODE_CN"
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:%s\n' "$NODE_CN" > "$CONF/node.ext"
+    openssl x509 -req -in "$CONF/node.csr" -CA "$CONF/ca.crt" -CAkey "$CONF/ca.key" -CAcreateserial -out "$CONF/node.crt" -days 3650 -extfile "$CONF/node.ext" || die "Could not make this node's certificate."
+fi
+# the certificate a browser sees on Kibana (its name, its addresses), from the same authority
+if [ ! -f "$CONF/web.crt" ]; then
+    SAN="DNS:$NODE_CN,DNS:$(hostname -f 2> /dev/null || hostname),DNS:localhost,IP:127.0.0.1"
+    for a in $(hostname -I 2> /dev/null); do SAN="$SAN,IP:$a"; done
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/web.key" -out "$CONF/web.csr" -subj "/CN=$(hostname -f 2> /dev/null || hostname)"
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\n' "$SAN" > "$CONF/web.ext"
+    openssl x509 -req -in "$CONF/web.csr" -CA "$CONF/ca.crt" -CAkey "$CONF/ca.key" -CAcreateserial -out "$CONF/web.crt" -days 825 -extfile "$CONF/web.ext" || die "Could not make Kibana's certificate."
+fi
+[ "$UPDATE" != 1 ] && { install -m 600 "$CERTTMP" "$CONF/panel.crt"; rm -f "$CERTTMP"; echo "$PANEL" > "$CONF/panel-url"; }
+openssl verify -CAfile "$CONF/ca.crt" "$CONF/node.crt" > /dev/null || die "This node's certificate does not check out."
+mkdir -p "$LSD"; chmod 750 "$LSD"; chown root:logstash "$LSD"
+install -m 640 -o root -g logstash "$CONF/node.crt" "$LSD/node.crt"
+openssl pkcs8 -topk8 -nocrypt -in "$CONF/node.key" -out "$LSD/node.key.new" && install -m 640 -o root -g logstash "$LSD/node.key.new" "$LSD/node.key"; rm -f "$LSD/node.key.new"
+install -m 640 -o root -g logstash "$CONF/panel.crt" "$LSD/panel.crt"
+mkdir -p /etc/kibana/sentora; chmod 750 /etc/kibana/sentora; chown root:kibana /etc/kibana/sentora
+install -m 640 -o root -g kibana "$CONF/web.crt" /etc/kibana/sentora/web.crt
+install -m 640 -o root -g kibana "$CONF/web.key" /etc/kibana/sentora/web.key
+note "Panel: $(cat "$CONF/panel-url"); its code $(panel_code sentora-elk "$(spki_b64 "$CONF/panel.crt")")."
+
+ui_step "Elasticsearch (this machine only, logins and TLS on)"
+YML=/etc/elasticsearch/elasticsearch.yml
+# (the package's own settings stay; Sentora's block says: one machine, listening on itself only)
+sed -i '/^# BEGIN Sentora Elk node/,/^# END Sentora Elk node/d; s/^cluster.initial_master_nodes:/#&/; s/^http.host:/#&/; s/^transport.host:/#&/; s/^network.host:/#&/' "$YML"
+cat >> "$YML" <<EOF
+# BEGIN Sentora Elk node (sentora2027-elk-node): this one machine, reached only from itself (Logstash, Kibana)
+cluster.name: sentora-elk
+discovery.type: single-node
+network.host: 127.0.0.1
+http.host: 127.0.0.1
+xpack.ml.enabled: false
+# END Sentora Elk node
+EOF
+# memory: Elasticsearch about 40% (at most 31 GB), Logstash 1 GB, Kibana 1 GB, the rest for the system
+HEAP=$(( MEM_MB * 40 / 100 )); [ $HEAP -gt 31744 ] && HEAP=31744; [ $HEAP -lt 1024 ] && HEAP=1024
+printf -- '-Xms%dm\n-Xmx%dm\n' $HEAP $HEAP > /etc/elasticsearch/jvm.options.d/sentora.options
+chmod 644 /etc/elasticsearch/jvm.options.d/sentora.options
+note "Memory: Elasticsearch ${HEAP} MB, Logstash 1 GB, Kibana 1 GB (of ${MEM_MB} MB)."
+run systemctl daemon-reload
+run systemctl enable elasticsearch
+run systemctl restart elasticsearch || die "Elasticsearch did not start (see $LOG and journalctl -u elasticsearch)."
+install -m 600 /etc/elasticsearch/certs/http_ca.crt "$CONF/http_ca.crt" || die "Elasticsearch has no certificate (the package's security setup did not run)."
+install -m 640 -o root -g logstash /etc/elasticsearch/certs/http_ca.crt "$LSD/http_ca.crt"
+install -m 640 -o root -g kibana /etc/elasticsearch/certs/http_ca.crt /etc/kibana/sentora/http_ca.crt
+wait_for 180 curl -s --cacert "$CONF/http_ca.crt" "$ES" || die "Elasticsearch does not answer (see journalctl -u elasticsearch)."
+if [ ! -s "$CONF/elastic.pw" ]; then
+    /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s > "$CONF/elastic.pw.new" 2>> "$LOG" && [ -s "$CONF/elastic.pw.new" ] || die "Could not set the built-in user's password."
+    tr -d '\r\n' < "$CONF/elastic.pw.new" > "$CONF/elastic.pw"; rm -f "$CONF/elastic.pw.new"; chmod 600 "$CONF/elastic.pw"
+fi
+wait_for 120 bash -c "esapi GET /_cluster/health | grep -Eq '\"status\":\"(green|yellow)\"'" || die "Elasticsearch is not ready (see journalctl -u elasticsearch)."
+
+ui_step "Sentora's logs in Elasticsearch: template, keeping time, users"
+mkdir -p "$CONF/files"
+for f in elasticsearch/ilm-policy.json elasticsearch/index-template.json logstash/sentora.conf; do
+    get "$f" "$CONF/files/$(basename "$f")" || die "Could not get $f."
+done
+python3 -I -c 'import json,sys; [json.load(open(f)) for f in sys.argv[1:]]' "$CONF/files/ilm-policy.json" "$CONF/files/index-template.json" || die "Sentora's Elasticsearch files are damaged."
+[ -n "$RETENTION" ] && echo "$RETENTION" > "$CONF/retention"
+[ -s "$CONF/retention" ] || echo 30 > "$CONF/retention"
+DAYS=$(cat "$CONF/retention")
+sed "s/RETENTION_DAYS/$DAYS/g" "$CONF/files/ilm-policy.json" > "$CONF/files/ilm.json"
+esapi PUT /_ilm/policy/sentora-logs "$CONF/files/ilm.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the keeping time (see $LOG)."
+esapi PUT /_index_template/logs-sentora "$CONF/files/index-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused Sentora's template (see $LOG)."
+# Logstash may only add lines to Sentora's logs; the administrators read them (and use Kibana) and change nothing else
+printf '%s' '{"cluster":["monitor","manage_index_templates","manage_ilm"],"indices":[{"names":["logs-sentora-*"],"privileges":["create_doc","create_index","auto_configure","view_index_metadata"]}]}' > "$CONF/files/role-writer.json"
+printf '%s' '{"cluster":["monitor"],"indices":[{"names":["logs-sentora-*"],"privileges":["read","view_index_metadata","monitor"]}],"applications":[{"application":"kibana-.kibana","privileges":["all"],"resources":["*"]}]}' > "$CONF/files/role-reader.json"
+esapi PUT /_security/role/sentora_logstash_writer "$CONF/files/role-writer.json" | grep -q '"role"' || die "Could not make Logstash's role."
+esapi PUT /_security/role/sentora_admin "$CONF/files/role-reader.json" | grep -q '"role"' || die "Could not make the administrators' role."
+[ -s "$CONF/logstash.pw" ] || { pw > "$CONF/logstash.pw"; chmod 600 "$CONF/logstash.pw"; }
+printf '{"password":"%s","roles":["sentora_logstash_writer"],"full_name":"Logstash (the panel'"'"'s logs)"}' "$(cat "$CONF/logstash.pw")" > "$CONF/files/u.json"
+esapi PUT /_security/user/sentora_logstash "$CONF/files/u.json" | grep -q '"created"' || die "Could not make Logstash's user."
+NEWADMINPW=''
+if ! esapi GET "/_security/user/$ADMIN_USER" | grep -q "\"$ADMIN_USER\""; then
+    NEWADMINPW=$(pw)
+    printf '{"password":"%s","roles":["sentora_admin"],"full_name":"Sentora administrator"}' "$NEWADMINPW" > "$CONF/files/u.json"
+    esapi PUT "/_security/user/$ADMIN_USER" "$CONF/files/u.json" | grep -q '"created":true' || die "Could not make Kibana's login."
+fi
+rm -f "$CONF/files/u.json"
+note "Logs are kept $DAYS days (sentora-elk-node retention DAYS)."
+
+ui_step "Logstash (port 6514: the panel's certificate only)"
+cp "$CONF/files/sentora.conf" /etc/logstash/conf.d/sentora.conf; chown root:logstash /etc/logstash/conf.d/sentora.conf; chmod 640 /etc/logstash/conf.d/sentora.conf
+mkdir -p /etc/systemd/system/logstash.service.d
+printf 'SENTORA_ES_PASSWORD=%s\nLS_JAVA_OPTS=-Xms1g -Xmx1g\n' "$(cat "$CONF/logstash.pw")" > "$CONF/logstash.env"; chmod 600 "$CONF/logstash.env"
+cat > /etc/systemd/system/logstash.service.d/sentora.conf <<EOF
+# Sentora Elk node: Logstash's password for Elasticsearch (read by systemd as root; only root can read the file)
+[Service]
+EnvironmentFile=$CONF/logstash.env
+EOF
+chmod 644 /etc/systemd/system/logstash.service.d/sentora.conf
+# (the rules are checked before they are used)
+LSDATA=$(mktemp -d); chown logstash: "$LSDATA"
+if ! SENTORA_ES_PASSWORD=x runuser -u logstash -- /usr/share/logstash/bin/logstash --path.settings /etc/logstash --path.data "$LSDATA" -t -f /etc/logstash/conf.d/sentora.conf > "$CONF/lstest.log" 2>&1; then
+    rm -rf "$LSDATA"
+    cat "$CONF/lstest.log" >> "$LOG"; die "Logstash refused Sentora's rules (see $LOG)."
+fi
+rm -rf "$LSDATA"
+run systemctl daemon-reload
+run systemctl enable logstash
+run systemctl restart logstash || die "Logstash did not start (see journalctl -u logstash)."
+
+ui_step "Kibana (https://$ADDR/, its own login)"
+KYML=/etc/kibana/kibana.yml
+sed -i '/^# BEGIN Sentora Elk node/,/^# END Sentora Elk node/d' "$KYML"
+cat >> "$KYML" <<EOF
+# BEGIN Sentora Elk node (sentora2027-elk-node)
+server.host: "0.0.0.0"
+server.port: 443
+server.publicBaseUrl: "https://$ADDR"
+server.ssl.enabled: true
+server.ssl.certificate: /etc/kibana/sentora/web.crt
+server.ssl.key: /etc/kibana/sentora/web.key
+elasticsearch.hosts: ["$ES"]
+elasticsearch.username: "kibana_system"
+elasticsearch.ssl.certificateAuthorities: ["/etc/kibana/sentora/http_ca.crt"]
+telemetry.optIn: false
+telemetry.allowChangingOptInStatus: false
+# END Sentora Elk node
+EOF
+mkdir -p /etc/systemd/system/kibana.service.d
+cat > /etc/systemd/system/kibana.service.d/sentora.conf <<'EOF'
+# Sentora Elk node: Kibana answers on 443 (https) without running as root
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+EOF
+chmod 644 /etc/systemd/system/kibana.service.d/sentora.conf
+grep -q 'max-old-space-size' /etc/kibana/node.options || echo '--max-old-space-size=1024' >> /etc/kibana/node.options
+KS=/usr/share/kibana/bin/kibana-keystore
+[ -f /etc/kibana/kibana.keystore ] || runuser -u kibana -- "$KS" create >> "$LOG" 2>&1
+if [ ! -s "$CONF/kibana_system.pw" ]; then
+    /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b -s > "$CONF/kibana_system.pw.new" 2>> "$LOG" && [ -s "$CONF/kibana_system.pw.new" ] || die "Could not set Kibana's own password."
+    tr -d '\r\n' < "$CONF/kibana_system.pw.new" > "$CONF/kibana_system.pw"; rm -f "$CONF/kibana_system.pw.new"; chmod 600 "$CONF/kibana_system.pw"
+    tr -d '\n' < "$CONF/kibana_system.pw" | runuser -u kibana -- "$KS" add -x -f --stdin elasticsearch.password >> "$LOG" 2>&1
+    for k in xpack.security.encryptionKey xpack.encryptedSavedObjects.encryptionKey xpack.reporting.encryptionKey; do
+        openssl rand -hex 32 | tr -d '\n' | runuser -u kibana -- "$KS" add -x -f --stdin "$k" >> "$LOG" 2>&1
+    done
+fi
+run systemctl daemon-reload
+run systemctl enable kibana
+run systemctl restart kibana || die "Kibana did not start (see journalctl -u kibana)."
+wait_for 300 bash -c 'kbapi GET /api/status | grep -q "\"level\":\"available\""' || die "Kibana is not ready after 5 minutes (see journalctl -u kibana)."
+
+ui_step "Sentora's dashboards"
+printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
+kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-logs"' || die "Kibana refused the data view (see $LOG)."
+printf '%s' '{"changes":{"defaultIndex":"sentora-logs","defaultRoute":"/app/dashboards#/view/sentora-overview","theme:darkMode":"system"}}' > "$CONF/files/ui.json"
+kbapi POST /api/kibana/settings "$CONF/files/ui.json" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme (Overview, light or dark as the computer is)"
+n=0
+for d in sentora-overview sentora-websites sentora-mail sentora-security sentora-panel; do
+    get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
+    out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
+    if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
+done
+note "$n dashboards (Sentora: Overview, Websites, Mail, Security, Panel and server)."
+
+cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
+#!/bin/bash
+# Sentora Elk node: what it does, and its few settings.
+#   sentora-elk-node status            the services, the logs kept, the disk
+#   sentora-elk-node key               this node's key, for the panel's "Add the Elk node"
+#   sentora-elk-node password          a new password for Kibana's sentora-admin login
+#   sentora-elk-node retention DAYS    keep the logs DAYS days (1-3650)
+#   sentora-elk-node kibana-from LIST  who may open Kibana: "any", or addresses/networks (203.0.113.5 10.0.0.0/8)
+#   sentora-elk-node panel-from LIST   the panel's address as this server sees it ("any": the certificate only)
+#   sentora-elk-node firewall          make the firewall rules again from those two lists
+#   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
+set -u
+[ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
+C=/etc/sentora-elk
+es() { curl -sS --cacert $C/http_ca.crt -u "elastic:$(cat $C/elastic.pw)" -H 'Content-Type: application/json' "$@"; }
+ip_list() { local a; for a in "$@"; do [ "$a" = any ] || [[ "$a" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?$ ]] || { echo "Not an address or network: $a"; exit 2; }; done; }
+case "${1:-status}" in
+    status)
+        for s in elasticsearch logstash kibana; do printf '%-14s %s\n' "$s" "$(systemctl is-active $s)"; done
+        echo "Logs kept:     $(cat $C/retention) days"
+        es "https://127.0.0.1:9200/_data_stream/logs-sentora-*/_stats?human" 2> /dev/null | python3 -I -c 'import json,sys
+try:
+    d = json.load(sys.stdin); print("Stored:        %s in %s parts" % (d.get("total_store_size", "?"), d.get("backing_indices", "?")))
+except Exception: print("Stored:        nothing yet")'
+        df -h /var/lib/elasticsearch | awk 'NR == 2 {print "Disk:          " $3 " used, " $4 " free (" $5 ")"}'
+        echo "Kibana from:   $(cat $C/kibana-from)    Panel from: $(cat $C/panel-from)" ;;
+    key)
+        h=$(openssl x509 -in $C/ca.crt -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum | cut -c1-20); a=ABCDEFGHJKLMNPQRSTUVWXYZ23456789; c=''
+        for half in 0 10; do v=$((16#${h:$half:10})); for i in 7 6 5 4 3 2 1 0; do c=$c${a:$(( (v >> (i * 5)) & 31 )):1}; done; done
+        echo "SE1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}"
+        echo "Address: $(hostname -I 2> /dev/null | awk '{print $1}')   (in the panel: Admin > Elk > Add the Elk node)" ;;
+    password)
+        p=$(openssl rand -base64 33 | tr -dc 'A-Za-z0-9' | cut -c1-24)
+        es -X POST https://127.0.0.1:9200/_security/user/sentora-admin/_password -d "{\"password\":\"$p\"}" | grep -q '{}' || { echo "Elasticsearch refused it."; exit 1; }
+        echo "Kibana: https://$(hostname -I | awk '{print $1}')/   login: sentora-admin   password: $p" ;;
+    retention)
+        d=${2:-}; [[ "$d" =~ ^[0-9]{1,4}$ ]] && [ "$d" -ge 1 ] && [ "$d" -le 3650 ] || { echo "sentora-elk-node retention DAYS (1-3650)"; exit 2; }
+        es -X PUT https://127.0.0.1:9200/_ilm/policy/sentora-logs --data-binary "$(sed "s/RETENTION_DAYS/$d/g" $C/files/ilm-policy.json)" | grep -q acknowledged || { echo "Elasticsearch refused it."; exit 1; }
+        echo "$d" > $C/retention; echo "Logs are now kept $d days (older ones go within a day)." ;;
+    kibana-from|panel-from)
+        w=$1; shift; [ $# -ge 1 ] || { echo "sentora-elk-node $w any | ADDRESS-OR-NETWORK..."; exit 2; }; ip_list "$@"
+        echo "$*" > $C/$w; exec "$0" firewall ;;
+    firewall)
+        # SSH stays open; Kibana (443) and the panel's logs (6514) from the two lists; Sentora's rules made anew
+        ports=$(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -u); ports=${ports:-22}
+        [ -n "${SSH_CONNECTION:-}" ] && ports="$ports ${SSH_CONNECTION##* }"
+        for p in $ports; do ufw allow "$p/tcp" > /dev/null; done
+        for r in $(ufw status numbered 2> /dev/null | grep sentora-elk | sed -n 's/^\[ *\([0-9]*\)\].*/\1/p' | sort -rn); do ufw --force delete "$r" > /dev/null; done
+        for a in $(cat $C/kibana-from); do if [ "$a" = any ]; then ufw allow 443/tcp comment sentora-elk-kibana; else ufw allow from "$a" to any port 443 proto tcp comment sentora-elk-kibana; fi; done > /dev/null
+        for a in $(cat $C/panel-from); do if [ "$a" = any ]; then ufw allow 6514/tcp comment sentora-elk-panel; else ufw allow from "$a" to any port 6514 proto tcp comment sentora-elk-panel; fi; done > /dev/null
+        if ! ufw status 2> /dev/null | grep -q '^Status: active'; then ufw default deny incoming > /dev/null; ufw default allow outgoing > /dev/null; ufw --force enable > /dev/null; fi
+        ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
+        echo "Firewall: SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 from $(cat $C/panel-from)." ;;
+    update) exec bash /usr/local/lib/sentora-elk/installer --update ;;
+    *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+TOOL_EOF
+chmod 700 /usr/local/sbin/sentora-elk-node
+
+ui_step "Firewall (SSH, Kibana, and the panel on 6514)"
+if [ "$UPDATE" != 1 ] && [ ! -s "$CONF/panel-from" ]; then
+    PHOST=$(cat "$CONF/panel-url"); PHOST=${PHOST#*://}; PHOST=${PHOST%%:*}
+    PIP=$(getent ahostsv4 "$PHOST" 2> /dev/null | awk '{print $1; exit}')
+    echo "${PIP:-any}" > "$CONF/panel-from"
+fi
+[ -s "$CONF/kibana-from" ] || echo any > "$CONF/kibana-from"
+out=$(/usr/local/sbin/sentora-elk-node firewall 2>&1) && note "$out" || echo "WARNING: $out"
+if command -v aa-status > /dev/null 2>&1 && aa-status --enabled 2> /dev/null; then note "AppArmor is on: nothing was widened."; fi
+
+ui_step "Checking: the panel's door, the logins"
+for s in elasticsearch logstash kibana; do systemctl is-active --quiet "$s" || echo "WARNING: $s is not running (journalctl -u $s)"; done
+wait_for 180 bash -c 'echo > /dev/tcp/127.0.0.1/6514' || echo "WARNING: Logstash does not listen on 6514 yet (journalctl -u logstash)"
+# a connection without the panel's certificate must be turned away
+if printf '{"message":"x"}\n' | timeout 10 openssl s_client -connect 127.0.0.1:6514 -CAfile "$CONF/ca.crt" -verify_return_error -quiet > "$CONF/door.txt" 2>&1 && ! grep -qi 'alert\|error' "$CONF/door.txt"; then
+    echo "WARNING: port 6514 took a connection without the panel's certificate"
+else
+    note "Port 6514 turns away anyone without the panel's certificate."
+fi
+rm -f "$CONF/door.txt"
+mkdir -p /usr/local/lib/sentora-elk; chmod 700 /usr/local/lib/sentora-elk
+if [ -f "$0" ] && [ "$0" != /usr/local/lib/sentora-elk/installer ]; then cp "$0" /usr/local/lib/sentora-elk/installer; chmod 700 /usr/local/lib/sentora-elk/installer; fi
+[ -n "$FILES" ] && echo "$FILES" > "$CONF/files-dir"
+
+ui_done
+UI_WORKING=''
+NODEKEY=$(c=$(der_key_code "$CONF/ca.crt"); echo "SE1-${c:0:4}-${c:4:4}-${c:8:4}-${c:12:4}")
+if [ $UI_TTY -eq 1 ]; then ui_bar "$BG_OK" "  $([ "$UPDATE" = 1 ] && echo "This Elk node is up to date" || echo "This Elk node is ready")"; echo >&3; fi
+if [ "$UPDATE" = 1 ]; then
+    say "Done: this Elk node is up to date."
+else
+    say "Done: this server is ready for the logs of $(cat "$CONF/panel-url")."
+    say ""
+    say "Last step, in the panel: Admin > Elk > Add the Elk node:"
+    say "    Address:          ${C_BOLD}${ADDR:-(its address)}${C_RESET}"
+    say "    Elk node key:     ${C_BOLD}${C_GREEN}$NODEKEY${C_RESET}"
+    say ""
+    say "Kibana: https://${ADDR}/   (the browser warns once: the certificate is this node's own)"
+    say "    login:     ${C_BOLD}$ADMIN_USER${C_RESET}"
+    [ -n "$NEWADMINPW" ] && say "    password:  ${C_BOLD}$NEWADMINPW${C_RESET}   (write it down: it is not kept here; sentora-elk-node password makes a new one)"
+fi
+say "Status: sentora-elk-node status    Log: $LOG"

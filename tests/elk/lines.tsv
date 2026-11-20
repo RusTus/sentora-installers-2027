@@ -1,0 +1,163 @@
+# kind<TAB>account<TAB>domain<TAB>line: real lines from a Sentora panel (Debian 13, the VM test's exercise) and a few made-up attacks, for the Elk node test
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:24 +0000] "POST /vmtest.php HTTP/1.1" 200 586 "-" "curl/8.14.1"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:24 +0000] "GET /no-such-page-6a3b07 HTTP/1.1" 404 381 "-" "curl/8.14.1"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:31 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:32 +0000] "GET /private/ HTTP/1.1" 401 610 "-" "curl/8.14.1"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - vm [20/Nov/2026:20:09:32 +0000] "GET /private/ HTTP/1.1" 200 278 "-" "curl/8.14.1"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:34 +0000] "GET /vmtest.php HTTP/1.1" 200 587 "-" "curl/8.14.1"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:48 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-access	vmxelk6a3b07	vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:10:08 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-access	vmxelk6a3b07	www2.vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:31 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-access	vmxelk6a3b07	www2.vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:09:48 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-access	vmxelk6a3b07	www2.vmx6a3b07.test	127.0.0.1 - - [20/Nov/2026:20:10:08 +0000] "GET / HTTP/1.1" 403 403 "-" "Sentora-SiteHealth/1.0"
+web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 20:09:24.364991 2026] [proxy_fcgi:error] [pid 45238:tid 45331] [client 127.0.0.1:60318] AH01071: Got error 'PHP message: vmtest error_log line'
+web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 20:09:31.654708 2026] [autoindex:error] [pid 45238:tid 45314] [client 127.0.0.1:55984] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 20:09:34.793594 2026] [proxy_fcgi:error] [pid 45238:tid 45317] [client 127.0.0.1:56002] AH01071: Got error 'PHP message: vmtest error_log line'
+web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 20:09:48.227615 2026] [autoindex:error] [pid 45236:tid 45342] [client 127.0.0.1:52574] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+web-error	vmxelk6a3b07	vmx6a3b07.test	[Fri Nov 20 20:10:08.391741 2026] [autoindex:error] [pid 50896:tid 50978] [client 127.0.0.1:42550] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+web-error	vmxelk6a3b07	www2.vmx6a3b07.test	[Fri Nov 20 20:09:31.662871 2026] [autoindex:error] [pid 45236:tid 45294] [client 127.0.0.1:55988] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/www2_vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+web-error	vmxelk6a3b07	www2.vmx6a3b07.test	[Fri Nov 20 20:09:48.235095 2026] [autoindex:error] [pid 45238:tid 45306] [client 127.0.0.1:52576] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/www2_vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+web-error	vmxelk6a3b07	www2.vmx6a3b07.test	[Fri Nov 20 20:10:08.400649 2026] [autoindex:error] [pid 50896:tid 50992] [client 127.0.0.1:42556] AH01276: Cannot serve directory /var/sentora/hostdata/vmxelk6a3b07/public_html/www2_vmx6a3b07_test/: No matching DirectoryIndex (index.html,index.htm,index.php,index.asp,index.aspx,index.jsp,index.jspa,index.shtml,index.shtm) found, and server-generated directory index forbidden by Options directive
+panel-access			127.0.0.1 - - [20/Nov/2026:20:08:35 +0000] "GET /?module=system_logviewer HTTP/2.0" 200 62499 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:16 +0000] "GET /?module=manage_groups HTTP/2.0" 200 39601 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:15 +0000] "GET /?module=dns_admin HTTP/2.0" 200 39646 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:08:33 +0000] "GET /?module=mailboxes HTTP/2.0" 200 52961 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:08:46 +0000] "GET /modules/system_logviewer/code/read.php?id=c6201ef31362691f HTTP/2.0" 200 10041 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:10:04 +0000] "POST /etc/apps/matomo// HTTP/1.1" 200 4253 "-" "Matomo/LogImport"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:16 +0000] "GET /?module=my_account HTTP/2.0" 200 46906 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:10 +0000] "POST /etc/apps/matomo// HTTP/1.1" 200 4213 "-" "Matomo/LogImport"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:17 +0000] "GET /?module=password_assistant HTTP/2.0" 200 44469 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:15 +0000] "GET /?module=mail_admin HTTP/2.0" 200 39658 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:08:31 +0000] "GET /?module=backup_admin HTTP/2.0" 200 61591 "-" "curl/8.14.1"
+panel-access			127.0.0.1 - - [20/Nov/2026:20:09:16 +0000] "GET /?module=mysql_databases HTTP/2.0" 200 44741 "-" "curl/8.14.1"
+panel-error			[Fri Nov 20 20:09:24.514545 2026] [proxy_fcgi:error] [pid 45238:tid 45258] [remote 127.0.0.1:51206] AH01071: Got error 'Primary script unknown'
+dovecot			2026-11-20 20:07:54 master: Info: Dovecot v2.4.1-4 (7d8c0e5759) starting up for imap, pop3, lmtp, sieve (core dumps disabled)
+dovecot			2026-11-20 20:09:24 imap-login: Info: Logged in: user=<box@vmx6a3b07.test>, method=PLAIN, rip=127.0.0.1, lip=127.0.0.1, mpid=49242, TLS, session=<C1sJ0rpgjqh/AAAB>
+dovecot			2026-11-20 20:09:18 imap-login: Info: Login aborted: Connection closed (disconnected during TLS handshake) (tls_handshake_not_finished): user=<>, rip=127.0.0.1, lip=127.0.0.1, TLS handshaking: Connection closed, session=<6rmp0bpgPpJ/AAAB>
+dovecot			2026-11-20 20:09:24 imap-login: Info: Logged in: user=<box@vmx6a3b07.test>, method=PLAIN, rip=127.0.0.1, lip=127.0.0.1, mpid=49401, secured, session=<VcAR0rpgULZ/AAAB>
+dovecot			2026-11-20 20:08:45 pop3-login: Info: Login aborted: Connection closed: SSL_accept() failed: error:0A0000F4:SSL routines::unexpected message (disconnected during TLS handshake) (tls_handshake_not_finished): user=<>, rip=127.0.0.1, lip=127.0.0.1, TLS handshaking: SSL_accept() failed: error:0A0000F4:SSL routines::unexpected message, session=<R7Wyz7pgcOF/AAAB>
+dovecot			2026-11-20 20:08:44 imap-login: Info: Login aborted: Connection closed: SSL_accept() failed: error:0A0000C1:SSL routines::no shared cipher (disconnected during TLS handshake) (tls_handshake_not_finished): user=<>, rip=127.0.0.1, lip=127.0.0.1, TLS handshaking: SSL_accept() failed: error:0A0000C1:SSL routines::no shared cipher, session=<auuxz7pg5t9/AAAB>
+dovecot			2026-11-20 20:10:19 log(38040): Warning: Killed with signal 15 (by pid=1 uid=0 code=kill)
+dovecot			2026-11-20 20:09:24 imap(box@vmx6a3b07.test)<49268><oyUM0rpglKh/AAAB>: Info: Disconnected: Logged out in=129 out=1458 deleted=0 expunged=0 trashed=0 hdr_count=0 hdr_bytes=0 body_count=1 body_bytes=386
+dovecot			2026-11-20 20:08:33 auth: Warning: Weak password schemes are allowed
+dovecot			2026-11-20 20:04:19 master: Error: bind(/var/spool/postfix/private/auth) failed: No such file or directory
+dovecot			2026-11-20 20:09:23 imap(box@vmx6a3b07.test)<49230><9noE0rpgeKh/AAAB>: Info: Disconnected: Logged out in=130 out=1737 deleted=0 expunged=0 trashed=0 hdr_count=0 hdr_bytes=0 body_count=1 body_bytes=673
+dovecot			2026-11-20 20:08:42 imap-login: Info: Login aborted: Connection closed: SSL_accept() failed: error:0A0000C1:SSL routines::no shared cipher (disconnected during TLS handshake) (tls_handshake_not_finished): user=<>, rip=127.0.0.1, lip=127.0.0.1, TLS handshaking: SSL_accept() failed: error:0A0000C1:SSL routines::no shared cipher, session=<8rmIz7pg0N9/AAAB>
+ftp-login			Sentora FTP Server [48750] 127.0.0.1 [20/Nov/2026:20:09:20 +0000] "PASS (hidden)" 230
+ftp-login			Sentora FTP Server [48759] 127.0.0.1 [20/Nov/2026:20:09:22 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48750] 127.0.0.1 [20/Nov/2026:20:09:20 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48757] 127.0.0.1 [20/Nov/2026:20:09:21 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48754] 127.0.0.1 [20/Nov/2026:20:09:21 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48742] 127.0.0.1 [20/Nov/2026:20:09:19 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48742] 127.0.0.1 [20/Nov/2026:20:09:19 +0000] "PASS (hidden)" 230
+ftp-login			Sentora FTP Server [48754] 127.0.0.1 [20/Nov/2026:20:09:21 +0000] "PASS (hidden)" 230
+ftp-login			Sentora FTP Server [48752] 127.0.0.1 [20/Nov/2026:20:09:20 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48761] 127.0.0.1 [20/Nov/2026:20:09:22 +0000] "USER vmxelk6a3b07_ftp" 331
+ftp-login			Sentora FTP Server [48759] 127.0.0.1 [20/Nov/2026:20:09:22 +0000] "PASS (hidden)" 230
+ftp-login			Sentora FTP Server [48752] 127.0.0.1 [20/Nov/2026:20:09:20 +0000] "PASS (hidden)" 230
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNFR sub/dir/two.txt" 350 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:22 +0000] "RMD sub/dir" 250 -
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNTO renamed.txt" 250 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNTO sub/dir/two.txt" 250 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNFR renamed.txt" 350 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:22 +0000] "DELE renamed.txt" 250 14
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RETR renamed.txt" 226 14
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNFR sub/swap.tmp" 350 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:21 +0000] "RNTO sub/swap.tmp" 250 0
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:20 +0000] "MKD dir" 257 -
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:22 +0000] "RMD sub" 250 -
+ftp			127.0.0.1 UNKNOWN vmxelk6a3b07_ftp [20/Nov/2026:20:09:19 +0000] "STOR one.txt" 226 13
+dns			20-Nov-2026 20:06:16.984 general: notice: FIPS mode is disabled
+dns			20-Nov-2026 20:08:03.716 general: notice: all zones loaded
+dns			20-Nov-2026 20:10:13.912 general: notice: all zones loaded
+dns			20-Nov-2026 20:08:40.248 general: notice: running
+dns			20-Nov-2026 20:09:01.540 general: notice: running
+dns			20-Nov-2026 20:10:01.960 general: notice: FIPS mode is disabled
+dns			20-Nov-2026 20:09:48.624 general: notice: FIPS mode is disabled
+dns			20-Nov-2026 20:09:31.984 general: notice: all zones loaded
+dns			20-Nov-2026 20:11:16.116 general: notice: all zones loaded
+dns			20-Nov-2026 20:08:03.716 general: notice: FIPS mode is disabled
+dns			20-Nov-2026 20:10:13.912 general: notice: running
+dns			20-Nov-2026 20:10:13.912 general: notice: FIPS mode is disabled
+fail2ban			2026-11-20 20:07:49,633 fail2ban.filter         [37328]: INFO    Added logfile: '/var/log/dovecot-info.log' (pos = 0, hash = )
+fail2ban			2026-11-20 20:07:49,636 fail2ban.filter         [37328]: INFO      maxRetry: 5
+fail2ban			2026-11-20 20:07:49,633 fail2ban.datedetector   [37328]: INFO      date pattern `'^%Y-%m-%d %H:%M:%S'`: `^Year-Month-Day 24hour:Minute:Second`
+fail2ban			2026-11-20 20:07:49,636 fail2ban.filter         [37328]: INFO    Added logfile: '/var/lib/sentora/sentora-auth.log' (pos = 0, hash = )
+fail2ban			2026-11-20 20:07:49,636 fail2ban.filter         [37328]: INFO      findtime: 600
+fail2ban			2026-11-20 20:07:49,633 fail2ban.jail           [37328]: INFO    Jail 'sentora-proftpd' uses pyinotify {}
+fail2ban			2026-11-20 20:07:49,630 fail2ban.actions        [37328]: INFO      banTime: 3600
+fail2ban			2026-11-20 20:07:49,632 fail2ban.jail           [37328]: INFO    Initiated 'pyinotify' backend
+fail2ban			2026-11-20 20:07:49,645 fail2ban.jail           [37328]: INFO    Jail 'sentora-phpmyadmin' started
+fail2ban			2026-11-20 20:07:49,612 fail2ban.database       [37328]: INFO    Connected to fail2ban persistent database '/var/lib/fail2ban/fail2ban.sqlite3'
+fail2ban			2026-11-20 20:07:49,631 fail2ban.filtersystemd  [37328]: INFO    [postfix-sasl] Added journal match for: '_SYSTEMD_UNIT=postfix.service _SYSTEMD_UNIT=postfix@-.service'
+fail2ban			2026-11-20 20:07:49,637 fail2ban.filter         [37328]: INFO    Added logfile: '/var/lib/sentora/phpmyadmin-auth.log' (pos = 0, hash = )
+zsudo			2026-11-20 20:08:42  ran hardening-check
+zsudo			2026-11-20 20:09:26  ran daemon-run
+zsudo			2026-11-20 20:11:16    service apache2 reload
+zsudo			2026-11-20 20:08:36  ran daemon-run
+zsudo			2026-11-20 20:09:01  ran service
+zsudo			2026-11-20 20:09:13    service apache2 reload
+zsudo			2026-11-20 20:08:40  ran hardening-check
+zsudo			2026-11-20 20:06:49    service named reload
+zsudo			2026-11-20 20:06:49  ran service
+zsudo			2026-11-20 20:09:03  ran daemon-run
+zsudo			2026-11-20 20:11:16  ran service
+zsudo			2026-11-20 20:09:48    service named reload
+daemon			2026-11-20T20:08:36+00:00 - 001 - Daemon execution started...
+daemon			2026-11-20T20:09:01+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:10:01+00:00 - 001 - Daemon execution started...
+daemon			2026-11-20T20:07:38+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:09:03+00:00 - 001 - Daemon execution started...
+daemon			2026-11-20T20:11:16+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:06:45+00:00 - 001 - Daemon execution started...
+daemon			2026-11-20T20:08:49+00:00 - 001 - Daemon execution started...
+daemon			2026-11-20T20:09:48+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:09:13+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:08:40+00:00 - 001 - Daemon execution completed!
+daemon			2026-11-20T20:09:31+00:00 - 001 - Daemon execution completed!
+problems			2026-11-20 20:07:37  clamav: Fri Nov 20 20:04:59 2026 -> WARNING: Clamd was NOT notified: Can't connect to clamd through /var/run/clamav/clamd.ctl: No such file or directory
+problems			2026-11-20 20:09:28  postfix/pipe: 2026-11-20 20:09:23 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:09:28  postfix/sendmail: 2026-11-20 20:09:24 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:08:38  postfix/postlog: 2026-11-20 20:07:54 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:09:09  postfix/postqueue: 2026-11-20 20:09:08 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:08:38  postfix/master: 2026-11-20 20:07:54 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:08:52  postfix/smtps/smtpd: 2026-11-20 20:08:42 warning: TLS library problem: error:0A0000C1:SSL routines::no shared cipher:../ssl/statem/statem_srvr.c:2361:
+problems			2026-11-20 20:07:37  postfix/proxymap: 2026-11-20 20:07:19 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:08:38  postfix/postdrop: 2026-11-20 20:08:37 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:07:37  postfix/postsuper: 2026-11-20 20:07:19 warning: inet_protocols: disabling IPv6 name/address support: Address family not supported by protocol
+problems			2026-11-20 20:07:37  clamav: Fri Nov 20 20:04:51 2026 -> WARNING: Invalid DNS reply. Falling back to HTTP mode.
+problems			2026-11-20 20:08:38  sogo: Nov 20 20:08:33 sogod [38073]: [ERROR] <0x0x561f89a240d0[WOHttpAdaptor]> http server caught: (null)
+mail			postfix/qmgr[38034]: 4EAEA38E9C2: from=<root@panel.elk.test>, size=580, nrcpt=1 (queue active)
+mail			postfix/smtp[41684]: 4EAEA38E9C2: to=<admin@elk.test>, relay=none, delay=0.02, delays=0.01/0.01/0/0, dsn=5.4.4, status=bounced (Host or domain name not found. Name service error for name=elk.test type=A: Host not found)
+mail			postfix/qmgr[38034]: 53CA338E9C5: from=<>, size=2567, nrcpt=1 (queue active)
+mail			postfix/smtp[41684]: 53CA338E9C5: to=<root@panel.elk.test>, relay=none, delay=0, delays=0/0/0/0, dsn=5.4.6, status=bounced (mail for panel.elk.test loops back to myself)
+mail			postfix/qmgr[38034]: 7FF4C38E253: from=<box@vmx6a3b07.test>, size=560, nrcpt=1 (queue active)
+mail			postfix/pipe[49211]: 7FF4C38E253: to=<box@vmx6a3b07.test>, relay=dovecot, delay=0.06, delays=0.02/0.01/0/0.03, dsn=2.0.0, status=sent (delivered via dovecot service)
+mail			postfix/qmgr[38034]: A470438E253: from=<box@vmx6a3b07.test>, size=559, nrcpt=1 (queue active)
+mail			postfix/pipe[49211]: A470438E253: to=<box@vmx6a3b07.test>, relay=dovecot, delay=0.05, delays=0.01/0/0/0.03, dsn=2.0.0, status=sent (delivered via dovecot service)
+mail			postfix/qmgr[38034]: B7E2638E253: from=<outside@example.com>, size=392, nrcpt=1 (queue active)
+mail			postfix/pipe[49211]: B7E2638E253: to=<box@vmx6a3b07.test>, orig_to=<alias@vmx6a3b07.test>, relay=dovecot, delay=0.06, delays=0.02/0.01/0/0.04, dsn=2.0.0, status=sent (delivered via dovecot service)
+mail			postfix/qmgr[38034]: 58E6D38E9CC: from=<web2@panel.elk.test>, size=316, nrcpt=1 (queue active)
+mail			postfix/pipe[49211]: 58E6D38E9CC: to=<box@vmx6a3b07.test>, relay=dovecot, delay=0.04, delays=0/0/0/0.03, dsn=2.0.0, status=sent (delivered via dovecot service)
+mail			postfix/qmgr[38034]: C188C38E9CE: from=<web2@panel.elk.test>, size=316, nrcpt=1 (queue active)
+mail			postfix/pipe[49211]: C188C38E9CE: to=<box@vmx6a3b07.test>, relay=dovecot, delay=0.04, delays=0/0/0/0.04, dsn=2.0.0, status=sent (delivered via dovecot service)
+mail			postfix/smtpd[4012]: NOQUEUE: reject: RCPT from unknown[198.51.100.23]: 554 5.7.1 <spam@x.test>: Relay access denied; from=<a@b.test> to=<spam@x.test> proto=ESMTP helo=<x>
+mail			postfix/smtpd[4013]: warning: unknown[203.0.113.77]: SASL LOGIN authentication failed: authentication failure
+mail			postfix/submission/smtpd[4014]: 8A1B2C3D4E: client=mail.example.net[192.0.2.44], sasl_method=PLAIN, sasl_username=box@vmx6a3b07.test
+mail			postfix/smtp[4015]: 8A1B2C3D4E: to=<friend@gmail.com>, relay=gmail-smtp-in.l.google.com[142.250.1.27]:25, delay=1.2, delays=0.1/0/0.4/0.7, dsn=2.0.0, status=sent (250 2.0.0 OK)
+mail			postfix/smtp[4016]: 9B1B2C3D4E: to=<nobody@nowhere.test>, relay=none, delay=30, delays=0/0/30/0, dsn=4.4.1, status=deferred (connect to nowhere.test[192.0.2.9]:25: Connection timed out)
+auth			sshd[811]: Failed password for invalid user admin from 203.0.113.50 port 51234 ssh2
+auth			sshd[812]: Accepted publickey for root from 198.51.100.4 port 40022 ssh2: ED25519 SHA256:abc
+auth			sshd[813]: Invalid user oracle from 45.155.205.233 port 40022
+auth			sudo[900]:     admin : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/systemctl restart apache2
+dovecot			2026-11-20 20:30:00 imap-login: Info: Login: user=<box@vmx6a3b07.test>, method=PLAIN, rip=198.51.100.8, lip=10.0.0.5, mpid=123, TLS, session=<abc>
+dovecot			2026-11-20 20:30:05 imap-login: Info: Login aborted: Logged out (auth failed, 1 attempts in 2 secs) (auth_failed): user=<box@vmx6a3b07.test>, method=PLAIN, rip=185.220.101.4, lip=10.0.0.5, TLS, session=<def>
+panel-login			2026-11-20 20:31:00 Sentora panel login failed for 'zadmin' from 185.220.101.4
+webmail			[20-Nov-2026 20:32:00 +0000]: <ab12cd34> Failed login for box@vmx6a3b07.test from 89.248.165.2 in session ab12cd34 (error: 0)
+fail2ban			2026-11-20 20:33:00,123 fail2ban.actions        [37328]: NOTICE  [sentora-dovecot] Ban 185.220.101.4
+fail2ban			2026-11-20 20:33:01,123 fail2ban.filter         [37328]: INFO    [sentora-panel] Found 185.220.101.4 - 2026-11-20 20:31:00
+ftp-login			Sentora FTP Server [48759] 91.92.1.3 [20/Nov/2026:20:09:22 +0000] "PASS (hidden)" 530
+web-access	vmxelk6a3b07	vmx6a3b07.test	81.2.69.142 - - [20/Nov/2026:20:40:00 +0000] "GET /index.php?p=1 HTTP/1.1" 200 5120 "https://www.google.com/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+web-access	vmxelk6a3b07	vmx6a3b07.test	185.220.101.4 - - [20/Nov/2026:20:40:01 +0000] "POST /wp-login.php HTTP/1.1" 404 196 "-" "python-requests/2.32"
+web-access	vmxelk6a3b07	vmx6a3b07.test	66.249.66.1 - - [20/Nov/2026:20:40:02 +0000] "GET /robots.txt HTTP/1.1" 200 24 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+web-access	vmxelk6a3b07	vmx6a3b07.test	2001:db8::5 - - [20/Nov/2026:20:40:03 +0000] "GET /missing HTTP/2.0" 500 0 "-" "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"

@@ -1,0 +1,37 @@
+# Sentora Elk node test: Ubuntu 26.04 in a container with systemd is made an Elk node
+# (elk-node/sentora2027-elk-node: Elasticsearch, Logstash, Kibana 9 and Sentora's dashboards) and fed real
+# panel log lines of every kind over TLS with the panel's certificate, including what it must refuse.
+# The script: .github/scripts/elk-node-test.sh. Results kept 14 days.
+name: Elk node test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master2027]
+    paths:
+      - elk-node/**
+      - tests/elk/**
+      - .github/scripts/elk-node-test.sh
+      - .github/workflows/elk-node-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  elk-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: The dashboards are the builder's
+        run: |
+          cd elk-node/kibana && python3 build.py > /dev/null && git diff --exit-code -- dashboards || { echo "::error::elk-node/kibana/dashboards differ from build.py: run python3 build.py"; exit 1; }
+      - name: Elk node
+        run: bash .github/scripts/elk-node-test.sh results
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elk-node-test
+          path: results
+          retention-days: 14
