@@ -1,0 +1,9 @@
+{
+  "policy": {
+    "_meta": { "description": "Sentora Elk node: the panel's logs, kept RETENTION_DAYS days (sentora-elk-node retention <days>)" },
+    "phases": {
+      "hot": { "actions": { "rollover": { "max_age": "1d", "max_primary_shard_size": "10gb" } } },
+      "delete": { "min_age": "RETENTION_DAYSd", "actions": { "delete": {} } }
+    }
+  }
+}

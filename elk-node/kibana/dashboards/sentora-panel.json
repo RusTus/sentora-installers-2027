@@ -1,0 +1,352 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"panel-access\"",
+     "language": "kql"
+    },
+    "title": "Panel pages opened",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"panel-login\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Panel login failures",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zsudo\" and event.action : \"ran\"",
+     "language": "kql"
+    },
+    "title": "Jobs root ran for the panel",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"problems\"",
+     "language": "kql"
+    },
+    "title": "Problems noted",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.log"
+       ],
+       "label": "Kind of log",
+       "limit": 8,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Lines",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : (\"panel-access\" or \"panel-error\" or \"zsudo\" or \"daemon\" or \"problems\" or \"dns\" or \"ftp\" or \"ftp-login\")",
+     "language": "kql"
+    },
+    "title": "Panel and server logs",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zsudo\" and event.action : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 10,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.zsudo.job"
+      ],
+      "label": "Job",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Root's jobs for the panel",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"panel-access\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "url.path"
+      ],
+      "label": "Page",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Panel pages",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Actions",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"ftp\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.ftp.command"
+      ],
+      "label": "FTP command",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "FTP uploads and changes",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Every line itself: **Discover**, data view *Sentora logs*, and filter on `sentora.log` (web-access, web-error, panel-access, panel-error, panel-login, mail, dovecot, auth, ftp, ftp-login, dns, fail2ban, zsudo, daemon, problems, webmail)."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 31
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Panel and server"
+}

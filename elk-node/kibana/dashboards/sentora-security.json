@@ -1,0 +1,463 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "title": "Failed logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "title": "Addresses trying",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"fail2ban\" and event.action : \"ban\"",
+     "language": "kql"
+    },
+    "title": "Bans",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and http.response.status_code : (403 or 404) and url.path : (\"/wp-login.php\" or \"/xmlrpc.php\" or \"/.env\" or \"/.git/config\" or \"/phpmyadmin/\")",
+     "language": "kql"
+    },
+    "title": "Probes for weak spots",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "event.action"
+       ],
+       "label": "What",
+       "limit": 8,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Attempts",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "title": "Failed logins by door",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "rule.name"
+      ],
+      "label": "Jail",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Bans",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"fail2ban\" and event.action : \"ban\"",
+     "language": "kql"
+    },
+    "title": "Bans by jail",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Attempts",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where the attempts come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Attempts",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.geo.country_name"
+      ],
+      "label": "Country",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Addresses trying hardest",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Attempts",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Names they try",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Logins",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"ssh-login\" and event.outcome : \"success\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 10,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Server logins that worked (SSH)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"sudo\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 10,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "process.command_line"
+      ],
+      "label": "Command",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Commands run as root (sudo)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 33
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Security"
+}

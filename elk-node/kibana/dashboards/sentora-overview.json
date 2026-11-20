@@ -1,0 +1,376 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "title": "Website requests",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "title": "Visitors (addresses)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.status_class : \"5xx\"",
+     "language": "kql"
+    },
+    "title": "Website errors (5xx)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"mail\" and sentora.mail.status : \"sent\"",
+     "language": "kql"
+    },
+    "title": "Mail sent",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : *",
+     "language": "kql"
+    },
+    "title": "Failed logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"fail2ban\" and event.action : \"ban\"",
+     "language": "kql"
+    },
+    "title": "Addresses banned",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.log"
+       ],
+       "label": "Kind of log",
+       "limit": 8,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Lines",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "*",
+     "language": "kql"
+    },
+    "title": "Everything the panel logged",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.log"
+      ],
+      "label": "Kind of log",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "*",
+     "language": "kql"
+    },
+    "title": "Kinds of log",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Requests",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where website visitors come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 16,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Busiest websites",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 16,
+    "w": 24,
+    "x": 24,
+    "y": 19
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Overview"
+}

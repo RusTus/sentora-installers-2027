@@ -1,0 +1,72 @@
+{
+  "index_patterns": [
+    "logs-sentora-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0,
+      "index.default_pipeline": "logs@default-pipeline"
+    },
+    "mappings": {
+      "properties": {
+        "sentora": {
+          "properties": {
+            "log": {
+              "type": "keyword"
+            },
+            "account": {
+              "type": "keyword"
+            },
+            "domain": {
+              "type": "keyword"
+            },
+            "panel": {
+              "type": "keyword"
+            },
+            "mail": {
+              "properties": {
+                "status": {
+                  "type": "keyword"
+                },
+                "queue_id": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "bot": {
+              "type": "boolean"
+            },
+            "visitor": {
+              "type": "keyword"
+            },
+            "status_class": {
+              "type": "keyword"
+            }
+          }
+        },
+        "source": {
+          "properties": {
+            "geo": {
+              "properties": {
+                "location": {
+                  "type": "geo_point"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "description": "Sentora Elk node: the panel's logs (one data stream per panel)"
+  }
+}

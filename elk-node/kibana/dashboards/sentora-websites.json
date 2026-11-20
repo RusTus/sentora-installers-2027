@@ -1,0 +1,566 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "title": "Requests",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "title": "Visitors (addresses)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and http.response.status_code : 404",
+     "language": "kql"
+    },
+    "title": "Not found (404)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.status_class : \"5xx\"",
+     "language": "kql"
+    },
+    "title": "Server errors (5xx)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.status_class"
+       ],
+       "label": "Answer",
+       "limit": 5,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Requests",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "title": "Requests by answer",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.visitor"
+      ],
+      "label": "Visitor",
+      "limit": 2,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "title": "People and bots",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Websites",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "url.path"
+      ],
+      "label": "Page",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Most requested pages",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and http.response.status_code : 404",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "url.path"
+      ],
+      "label": "Page",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Pages not found (404)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Requests",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Visitors by country",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : true",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user_agent.name"
+      ],
+      "label": "Browser or bot",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Bots and crawlers",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Busiest addresses",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-error\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "error.code"
+      ],
+      "label": "Apache message",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Error log lines by website",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 47
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.bot : false",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user_agent.name"
+      ],
+      "label": "Browser or bot",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Browsers",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 47
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Websites"
+}
