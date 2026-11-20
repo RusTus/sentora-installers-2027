@@ -1,0 +1,446 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-blocked\"",
+     "language": "kql"
+    },
+    "title": "Requests stopped",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-watched\"",
+     "language": "kql"
+    },
+    "title": "Would be stopped (watch only)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "title": "Addresses caught",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.domain",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "title": "Websites attacked",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "event.action"
+       ],
+       "label": "What",
+       "limit": 2,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Requests",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "title": "Caught requests by verdict",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.waf.attack"
+      ],
+      "label": "Attack",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Rule matches",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-rule\"",
+     "language": "kql"
+    },
+    "title": "Kinds of attack",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Requests",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where the attacks come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Matches",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-rule\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "rule.id"
+      ],
+      "label": "Rule",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "rule.name"
+      ],
+      "label": "What it looks for",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Rules that matched most",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "url.path"
+      ],
+      "label": "Page",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Websites and pages attacked",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Requests",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"waf-blocked\" or \"waf-watched\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.geo.country_name"
+      ],
+      "label": "Country",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Addresses caught most",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "A request is **stopped** when its rule matches add up to Web Hardening's limit (**watched** in watch-only mode: it would have been). Each rule a request matched counts under *Rules that matched most*. A rule that stops your own visitors by mistake can be left alone in Server Admin > Web Hardening."
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 33
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Web firewall"
+}

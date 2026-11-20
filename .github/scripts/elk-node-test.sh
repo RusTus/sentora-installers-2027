@@ -110,7 +110,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-security sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -171,6 +171,10 @@ chk "mail sent, with the recipient" '{"bool":{"filter":[{"term":{"sentora.mail.s
 chk "website requests with status, page and website" '{"bool":{"filter":[{"term":{"sentora.log":"web-access"}},{"exists":{"field":"http.response.status_code"}},{"exists":{"field":"url.path"}},{"term":{"sentora.domain":"vmx6a3b07.test"}}]}}'
 chk "panel login failures with name and address" '{"bool":{"filter":[{"term":{"event.action":"panel-login"}},{"exists":{"field":"user.name"}},{"exists":{"field":"source.ip"}}]}}'
 chk "visitors' countries" '{"exists":{"field":"source.geo.country_iso_code"}}'
+chk "web firewall: a stopped request with its score" '{"bool":{"filter":[{"term":{"event.action":"waf-blocked"}},{"exists":{"field":"sentora.waf.score"}}]}}'
+chk "web firewall: rules with their kind of attack" '{"bool":{"filter":[{"term":{"event.action":"waf-rule"}},{"exists":{"field":"sentora.waf.attack"}},{"exists":{"field":"rule.id"}}]}}'
+chk "spam scores" '{"bool":{"filter":[{"term":{"sentora.mail.status":"spam"}},{"exists":{"field":"sentora.mail.spam_score"}}]}}'
+chk "receiving domains of mail" '{"exists":{"field":"email.to.domain"}}'
 
 say "What it must refuse"
 printf '# marker\nother\t\t\tline from a stranger\n' > "$W/stranger.tsv"

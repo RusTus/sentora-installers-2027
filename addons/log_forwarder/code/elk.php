@@ -90,7 +90,7 @@ class elk
     {
         return array(
             'websites' => array('Websites', 'Every hosted website\'s visits and errors (Apache).'),
-            'mail' => array('Mail', 'Postfix (sent, bounced, refused), Dovecot (mailbox logins), webmail logins.'),
+            'mail' => array('Mail', 'Postfix (sent, bounced, refused), spam scores (SpamAssassin), Dovecot (mailbox logins), webmail logins.'),
             'logins' => array('Server logins', 'SSH logins and sudo, FTP logins.'),
             'bans' => array('Bans', 'fail2ban: addresses found and banned, by jail.'),
             'panel' => array('The panel', 'Panel pages and errors, failed panel logins, what root did for the panel, the daemon, the problems log.'),
@@ -720,7 +720,7 @@ class elk
             . "        action.resumeRetryCount=\"-1\" action.resumeInterval=\"30\")\n}\n\n";
         $rules = array();
         if (in_array('mail', $plan['streams'], true)) {
-            $rules[] = "if (\$programname startswith \"postfix\") then {\n    set \$.eklog = \"mail\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
+            $rules[] = "if (\$programname startswith \"postfix\" or \$programname == \"spamd\" or \$programname startswith \"spamass\") then {\n    set \$.eklog = \"mail\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";
         }
         if (in_array('logins', $plan['streams'], true)) {
             $rules[] = "if (\$programname == \"sshd\" or \$programname == \"sshd-session\" or \$programname == \"sudo\") then {\n    set \$.eklog = \"auth\"; set \$.ekacct = \"\"; set \$.ekdomain = \"\"; set \$.ekmsg = \$syslogtag & \$msg; call sentora_elk_out\n}";

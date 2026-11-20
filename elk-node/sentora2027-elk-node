@@ -504,7 +504,7 @@ out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "el
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-security sentora-panel; do
+for d in sentora-overview sentora-worldmap sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
@@ -516,7 +516,7 @@ kbapi GET /api/saved_objects/dashboard/sentora-worldmap > "$CONF/files/wm.json" 
     && python3 -I "$CONF/files/addmap.py" "$CONF/files/wm.json" sentora-world-map 0 2 34 30 > "$CONF/files/wm-new.json" \
     && kbapi PUT /api/saved_objects/dashboard/sentora-worldmap "$CONF/files/wm-new.json" | grep -q '"id":"sentora-worldmap"' || echo "WARNING: the world map is not on its dashboard"
 rm -f "$CONF/files/wm.json" "$CONF/files/wm-new.json"
-note "$n dashboards (Sentora: Overview, World map, Websites, Mail, Security, Panel and server)."
+note "$n dashboards (Sentora: Overview, World map, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash

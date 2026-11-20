@@ -26,8 +26,18 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-security",
       "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
       "type": "dashboardLink"
      },
      {

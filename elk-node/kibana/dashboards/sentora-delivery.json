@@ -1,0 +1,496 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"sent\"",
+     "language": "kql"
+    },
+    "title": "Delivered",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"bounced\"",
+     "language": "kql"
+    },
+    "title": "Bounced",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"spam\"",
+     "language": "kql"
+    },
+    "title": "Spam caught",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "email.to.domain",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"sent\"",
+     "language": "kql"
+    },
+    "title": "Receiving domains",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.mail.status"
+       ],
+       "label": "Result",
+       "limit": 4,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Mails",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.mail.status : (\"sent\" or \"bounced\" or \"deferred\" or \"expired\")",
+     "language": "kql"
+    },
+    "title": "Delivery results",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 32,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.mail.status"
+      ],
+      "label": "Result",
+      "limit": 2,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Mails",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : (\"spam\" or \"clean\")",
+     "language": "kql"
+    },
+    "title": "Spam check",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Mails",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : (\"bounced\" or \"deferred\" or \"expired\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "email.to.domain"
+      ],
+      "label": "Receiving domain",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.mail.status"
+      ],
+      "label": "Result",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Bounced or waiting, by receiving domain",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Mails",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : (\"bounced\" or \"deferred\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.mail.reason"
+      ],
+      "label": "Reason",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Why mail came back",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Mails",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"sent\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "email.to.domain"
+      ],
+      "label": "Receiving domain",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Where mail went",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 19
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Mails",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "email.from.address : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "email.from.address"
+      ],
+      "label": "Sender",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Who sends most",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Spam",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"spam\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Mailboxes getting spam",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.mail.status : \"spam\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.mail.spam_rules"
+      ],
+      "label": "Spam rule",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Spam rules that fired most",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 33
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Mail delivery"
+}

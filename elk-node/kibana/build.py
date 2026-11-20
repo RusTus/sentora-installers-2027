@@ -17,7 +17,9 @@ DASHBOARDS = [
     ("sentora-worldmap", "World map"),
     ("sentora-websites", "Websites"),
     ("sentora-mail", "Mail"),
+    ("sentora-delivery", "Mail delivery"),
     ("sentora-security", "Security"),
+    ("sentora-firewall", "Web firewall"),
     ("sentora-panel", "Panel and server"),
 ]
 
@@ -28,7 +30,9 @@ NAMES = {"sentora.domain": "Website", "url.path": "Page", "source.ip": "Address"
          "sentora.mail.status": "Result", "user.name": "Name", "event.action": "What", "rule.name": "Jail",
          "process.command_line": "Command", "sentora.zsudo.job": "Job", "sentora.ftp.command": "FTP command",
          "sentora.log": "Kind of log", "sentora.visitor": "Visitor", "event.outcome": "Result",
-         "sentora.status_class": "Answer"}
+         "sentora.status_class": "Answer", "rule.id": "Rule", "rule.name": "What it looks for", "sentora.waf.attack": "Attack",
+         "email.to.domain": "Receiving domain", "email.from.address": "Sender", "sentora.mail.reason": "Reason",
+         "sentora.mail.spam_rules": "Spam rule"}
 
 
 def q(kql):
@@ -101,7 +105,7 @@ BOARDS = {
                        {"operation": "unique_count", "field": "source.ip"})),
          (8, 5, metric("Website errors (5xx)", WEB + " and sentora.status_class : \"5xx\"", "Errors")),
          (8, 5, metric("Mail sent", 'sentora.log : "mail" and sentora.mail.status : "sent"', "Mails")),
-         (8, 5, metric("Failed logins", "event.outcome : \"failure\" and event.action : *", "Failed logins")),
+         (8, 5, metric("Failed logins", 'event.outcome : "failure" and event.action : * and not event.action : waf-*', "Failed logins")),
          (8, 5, metric("Addresses banned", 'sentora.log : "fail2ban" and event.action : "ban"', "Bans"))],
         [(32, 12, bars("Everything the panel logged", "*", "sentora.log", 8)),
          (16, 12, pie("Kinds of log", "*", "sentora.log", 8))],
@@ -145,20 +149,20 @@ BOARDS = {
                         ["user.name"], 15, "Logins"))],
     ]),
     "sentora-security": build("sentora-security", "Security", [
-        [(12, 5, metric("Failed logins", 'event.outcome : "failure" and event.action : *', "Attempts")),
-         (12, 5, metric("Addresses trying", 'event.outcome : "failure" and event.action : *', "Addresses",
+        [(12, 5, metric("Failed logins", 'event.outcome : "failure" and event.action : * and not event.action : waf-*', "Attempts")),
+         (12, 5, metric("Addresses trying", 'event.outcome : "failure" and event.action : * and not event.action : waf-*', "Addresses",
                         {"operation": "unique_count", "field": "source.ip"})),
          (12, 5, metric("Bans", 'sentora.log : "fail2ban" and event.action : "ban"', "Bans")),
          (12, 5, metric("Probes for weak spots", WEB + " and http.response.status_code : (403 or 404) and url.path : "
                         "(\"/wp-login.php\" or \"/xmlrpc.php\" or \"/.env\" or \"/.git/config\" or \"/phpmyadmin/\")",
                         "Probes"))],
-        [(32, 12, bars("Failed logins by door", 'event.outcome : "failure" and event.action : *', "event.action", 8,
+        [(32, 12, bars("Failed logins by door", 'event.outcome : "failure" and event.action : * and not event.action : waf-*', "event.action", 8,
                        "Attempts")),
          (16, 12, pie("Bans by jail", 'sentora.log : "fail2ban" and event.action : "ban"', "rule.name", 8, "Bans"))],
-        [(16, 14, world("Where the attempts come from", 'event.outcome : "failure" and event.action : *', "Attempts")),
-         (16, 14, table("Addresses trying hardest", 'event.outcome : "failure" and event.action : *',
+        [(16, 14, world("Where the attempts come from", 'event.outcome : "failure" and event.action : * and not event.action : waf-*', "Attempts")),
+         (16, 14, table("Addresses trying hardest", 'event.outcome : "failure" and event.action : * and not event.action : waf-*',
                         ["source.ip", "source.geo.country_name"], 15, "Attempts")),
-         (16, 14, table("Names they try", 'event.outcome : "failure" and event.action : *',
+         (16, 14, table("Names they try", 'event.outcome : "failure" and event.action : * and not event.action : waf-*',
                         ["event.action", "user.name"], 15, "Attempts"))],
         [(24, 12, table("Server logins that worked (SSH)", 'event.action : "ssh-login" and event.outcome : "success"',
                         ["user.name", "source.ip"], 10, "Logins")),
@@ -263,6 +267,44 @@ def build_free(title, placed, refresh=30000):
 
 
 BOARDS["sentora-worldmap"] = build_free("World map", WORLD_PANELS)
+
+# ---- Web firewall: what ModSecurity (Web Hardening) caught, from the websites' error logs
+WAF = 'event.module : "modsecurity"'
+WAF_STOP = 'event.action : ("waf-blocked" or "waf-watched")'
+WAF_RULE = 'event.action : "waf-rule"'
+BOARDS["sentora-firewall"] = build("sentora-firewall", "Web firewall", [
+    [(12, 5, metric("Requests stopped", 'event.action : "waf-blocked"', "")),
+     (12, 5, metric("Would be stopped (watch only)", 'event.action : "waf-watched"', "")),
+     (12, 5, metric("Addresses caught", WAF_STOP, "", {"operation": "unique_count", "field": "source.ip"})),
+     (12, 5, metric("Websites attacked", WAF_STOP, "", {"operation": "unique_count", "field": "sentora.domain"}))],
+    [(32, 12, bars("Caught requests by verdict", WAF_STOP, "event.action", 2, "Requests")),
+     (16, 12, pie("Kinds of attack", WAF_RULE, "sentora.waf.attack", 8, "Rule matches"))],
+    [(16, 14, world("Where the attacks come from", WAF_STOP, "Requests")),
+     (16, 14, table("Rules that matched most", WAF_RULE, ["rule.id", "rule.name"], 15, "Matches")),
+     (16, 14, table("Websites and pages attacked", WAF_STOP, ["sentora.domain", "url.path"], 15, "Requests"))],
+    [(24, 12, table("Addresses caught most", WAF_STOP, ["source.ip", "source.geo.country_name"], 15, "Requests")),
+     (24, 12, note("A request is **stopped** when its rule matches add up to Web Hardening's limit (**watched** in watch-only "
+                   "mode: it would have been). Each rule a request matched counts under *Rules that matched most*. "
+                   "A rule that stops your own visitors by mistake can be left alone in Server Admin > Web Hardening."))],
+])
+
+# ---- Mail delivery: where mail goes, what comes back, spam scores, who sends
+SENT = 'sentora.mail.status : "sent"'
+BOARDS["sentora-delivery"] = build("sentora-delivery", "Mail delivery", [
+    [(12, 5, metric("Delivered", SENT, "")),
+     (12, 5, metric("Bounced", 'sentora.mail.status : "bounced"', "")),
+     (12, 5, metric("Spam caught", 'sentora.mail.status : "spam"', "")),
+     (12, 5, metric("Receiving domains", SENT, "", {"operation": "unique_count", "field": "email.to.domain"}))],
+    [(32, 12, bars("Delivery results", 'sentora.mail.status : ("sent" or "bounced" or "deferred" or "expired")', "sentora.mail.status", 4, "Mails")),
+     (16, 12, pie("Spam check", 'sentora.mail.status : ("spam" or "clean")', "sentora.mail.status", 2, "Mails"))],
+    [(16, 14, table("Bounced or waiting, by receiving domain", 'sentora.mail.status : ("bounced" or "deferred" or "expired")',
+                    ["email.to.domain", "sentora.mail.status"], 15, "Mails")),
+     (16, 14, table("Why mail came back", 'sentora.mail.status : ("bounced" or "deferred")', ["sentora.mail.reason"], 15, "Mails")),
+     (16, 14, table("Where mail went", SENT, ["email.to.domain"], 15, "Mails"))],
+    [(16, 14, table("Who sends most", 'email.from.address : *', ["email.from.address"], 15, "Mails")),
+     (16, 14, table("Mailboxes getting spam", 'sentora.mail.status : "spam"', ["user.name"], 15, "Spam")),
+     (16, 14, table("Spam rules that fired most", 'sentora.mail.status : "spam"', ["sentora.mail.spam_rules"], 15, "Times"))],
+])
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
