@@ -152,7 +152,7 @@ n=0; for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_
 [ "${n:-0}" -gt 0 ] && ok "the panel's CPU, memory and MySQL figures arrived" || bad "no health figures on the node: $(es "'https://127.0.0.1:9200/logs-sentora-*/_search?q=sentora.log:health&size=2'" | head -c 600)"
 es "'https://127.0.0.1:9200/logs-sentora-*/_mapping/field/sentora.health.cpu_pct'" | grep -q '"type":"double"' && ok "the figures are numbers (double)" || bad "sentora.health.cpu_pct is not a double"
 in_box 'sentora-elk-node panel-from '"$PIP $GW" > /dev/null 2>&1 && ok "panel-from takes two addresses (the runner sends test lines too)" || bad "panel-from with two addresses"
-pphp 'echo "timing:", elk::Setting("apache_timing_log"), "\n";' | grep -q "timing: true" && ok "the panel's Apache is asked to note how long each page takes" || bad "apache_timing_log is not on"
+pphp 'elk::Prepare(); echo "timing:", elk::Setting("apache_timing_log"), "\n";' | grep -q "timing: true" && ok "the panel's Apache is asked to note how long each page takes" || bad "apache_timing_log is not on"
 # alerts: the node's service on 6515 (the panel's certificate only); a low disk limit makes one, the panel shows it, then it clears
 in_box 'systemctl is-active --quiet sentora-elk-alerts' && ok "the alerts service runs" || bad "the alerts service does not run: $(in_box 'journalctl -u sentora-elk-alerts -n 20 --no-pager' | tail -5)"
 in_box 'echo "{\"disk_pct\": 1}" > /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > "$OUT/alerts-check.txt" 2>&1
