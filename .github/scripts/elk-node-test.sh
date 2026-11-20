@@ -116,7 +116,7 @@ curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "htt
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
 
 say "The panel pairs with the node, and its own logs arrive"
-grep -q "6514 from $PIP" "$OUT/install-screen.txt" && ok "the firewall lets only the panel ($PIP) reach 6514" || bad "the firewall's panel address: $(grep 6514 "$OUT/install-screen.txt")"
+grep -qE "6514( and alerts 6515)? from $PIP" "$OUT/install-screen.txt" && ok "the firewall lets only the panel ($PIP) reach 6514" || bad "the firewall's panel address: $(grep 6514 "$OUT/install-screen.txt")"
 pphp 'echo elk::AddNode("'"$IP"'", "SE1-AAAA-BBBB-CCCC-DDDD"), "\n"; foreach (elk::Prepare() as $l) echo $l, "\n"; foreach (log_forwarder::Apply() as $l) echo $l, "\n"; foreach (elk::After(log_forwarder::$installed) as $l) echo $l, "\n";' > "$OUT/pair-wrong.txt" 2>&1
 grep -q "does not have that key" "$OUT/pair-wrong.txt" && ! in_panel 'grep -q sentora_elk_out /etc/rsyslog.d/60-sentora-logforward.conf 2> /dev/null' && ok "a wrong node key: not paired, nothing sent" || bad "wrong node key: $(cat "$OUT/pair-wrong.txt")"
 pphp 'echo elk::AddNode("'"$IP"'", "'"$NODEKEY"'"), "\n"; foreach (elk::Prepare() as $l) echo $l, "\n"; foreach (log_forwarder::Apply() as $l) echo $l, "\n"; foreach (elk::After(log_forwarder::$installed) as $l) echo $l, "\n"; echo json_encode(elk::State()), "\n";' > "$OUT/pair.txt" 2>&1

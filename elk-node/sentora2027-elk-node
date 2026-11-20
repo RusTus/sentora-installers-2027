@@ -560,15 +560,17 @@ install -m 640 -o root -g sentora-elk-alerts "$CONF/http_ca.crt" "$AL/http_ca.cr
 install -m 640 -o root -g sentora-elk-alerts "$CONF/panel.crt" "$AL/panel.crt"
 cat "$CONF/node.crt" "$CONF/ca.crt" > "$AL/node.crt.new" && install -m 640 -o root -g sentora-elk-alerts "$AL/node.crt.new" "$AL/node.crt"; rm -f "$AL/node.crt.new"
 install -m 640 -o root -g sentora-elk-alerts "$CONF/node.key" "$AL/node.key"
-mkdir -p /usr/local/lib/sentora-elk
-get alerts/sentora-elk-alerts.py /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new || die "Could not get the alerts service."
-python3 -I -m py_compile /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new || die "The alerts service is damaged."
-install -m 755 -o root -g root /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new /usr/local/lib/sentora-elk/sentora-elk-alerts.py
-rm -f /usr/local/lib/sentora-elk/sentora-elk-alerts.py.new; rm -rf /usr/local/lib/sentora-elk/__pycache__
+# (its own folder: the installer's umask keeps root's folders closed, and this one its user must read)
+ALIB=/usr/local/lib/sentora-elk-alerts
+mkdir -p "$ALIB"; chown root:root "$ALIB"; chmod 755 "$ALIB"
+get alerts/sentora-elk-alerts.py "$ALIB/sentora-elk-alerts.py.new" || die "Could not get the alerts service."
+python3 -I -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$ALIB/sentora-elk-alerts.py.new" || die "The alerts service is damaged."
+install -m 755 -o root -g root "$ALIB/sentora-elk-alerts.py.new" "$ALIB/sentora-elk-alerts.py"; rm -f "$ALIB/sentora-elk-alerts.py.new"
+rm -f /usr/local/lib/sentora-elk/sentora-elk-alerts.py
 printf '%s\n' '[Unit]' "Description=Sentora Elk node: alerts for the panel (port 6515, the panel's certificate only)" \
     'After=network-online.target elasticsearch.service' 'Wants=network-online.target' \
     '[Service]' 'User=sentora-elk-alerts' 'Group=sentora-elk-alerts' \
-    'ExecStart=/usr/bin/python3 -I /usr/local/lib/sentora-elk/sentora-elk-alerts.py serve' \
+    'ExecStart=/usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py serve' \
     'StateDirectory=sentora-elk-alerts' 'StateDirectoryMode=0750' 'Restart=always' 'RestartSec=10' \
     'NoNewPrivileges=yes' 'ProtectSystem=strict' 'ProtectHome=yes' 'PrivateTmp=yes' 'PrivateDevices=yes' \
     'ProtectKernelTunables=yes' 'ProtectKernelModules=yes' 'ProtectKernelLogs=yes' 'ProtectControlGroups=yes' 'ProtectClock=yes' \
@@ -691,7 +693,7 @@ if new != old:
     print("%d website(s) checked every minute" % len(mon))
 ' ;;
     alerts)
-        runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk/sentora-elk-alerts.py check ;;
+        runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py check ;;
     update) exec bash /usr/local/lib/sentora-elk/installer --update ;;
     *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
