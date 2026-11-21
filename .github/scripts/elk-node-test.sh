@@ -221,7 +221,6 @@ n=$(waitcnt 'sentora-shop' '{"query":{"match_all":{}}}' 85)
 [ "$n" = 85 ] && ok "the node keeps 40 orders, 40 product lines, 5 searches" || bad "store documents: $n of 85"
 [ "$(cnt 'sentora-shop' '{"query":{"query_string":{"query":"*example.com* OR *Main*"}}}')" = 0 ] && ok "no customer e-mail or street address on the node" || bad "customer details reached the node"
 [ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.kind":"search"}},{"term":{"sentora.shop.results":0}}]}}}')" = 2 ] && ok "the searches that found nothing" || bad "no searches that found nothing"
-[ "$(cnt 'logs-sentora-*' '{"query":{"term":{"sentora.search.term":"band saw blade"}}}')" -ge 1 ] && ok "search words read from the visits" || bad "no search words from the access log"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"
 SENT=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)
@@ -259,6 +258,7 @@ chk "web firewall: a stopped request with its score" '{"bool":{"filter":[{"term"
 chk "web firewall: rules with their kind of attack" '{"bool":{"filter":[{"term":{"event.action":"waf-rule"}},{"exists":{"field":"sentora.waf.attack"}},{"exists":{"field":"rule.id"}}]}}'
 chk "spam scores" '{"bool":{"filter":[{"term":{"sentora.mail.status":"spam"}},{"exists":{"field":"sentora.mail.spam_score"}}]}}'
 chk "receiving domains of mail" '{"exists":{"field":"email.to.domain"}}'
+chk "search words read from the visits (Magento and WordPress)" '{"terms":{"sentora.search.term":["band saw blade","cold saw"]}}'
 
 say "What it must refuse"
 printf '# marker\nother\t\t\tline from a stranger\n' > "$W/stranger.tsv"

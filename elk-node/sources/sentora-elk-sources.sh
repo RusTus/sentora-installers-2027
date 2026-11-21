@@ -71,7 +71,8 @@ rsyslog_conf() {
     cat $C/node.crt $C/ca.crt > "$RS/node.crt.new"; install -m 640 -o root -g "$g" "$RS/node.crt.new" "$RS/node.crt"; rm -f "$RS/node.crt.new"
     install -m 640 -o root -g "$g" $C/node.key "$RS/node.key"
     local imtcp='module(load="imtcp")'
-    grep -lqsE 'load="imtcp"|ModLoad\s+imtcp' /etc/rsyslog.conf $(ls /etc/rsyslog.d/*.conf 2> /dev/null | grep -v 40-sentora-sources) 2> /dev/null && imtcp='# (imtcp is loaded by another file)'
+    # (loaded by another file already? only a line that is not a comment counts: Ubuntu ships it commented out)
+    grep -lqsE '^[[:space:]]*(module\(load="imtcp"|\$ModLoad[[:space:]]+imtcp)' /etc/rsyslog.conf $(ls /etc/rsyslog.d/*.conf 2> /dev/null | grep -v 40-sentora-sources) 2> /dev/null && imtcp='# (imtcp is loaded by another file)'
     {
         echo "# Sentora Elk node: other sources over TLS (sentora-elk-node sources). Made anew by that command."
         echo "$imtcp"
