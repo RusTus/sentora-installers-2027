@@ -55,6 +55,12 @@
                 "assigned_ip": {
                   "type": "ip",
                   "ignore_malformed": true
+                },
+                "name": {
+                  "type": "keyword"
+                },
+                "kind": {
+                  "type": "keyword"
                 }
               }
             }

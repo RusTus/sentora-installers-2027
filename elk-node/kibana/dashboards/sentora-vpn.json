@@ -65,7 +65,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
      "language": "kql"
     },
     "title": "Connected now (last 15 minutes)",
@@ -93,7 +93,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : \"tunnel-up\"",
      "language": "kql"
     },
     "title": "Connections",
@@ -121,7 +121,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.outcome : \"failure\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.outcome : \"failure\"",
      "language": "kql"
     },
     "title": "Failed VPN logins",
@@ -150,7 +150,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : \"tunnel-up\"",
      "language": "kql"
     },
     "title": "People who connected",
@@ -177,7 +177,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
      "language": "kql"
     },
     "rows": [
@@ -220,7 +220,7 @@
      "operation": "count"
     },
     "query": {
-     "expression": "event.category : \"vpn\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\"",
      "language": "kql"
     },
     "region": {
@@ -275,7 +275,7 @@
      "visibility": "visible"
     },
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : (\"tunnel-up\" or \"tunnel-down\")",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-down\")",
      "language": "kql"
     },
     "title": "Connections over time",
@@ -302,7 +302,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.outcome : \"failure\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.outcome : \"failure\"",
      "language": "kql"
     },
     "rows": [
@@ -355,7 +355,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : \"tunnel-down\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : \"tunnel-down\"",
      "language": "kql"
     },
     "rows": [
@@ -395,7 +395,7 @@
       "fields": [
        "fortigate.vpn.tunnel"
       ],
-      "label": "Tunnel",
+      "label": "Kind of tunnel",
       "limit": 4,
       "operation": "terms"
      }
@@ -407,7 +407,7 @@
      }
     ],
     "query": {
-     "expression": "event.category : \"vpn\" and event.action : \"tunnel-up\"",
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : \"tunnel-up\"",
      "language": "kql"
     },
     "title": "Kind of tunnel",
@@ -418,6 +418,58 @@
     "w": 24,
     "x": 24,
     "y": 33
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "@timestamp",
+      "label": "Last seen up",
+      "operation": "max"
+     },
+     {
+      "field": "event.action",
+      "label": "Last event",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and fortigate.vpn.kind : \"site-to-site\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "fortigate.vpn.name"
+      ],
+      "label": "Tunnel",
+      "limit": 30,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Other end",
+      "limit": 3,
+      "operation": "terms"
+     }
+    ],
+    "title": "Site-to-site tunnels (to other offices)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 45
    },
    "type": "vis"
   }

@@ -185,17 +185,19 @@ docker cp "$NAME:/root/fgt-test.crt" "$W/fgt.crt"; docker cp "$NAME:/root/fgt-te
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6516 " && ss -ltn | grep -q "127.0.0.1:5516 "' && break; sleep 3; done
 in_box 'ufw status | grep -qE "6516/tcp +ALLOW( IN)? +'"$GW"'"' && ok "the firewall lets only the FortiGate reach 6516" || bad "no 6516 rule for $GW: $(in_box 'ufw status | grep 651')"
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/fgt.crt" "$W/fgt.key" "$REPO/tests/elk/fortigate.txt" > "$OUT/fgt-send.txt" 2>&1
-n=$(waitcnt 'logs-fortigate-*' '{"query":{"match_all":{}}}' 14)
-[ "$n" = 14 ] && ok "the FortiGate's 14 lines arrived" || bad "FortiGate lines: $n of 14 ($(cat "$OUT/fgt-send.txt"); $(in_box 'journalctl -u rsyslog -n 5 --no-pager' | tail -3))"
+n=$(waitcnt 'logs-fortigate-*' '{"query":{"match_all":{}}}' 15)
+[ "$n" = 15 ] && ok "the FortiGate's 15 lines arrived" || bad "FortiGate lines: $n of 15 ($(cat "$OUT/fgt-send.txt"); $(in_box 'journalctl -u rsyslog -n 5 --no-pager' | tail -3))"
 [ "$(cnt 'logs-fortigate-*' '{"query":{"term":{"tags":"fortigate_unparsed"}}}')" = 0 ] && ok "all of them understood" || bad "FortiGate lines not understood"
 [ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"url.domain":"freegames.example"}},{"term":{"event.outcome":"failure"}},{"term":{"fortigate.category":"Games"}},{"term":{"user.name":"jsmith"}}]}}}')" = 1 ] \
     && ok "a blocked site with its category and person" || bad "the blocked site was not read"
 [ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"event.category":"vpn"}},{"term":{"user.name":"tgarcia"}},{"term":{"event.action":"tunnel-up"}}]}}}')" = 1 ] \
     && ok "a FortiClient VPN user" || bad "the FortiClient user was not read"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"fortigate.vpn.kind":"site-to-site"}},{"term":{"fortigate.vpn.name":"OfficeToBranch"}}],"must_not":[{"exists":{"field":"user.name"}}]}}}')" = 1 ] \
+    && ok "a tunnel to another site is a tunnel, not a person" || bad "the site-to-site tunnel was read as a person"
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/other.crt" "$W/other.key" "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" - - "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
 sleep 8; es -X POST 'https://127.0.0.1:9200/logs-fortigate-*/_refresh' > /dev/null 2>&1
-[ "$(cnt 'logs-fortigate-*' '{"query":{"match_all":{}}}')" = 14 ] && ok "6516 takes nothing without the FortiGate's certificate" || bad "6516 took lines from another certificate or none"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"match_all":{}}}')" = 15 ] && ok "6516 takes nothing without the FortiGate's certificate" || bad "6516 took lines from another certificate or none"
 # Veeam: its events over TLS on 6517 (no certificate of its own); a failed job becomes an alert
 in_box "sentora-elk-node veeam $GW" > "$OUT/veeam-on.txt" 2>&1 && grep -q "Event Forwarding" "$OUT/veeam-on.txt" && ok "sentora-elk-node veeam: switched on, with Veeam's steps" || bad "veeam on: $(tail -5 "$OUT/veeam-on.txt")"
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6517 " && ss -ltn | grep -q "127.0.0.1:5517 "' && break; sleep 3; done

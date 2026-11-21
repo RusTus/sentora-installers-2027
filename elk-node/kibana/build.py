@@ -441,7 +441,7 @@ FGT = {"type": "data_view_reference", "ref_id": "sentora-fortigate"}
 VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
 M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
 NAMES.update({"url.domain": "Site", "fortigate.category": "Category", "network.application": "App", "fortigate.appcat": "Kind of app",
-              "fortigate.threat": "Threat", "fortigate.vpn.tunnel": "Tunnel", "source.geo.country_name": "Country", "source.geo.country_iso_code": "Country", "observer.name": "Device",
+              "fortigate.threat": "Threat", "fortigate.vpn.tunnel": "Kind of tunnel", "fortigate.vpn.name": "Tunnel", "source.geo.country_name": "Country", "source.geo.country_iso_code": "Country", "observer.name": "Device",
               "veeam_job.name": "Job", "veeam_job.why": "Why", "m365.reason": "Why", "veeam_job.result": "Result", "host.name": "Machine", "m365.app": "App", "error.message": "Why",
               "m365.issue.service": "Service", "m365.issue.title": "Problem", "m365.client_app": "Client", "fortigate.subtype": "Kind",
               "sentora.shop.status": "Status", "sentora.shop.country": "Country", "sentora.shop.sku": "Product", "sentora.search.term": "Searched for",
@@ -491,7 +491,8 @@ BOARDS["sentora-fortigate"] = build_src("sentora-fortigate", "FortiGate: where p
                   "host name; a web filter profile in monitor mode on the outgoing policy logs every site without blocking any."))],
 ])
 
-VPNQ = 'event.category : "vpn"'
+VPNQ = 'event.category : "vpn" and not fortigate.vpn.kind : "site-to-site"'
+SITEQ = 'event.category : "vpn" and fortigate.vpn.kind : "site-to-site"'
 BOARDS["sentora-vpn"] = build_src("sentora-vpn", "FortiGate: VPN and FortiClient", [
     [(12, 5, on(FGT, metric("Connected now (last 15 minutes)", VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats") and @timestamp >= "now-15m"', "",
                             {"operation": "unique_count", "field": "user.name"}))),
@@ -505,6 +506,11 @@ BOARDS["sentora-vpn"] = build_src("sentora-vpn", "FortiGate: VPN and FortiClient
      (24, 12, on(FGT, table("Failed VPN logins", VPNQ + ' and event.outcome : "failure"', ["user.name", "source.ip"], 15, "Times")))],
     [(24, 12, sum_table("Data over VPN, by person", FGT, VPNQ + ' and event.action : "tunnel-down"', ["user.name"], "network.bytes", "Data", 15, {"type": "bytes"})),
      (24, 12, on(FGT, pie("Kind of tunnel", VPNQ + ' and event.action : "tunnel-up"', "fortigate.vpn.tunnel", 4, "Connections")))],
+    [(48, 12, {"type": "data_table", "title": "Site-to-site tunnels (to other offices)", "data_source": FGT, "query": q(SITEQ),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "Last seen up"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "event.action", "label": "Last event"}],
+               "rows": [{"operation": "terms", "fields": ["fortigate.vpn.name"], "limit": 30, "label": "Tunnel"},
+                        {"operation": "terms", "fields": ["source.ip"], "limit": 3, "label": "Other end"}]})],
 ])
 
 BOARDS["sentora-threats"] = build_src("sentora-threats", "FortiGate: threats", [
