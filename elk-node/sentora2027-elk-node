@@ -754,7 +754,17 @@ if new != old:
     fortigate|veeam|m365|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
     alerts)
         runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py check ;;
-    update) exec bash /usr/local/lib/sentora-elk/installer --update ;;
+    update)
+        # the newest installer first (its steps change too: new parts of the node), then its update
+        t=$(mktemp)
+        if curl -fsSL --proto =https --proto-redir =https --retry 3 https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/elk-node/sentora2027-elk-node -o "$t" \
+            && bash -n "$t" && grep -q '^ui_step "Checking' "$t"; then
+            install -m 700 -o root -g root "$t" /usr/local/lib/sentora-elk/installer
+        else
+            echo "Could not get the newest installer; updating with the one this node has."
+        fi
+        rm -f "$t"
+        exec bash /usr/local/lib/sentora-elk/installer --update ;;
     *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
