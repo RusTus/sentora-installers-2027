@@ -33,6 +33,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# (a quick look first: a single quote inside a Logstash ruby block would stop the install ten minutes in)
+python3 -I "$REPO/tests/elk/conf-quotes.py" "$REPO"/elk-node/logstash/*.conf "$REPO"/elk-node/company/*.conf || { echo "ELK NODE TEST: Logstash rules have a single quote inside a ruby block"; exit 1; }
 say "A Sentora panel ($PANEL_IMAGE), installing itself on its first start"
 docker run -d --name "$PNAME" --cgroupns=private --security-opt writable-cgroups=true --tmpfs /run --tmpfs /run/lock --cap-add NET_ADMIN \
     -h panel.elktest.example -e SENTORA_EMAIL=admin@elktest.example "$PANEL_IMAGE" > /dev/null || { echo "::error::the panel image did not start"; exit 1; }
