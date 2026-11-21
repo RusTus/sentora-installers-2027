@@ -126,6 +126,13 @@
                   "type": "keyword"
                 }
               }
+            },
+            "store": {
+              "properties": {
+                "step": {
+                  "type": "keyword"
+                }
+              }
             }
           }
         },

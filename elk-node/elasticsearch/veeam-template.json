@@ -46,6 +46,24 @@
             },
             "why": {
               "type": "keyword"
+            },
+            "last_backup": {
+              "type": "keyword"
+            },
+            "hours_since": {
+              "type": "double"
+            },
+            "platform": {
+              "type": "keyword"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "last_run": {
+              "type": "keyword"
+            },
+            "next_run": {
+              "type": "keyword"
             }
           }
         }

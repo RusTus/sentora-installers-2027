@@ -6,6 +6,11 @@
     "layout": "horizontal",
     "links": [
      {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Overview",
       "type": "dashboardLink"
@@ -38,6 +43,11 @@
      {
       "destination": "sentora-security",
       "label": "Security",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
       "type": "dashboardLink"
      },
      {

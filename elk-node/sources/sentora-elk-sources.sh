@@ -6,6 +6,7 @@
 #   sentora-elk-node veeam ADDRESS       Veeam Backup & Replication's events: over TLS on 6517, from ADDRESS only
 #   sentora-elk-node m365 TENANT-ID APP-ID   Microsoft 365 / Entra: sign-ins, Teams and mail activity, service health,
 #                                        read with an app registered in Entra (its secret asked for, never shown)
+#   sentora-elk-node veeam-api ADDRESS USER   Veeam's REST API (read only): each machine's newest backup, each job's state
 #   sentora-elk-node SOURCE off          stop taking it (what came in stays until the keeping time ends)
 #   sentora-elk-node sources             what is on, and when each last sent something
 #
@@ -120,7 +121,7 @@ rsyslog_conf() {
 
 # the reader (Microsoft 365): on while it has something to read
 reader() {
-    if [ -s "$SRC/m365" ]; then
+    if [ -s "$SRC/m365" ] || [ -s "$SRC/veeam-api" ]; then
         systemctl enable sentora-elk-reader > /dev/null 2>&1; systemctl restart sentora-elk-reader
     else
         systemctl disable --now sentora-elk-reader > /dev/null 2>&1
@@ -216,6 +217,29 @@ case "${1:-sources}" in
         reader
         sleep 5
         runuser -u sentora-elk-reader -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-reader/sentora-elk-reader.py check ;;
+    veeam-api)
+        a=${2:-}; u=${3:-}
+        if [ "$a" = off ]; then rm -f "$SRC/veeam-api"; install -m 640 -o root -g sentora-elk-reader /dev/null /etc/sentora-elk-reader/veeam.json; publish; reader; say "Veeam's API is no longer read."; exit 0; fi
+        ip_ok "$a" && [[ "$u" =~ ^[A-Za-z0-9._@\\-]{1,128}$ ]] || { say "sentora-elk-node veeam-api VEEAM-SERVER-ADDRESS USER   (a Veeam user with the Veeam Backup Viewer role is enough)"; exit 2; }
+        # Veeam's API has its own certificate: its fingerprint is shown once, to check, and then only that one is accepted
+        fp=$(timeout 15 openssl s_client -connect "$a:9419" -servername "$a" < /dev/null 2> /dev/null | openssl x509 -outform DER 2> /dev/null | sha256sum | cut -d' ' -f1)
+        [ ${#fp} = 64 ] && [ "$fp" != e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ] || { say "Veeam's API does not answer on $a:9419 (is the Veeam Backup & Replication server there, port 9419 open?)."; exit 1; }
+        say "Veeam's API certificate on $a:9419, SHA-256:"
+        say "  $(echo "$fp" | sed 's/../&:/g; s/:$//' | tr a-f A-F)"
+        say "  (On the Veeam server: the console's menu > Options > Security > certificate > View; its thumbprint there is SHA-1, so"
+        say "   compare in PowerShell: Get-ChildItem Cert:\\LocalMachine\\My | ForEach-Object { \$_.GetCertHashString('SHA256') })"
+        read -r -p "Is it Veeam's? Type yes to accept it: " ans
+        [ "$ans" = yes ] || { say "Not accepted; nothing was changed."; exit 1; }
+        read -r -s -p "The password of $u: " vpw; echo
+        [ -n "$vpw" ] && [ ${#vpw} -le 200 ] && [[ "$vpw" != *[\"\\]* ]] || { say "That password can not be used here (no quotes or backslashes)."; exit 2; }
+        python3 -I -c 'import json,sys; print(json.dumps({"host": sys.argv[1], "port": 9419, "user": sys.argv[2], "password": sys.argv[3], "sha256": sys.argv[4]}))' "$a" "$u" "$vpw" "$fp" > /etc/sentora-elk-reader/veeam.json.new
+        chown root:sentora-elk-reader /etc/sentora-elk-reader/veeam.json.new; chmod 640 /etc/sentora-elk-reader/veeam.json.new
+        mv /etc/sentora-elk-reader/veeam.json.new /etc/sentora-elk-reader/veeam.json
+        echo "$a" > "$SRC/veeam-api"
+        publish
+        reader
+        sleep 3
+        runuser -u sentora-elk-reader -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-reader/sentora-elk-reader.py check | grep -E "^veeam" ;;
     sources)
         for s in fortigate veeam m365; do
             if [ -s "$SRC/$s" ]; then
@@ -225,7 +249,8 @@ case "${1:-sources}" in
             else
                 printf '%-10s off\n' "$s"
             fi
-        done ;;
+        done
+        if [ -s "$SRC/veeam-api" ]; then printf '%-10s on (%s)   backup coverage, read every hour\n' "veeam-api" "$(cat "$SRC/veeam-api")"; else printf '%-10s off\n' "veeam-api"; fi ;;
     refresh)
         # (the installer's --update: the newest pipelines and settings for what is on)
         apply > /dev/null ;;

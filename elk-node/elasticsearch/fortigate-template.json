@@ -63,6 +63,15 @@
                   "type": "keyword"
                 }
               }
+            },
+            "hour": {
+              "type": "keyword"
+            },
+            "weekday": {
+              "type": "keyword"
+            },
+            "hour_n": {
+              "type": "integer"
             }
           }
         },

@@ -6,8 +6,18 @@
     "layout": "horizontal",
     "links": [
      {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
       "type": "dashboardLink"
      },
      {
@@ -26,8 +36,18 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-veeam",
       "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
       "type": "dashboardLink"
      },
      {
@@ -38,6 +58,11 @@
      {
       "destination": "sentora-shop",
       "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
       "type": "dashboardLink"
      }
     ]
@@ -572,6 +597,61 @@
     },
     "metrics": [
      {
+      "field": "source.geo.country_iso_code",
+      "label": "Countries",
+      "operation": "unique_count"
+     },
+     {
+      "label": "Sign-ins",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and event.outcome : \"success\" and source.geo.country_iso_code : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Person",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     },
+     {
+      "fields": [
+       "source.geo.country_iso_code"
+      ],
+      "label": "Country",
+      "limit": 5,
+      "operation": "terms"
+     }
+    ],
+    "title": "People signing in from more than one country",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 59
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
       "label": "Seen",
       "operation": "count"
      }
@@ -605,7 +685,7 @@
     "h": 10,
     "w": 48,
     "x": 0,
-    "y": 59
+    "y": 71
    },
    "type": "vis"
   },
@@ -617,7 +697,7 @@
     "h": 3,
     "w": 48,
     "x": 0,
-    "y": 69
+    "y": 81
    },
    "type": "markdown"
   }

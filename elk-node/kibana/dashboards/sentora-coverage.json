@@ -1,0 +1,330 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "host.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"coverage\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Machines backed up",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "host.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"coverage\" and @timestamp >= \"now-2h\" and veeam_job.hours_since > 26",
+     "language": "kql"
+    },
+    "title": "Without a backup for a day",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "veeam_job.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-state\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Jobs",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "veeam_job.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-state\" and @timestamp >= \"now-2h\" and veeam_job.result : \"Failed\"",
+     "language": "kql"
+    },
+    "title": "Jobs whose last run failed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "veeam_job.hours_since",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "Hours ago",
+      "operation": "min"
+     },
+     {
+      "field": "veeam_job.last_backup",
+      "label": "Newest backup",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"coverage\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "host.name"
+      ],
+      "label": "Machine",
+      "limit": 200,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Every machine: its newest backup (oldest first)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 18,
+    "w": 26,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Readings",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-state\" and @timestamp >= \"now-70m\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "veeam_job.name"
+      ],
+      "label": "Job",
+      "limit": 100,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "veeam_job.result"
+      ],
+      "label": "Last result",
+      "limit": 1,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "veeam_job.last_run"
+      ],
+      "label": "Last run",
+      "limit": 1,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "veeam_job.next_run"
+      ],
+      "label": "Next run",
+      "limit": 1,
+      "operation": "terms"
+     }
+    ],
+    "title": "Every job: last result and next run",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 18,
+    "w": 22,
+    "x": 26,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Read from Veeam's API every hour (sentora-elk-node veeam-api). A machine without a backup for over a day is also an alert in the panel."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 25
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Backup coverage"
+}

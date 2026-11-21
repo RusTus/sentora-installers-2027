@@ -1,0 +1,464 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "network.bytes : *",
+     "language": "kql"
+    },
+    "title": "Data moved",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "(fortigate.appcat : (\"Video/Audio\" or \"Social.Media\" or \"Game\" or \"P2P\") or fortigate.category : (\"Streaming Media and Download\" or \"Social Networking\" or \"Games\" or \"Entertainment\" or \"Peer-to-peer File Sharing\")) and network.bytes : *",
+     "language": "kql"
+    },
+    "title": "Streaming, social, games",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "user.name : * and network.bytes : *",
+     "language": "kql"
+    },
+    "title": "People online",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "url.domain",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "url.domain : *",
+     "language": "kql"
+    },
+    "title": "Sites visited",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "field": "network.bytes",
+     "format": {
+      "type": "bytes"
+     },
+     "label": "Data",
+     "operation": "sum"
+    },
+    "query": {
+     "expression": "network.bytes : * and fortigate.hour_n : *",
+     "language": "kql"
+    },
+    "title": "When the internet is busiest (data moved, by hour and day, the FortiGate's time)",
+    "type": "heatmap",
+    "x": {
+     "field": "fortigate.hour_n",
+     "granularity": "auto",
+     "label": "Hour",
+     "operation": "histogram"
+    },
+    "y": {
+     "fields": [
+      "fortigate.weekday"
+     ],
+     "label": "Day",
+     "limit": 7,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    }
+   },
+   "grid": {
+    "h": 13,
+    "w": 48,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "user.name : * and network.bytes : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Who uses the most",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 20
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "(fortigate.appcat : (\"Video/Audio\" or \"Social.Media\" or \"Game\" or \"P2P\") or fortigate.category : (\"Streaming Media and Download\" or \"Social Networking\" or \"Games\" or \"Entertainment\" or \"Peer-to-peer File Sharing\")) and user.name : * and network.bytes : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     },
+     {
+      "fields": [
+       "network.application"
+      ],
+      "label": "App",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Streaming, social and games, by person",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 20
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     },
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.appcat : * and network.bytes : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "fortigate.appcat"
+      ],
+      "label": "Kind of app",
+      "limit": 12,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Kinds of apps",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 34
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-fortigate",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "network.bytes",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Data",
+        "operation": "sum"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "network.bytes : *",
+     "language": "kql"
+    },
+    "title": "Data over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 34
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Internet use at the office"
+}

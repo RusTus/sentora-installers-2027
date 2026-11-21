@@ -1,0 +1,425 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.store.step : \"search\"",
+     "language": "kql"
+    },
+    "title": "Searches",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.store.step : \"cart-add\"",
+     "language": "kql"
+    },
+    "title": "Added to cart",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.store.step : \"checkout\"",
+     "language": "kql"
+    },
+    "title": "Reached checkout",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.store.step : \"order-placed\"",
+     "language": "kql"
+    },
+    "title": "Orders placed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Page views",
+      "operation": "count"
+     },
+     {
+      "formula": "count(kql='sentora.store.step : \"search\"')",
+      "label": "Searches",
+      "operation": "formula"
+     },
+     {
+      "formula": "count(kql='sentora.store.step : \"cart-add\"')",
+      "label": "Cart adds",
+      "operation": "formula"
+     },
+     {
+      "formula": "count(kql='sentora.store.step : \"checkout\"')",
+      "label": "Checkouts",
+      "operation": "formula"
+     },
+     {
+      "formula": "count(kql='sentora.store.step : \"order-placed\"')",
+      "label": "Orders",
+      "operation": "formula"
+     },
+     {
+      "format": {
+       "type": "percent"
+      },
+      "formula": "count(kql='sentora.store.step : \"order-placed\"') / count(kql='sentora.store.step : \"cart-add\"')",
+      "label": "Carts that became orders",
+      "operation": "formula"
+     },
+     {
+      "formula": "count(kql='sentora.store.step : \"cart-add\"') - count(kql='sentora.store.step : \"order-placed\"')",
+      "label": "Carts left",
+      "operation": "formula"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.domain : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Store",
+      "limit": 5,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "The funnel, by store (people only, bots left out)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 48,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.store.step"
+       ],
+       "label": "Step",
+       "limit": 6,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Visits",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and sentora.store.step : *",
+     "language": "kql"
+    },
+    "title": "Steps over time (people)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 17
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Hits",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"bot\" and sentora.store.step : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user_agent.name"
+      ],
+      "label": "Browser or bot",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.store.step"
+      ],
+      "label": "Step",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Bots in the store's buying pages",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 0,
+    "y": 29
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Hits",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"bot\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user_agent.name"
+      ],
+      "label": "Browser or bot",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.domain"
+      ],
+      "label": "Website",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Busiest bots on the websites",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 24,
+    "x": 24,
+    "y": 29
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Steps come from Magento's own addresses (search, add to cart, cart, checkout, order placed); bots are left out of the funnel. A bot that keeps adding to carts wastes the server's time: QuickFig's Who is crawling can block it."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 43
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Store funnel"
+}

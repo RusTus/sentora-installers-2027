@@ -1,0 +1,399 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.ip",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "title": "Attacking addresses",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "title": "Tries",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "source.geo.country_iso_code",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "title": "Countries",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"ban\"",
+     "language": "kql"
+    },
+    "title": "Banned (fail2ban)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "data_stream.dataset",
+      "label": "Places",
+      "operation": "unique_count"
+     },
+     {
+      "label": "Tries",
+      "operation": "count"
+     },
+     {
+      "field": "@timestamp",
+      "label": "Last seen",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 25,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     },
+     {
+      "fields": [
+       "source.geo.country_iso_code"
+      ],
+      "label": "Country",
+      "limit": 1,
+      "operation": "terms"
+     }
+    ],
+    "title": "Who attacks the most places (block these first)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 16,
+    "w": 28,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Tries",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "region": {
+     "fields": [
+      "source.geo.country_iso_code"
+     ],
+     "limit": 100,
+     "operation": "terms"
+    },
+    "title": "Where they come from",
+    "type": "region_map"
+   },
+   "grid": {
+    "h": 16,
+    "w": 20,
+    "x": 28,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "data_stream.dataset"
+       ],
+       "label": "Seen by",
+       "limit": 3,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-all",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Tries",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "title": "Tries over time, by where they were seen",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 23
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Tries",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "data_stream.dataset"
+      ],
+      "label": "Seen by",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "What they tried",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 23
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Failed logins (panel, SSH, mail, FTP, VPN, Microsoft 365), requests the web firewall stopped, attacks the FortiGate stopped and fail2ban bans, joined by address; inside addresses left out. An address in two places or more within an hour is also an alert. sentora = this panel, fortigate = the FortiGate, m365 = Microsoft 365."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 35
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Attackers across everything"
+}

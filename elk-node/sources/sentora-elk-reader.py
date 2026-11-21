@@ -20,6 +20,7 @@ import base64
 import csv
 import datetime
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -107,15 +108,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def bulk(docs):
-    """Add documents (id, body) to the data stream; ones already there are left alone."""
+def bulk(docs, index=INDEX):
+    """Add documents (id, body) to a data stream; ones already there are left alone."""
     if not docs:
         return 0
     with open(os.path.join(CONF, "es.pw")) as f:
         pw = f.read().strip()
     lines = []
     for i, d in docs:
-        lines.append(json.dumps({"create": {"_index": INDEX, "_id": i}}))
+        lines.append(json.dumps({"create": {"_index": index, "_id": i}}))
         lines.append(json.dumps(d))
     req = urllib.request.Request(ES + "/_bulk", data=("\n".join(lines) + "\n").encode(), method="POST",
                                  headers={"Content-Type": "application/x-ndjson",
@@ -245,12 +246,88 @@ def health(g, st):
     return "service health: %d open, %d new this hour" % (len(docs), added)
 
 
+# ---- Veeam Backup & Replication's REST API (port 9419, its own certificate, pinned by its SHA-256 when switched on)
+class PinnedHTTPS(http.client.HTTPSConnection):
+    """HTTPS to a server whose certificate is known by its fingerprint (Veeam's is its own, not from an authority)."""
+    def __init__(self, host, port, pin):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE  # (checked below, by fingerprint, before anything is sent)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        super().__init__(host, port, context=ctx, timeout=60)
+        self.pin = pin.lower().replace(":", "")
+
+    def connect(self):
+        super().connect()
+        got = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest()
+        if got != self.pin:
+            self.sock.close()
+            raise ssl.SSLError("Veeam's certificate changed (now %s): run sentora-elk-node veeam-api again to check and accept it" % got)
+
+
+def veeam_call(cfg, method, path, body=None, token=None):
+    c = PinnedHTTPS(cfg["host"], int(cfg.get("port", 9419)), cfg["sha256"])
+    h = {"x-api-version": "1.1-rev0", "Accept": "application/json"}
+    if token:
+        h["Authorization"] = "Bearer " + token
+    if body is not None:
+        h["Content-Type"] = "application/x-www-form-urlencoded"
+    c.request(method, path, body=body, headers=h)
+    r = c.getresponse()
+    data = r.read(20 << 20)
+    c.close()
+    if r.status >= 400:
+        raise urllib.error.HTTPError(path, r.status, r.reason, r.headers, None)
+    return json.loads(data or b"{}")
+
+
+def veeam(st):
+    cfg = load(os.path.join(CONF, "veeam.json"), {})
+    if not all(cfg.get(k) for k in ("host", "user", "password", "sha256")):
+        return None
+    tok = veeam_call(cfg, "POST", "/api/oauth2/token", urllib.parse.urlencode(
+        {"grant_type": "password", "username": cfg["user"], "password": cfg["password"]}))["access_token"]
+    hour = now().strftime("%Y%m%d%H")
+    stamp = iso(now())
+    docs, newest = [], {}
+    # every machine's newest restore point (newest first, up to 5000)
+    for skip in range(0, 5000, 1000):
+        d = veeam_call(cfg, "GET", "/api/v1/objectRestorePoints?limit=1000&skip=%d&orderColumn=CreationTime&orderAsc=false" % skip, token=tok)
+        rows = d.get("data") or []
+        for x in rows:
+            n, t = str(x.get("name") or "")[:255], str(x.get("creationTime") or "")
+            if n and t and n not in newest:
+                newest[n] = (t, str(x.get("platformName") or "")[:64])
+        if len(rows) < 1000:
+            break
+    for n, (t, plat) in newest.items():
+        try:
+            age = (now() - datetime.datetime.fromisoformat(t.replace("Z", "+00:00"))).total_seconds() / 3600
+        except ValueError:
+            continue
+        docs.append(("cover-%s-%s" % (hour, hashlib.sha1(n.encode()).hexdigest()[:16]), {
+            "@timestamp": stamp, "event": {"module": "veeam", "dataset": "veeam.coverage", "action": "coverage"}, "host": {"name": n},
+            "veeam_job": {"last_backup": t, "hours_since": round(age, 1), "platform": plat}, "message": "coverage"}))
+    # each job's state: its last result, when it last ran and runs next
+    d = veeam_call(cfg, "GET", "/api/v1/jobs/states?limit=1000", token=tok)
+    for j in d.get("data") or []:
+        name = str(j.get("name") or "")[:255]
+        if not name:
+            continue
+        docs.append(("job-%s-%s" % (hour, hashlib.sha1(name.encode()).hexdigest()[:16]), {
+            "@timestamp": stamp, "event": {"module": "veeam", "dataset": "veeam.jobs", "action": "job-state"},
+            "veeam_job": {"name": name, "result": str(j.get("lastResult") or "")[:32].capitalize() or None, "status": str(j.get("status") or "")[:32],
+                          "last_run": j.get("lastRun"), "next_run": j.get("nextRun"), "type": str(j.get("type") or "")[:32]}, "message": "job-state"}))
+    added = bulk(docs, "logs-veeam-default")
+    return "%d machine(s) with backups, %d job(s), %d new" % (len(newest), len(docs) - len(newest), added)
+
+
 def run(say=None):
     cfg = load(os.path.join(CONF, "m365.json"), {})
     st = load(os.path.join(STATE, "state.json"), {})
     out = {}
     if not all(cfg.get(k) for k in ("tenant", "app", "secret")):
-        out["m365"] = "not set up (sentora-elk-node m365)"
+        pass
     else:
         g = Graph(cfg)
         for name, part in (("sign-ins", signins), ("reports", reports), ("health", health)):
@@ -262,6 +339,15 @@ def run(say=None):
                 out[name] = "Microsoft said %d %s" % (e.code, why)
             except Exception as e:
                 out[name] = "failed: %s" % str(e)[:200]
+    try:
+        v = veeam(st) if time.time() - st.get("veeam_at", 0) >= 3000 or say else None
+        if v is not None:
+            out["veeam"] = v
+            st["veeam_at"] = time.time()
+    except urllib.error.HTTPError as e:
+        out["veeam"] = "Veeam said %d %s" % (e.code, {401: "the user or password is not right", 403: "that user may not read this"}.get(e.code, ""))
+    except Exception as e:
+        out["veeam"] = "failed: %s" % str(e.args[0] if len(e.args) == 1 else e)[:200]
     st["last"] = {"time": int(time.time()), "parts": out}
     save_state(st)
     if say:

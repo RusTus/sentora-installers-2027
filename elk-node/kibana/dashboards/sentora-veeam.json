@@ -6,8 +6,18 @@
     "layout": "horizontal",
     "links": [
      {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
       "type": "dashboardLink"
      },
      {
@@ -26,8 +36,18 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-veeam",
       "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
       "type": "dashboardLink"
      },
      {
@@ -38,6 +58,11 @@
      {
       "destination": "sentora-shop",
       "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
       "type": "dashboardLink"
      }
     ]

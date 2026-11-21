@@ -42,6 +42,9 @@ LIMITS = {
     "quiet_minutes": 30,     # no log line from the panel for this long (while there were lines the day before)
     "fgt_admin_fail": 5,     # failed admin logins on a FortiGate in 15 minutes
     "fgt_vpn_fail": 20,      # failed VPN logins on a FortiGate in 15 minutes
+    "attacker_events": 10,   # an address that tried this many times in an hour, in two places or more
+    "travel_hours": 3,
+    "backup_hours": 26,      # Veeam: a machine whose newest backup is older than this       # Microsoft 365: two countries within this many hours is "impossible travel"
 }
 
 
@@ -185,12 +188,72 @@ def check():
             found.append(("veeam:" + slug(b["key"]), "outage", "Veeam: " + b["key"][:80] + " failed",
                           "The last run of the Veeam job %s on %s failed: %s" % (b["key"][:120], h.get("observer", {}).get("name", "?"), str(h.get("message", ""))[:300]),
                           "sentora-veeam"))
+    # Veeam's API (when read): a machine whose newest backup is older than the limit
+    r = es("/logs-veeam-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"event.action": "coverage"}}, {"range": {"@timestamp": {"gte": "now-3h"}}}]}},
+        "aggs": {"h": {"terms": {"field": "host.name", "size": 2000}, "aggs": {"a": {"min": {"field": "veeam_job.hours_since"}}}}}})
+    for b in r.get("aggregations", {}).get("h", {}).get("buckets", []):
+        a = b["a"].get("value")
+        if a is not None and a > L["backup_hours"]:
+            found.append(("backup-stale:" + slug(b["key"]), "warning", "%s has no backup for %d hours" % (b["key"][:80], a),
+                          "Veeam's newest backup of %s is %.0f hours old (the alert starts after %d hours): it may have dropped out of its job." % (b["key"][:120], a, L["backup_hours"]),
+                          "sentora-coverage"))
     for what, q, n_, board in (("admin logins on the FortiGate", {"term": {"event.category": "admin-login"}}, L["fgt_admin_fail"], "sentora-threats"),
                                ("VPN logins", {"term": {"event.category": "vpn"}}, L["fgt_vpn_fail"], "sentora-vpn")):
         c = count("logs-fortigate-*", "now-15m", [q, {"term": {"event.outcome": "failure"}}])
         if c >= n_:
             found.append(("fortigate:" + slug(what), "warning", "FortiGate: %d failed %s in 15 minutes" % (c, what),
                           "%d failed %s in the last 15 minutes: someone may be guessing passwords." % (c, what), board))
+
+    # an address that attacks in more than one place (the panel, the FortiGate, Microsoft 365) within an hour
+    bad = {"bool": {"should": [{"term": {"event.outcome": "failure"}}, {"prefix": {"event.action": "waf-"}},
+                               {"term": {"fortigate.subtype": "ips"}}, {"term": {"event.action": "ban"}}], "minimum_should_match": 1}}
+    private = [{"term": {"source.ip": c}} for c in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "fc00::/7", "fe80::/10", "::1")]
+    r = es("/logs-sentora-*,logs-fortigate-*,logs-m365-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {
+        "filter": [{"range": {"@timestamp": {"gte": "now-1h"}}}, {"exists": {"field": "source.ip"}}, bad], "must_not": private}},
+        "aggs": {"ip": {"terms": {"field": "source.ip", "size": 200, "min_doc_count": int(L["attacker_events"])},
+                        "aggs": {"src": {"terms": {"field": "data_stream.dataset", "size": 5}}}}}})
+    names = {"sentora": "the panel", "fortigate": "the FortiGate", "m365": "Microsoft 365"}
+    for b in r.get("aggregations", {}).get("ip", {}).get("buckets", []):
+        srcs = [(x["key"], x["doc_count"]) for x in b["src"]["buckets"]]
+        if len(srcs) >= 2:
+            where = ", ".join("%s (%d)" % (names.get(k, k), c) for k, c in srcs)
+            found.append(("attacker:" + slug(b["key"]), "warning", "%s attacks in %d places" % (b["key"], len(srcs)),
+                          "In the last hour the address %s tried %d times: %s. Blocking it on the firewall stops it everywhere." % (b["key"], b["doc_count"], where),
+                          "sentora-attackers"))
+
+    # Microsoft 365: one person signing in from two countries too close together, or from a country new for them
+    r = es("/logs-m365-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 3000, "sort": [{"@timestamp": "asc"}],
+        "_source": ["@timestamp", "user.name", "source.geo.country_iso_code", "source.ip"],
+        "query": {"bool": {"filter": [{"term": {"m365.kind": "signin"}}, {"term": {"event.outcome": "success"}},
+                                      {"range": {"@timestamp": {"gte": "now-%dh" % int(L["travel_hours"] * 2)}}}, {"exists": {"field": "source.geo.country_iso_code"}}]}}})
+    seen = {}
+    for h in r.get("hits", {}).get("hits", []):
+        x = h["_source"]
+        u, c = (x.get("user") or {}).get("name"), ((x.get("source") or {}).get("geo") or {}).get("country_iso_code")
+        t = datetime.datetime.fromisoformat(x["@timestamp"].replace("Z", "+00:00")).timestamp()
+        if not u or not c:
+            continue
+        prev = seen.get(u)
+        if prev and prev[1] != c and t - prev[0] <= L["travel_hours"] * 3600 and now - t <= L["travel_hours"] * 3600:
+            found.append(("office-travel:" + slug(u), "warning", "%s signed in from %s and %s" % (u, prev[1], c),
+                          "Microsoft 365: %s signed in from %s and then from %s within %.1f hours. If that was not them (a VPN or a phone abroad can explain it), "
+                          "reset their password and sign them out in Entra." % (u, prev[1], c, (t - prev[0]) / 3600), "sentora-m365"))
+        seen[u] = (t, c)
+    r = es("/logs-m365-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"m365.kind": "signin"}}, {"term": {"event.outcome": "success"}}, {"range": {"@timestamp": {"gte": "now-30d", "lt": "now-1h"}}}]}},
+        "aggs": {"u": {"terms": {"field": "user.name", "size": 2000}, "aggs": {"c": {"terms": {"field": "source.geo.country_iso_code", "size": 50}}}}}})
+    known = {b["key"]: {x["key"] for x in b["c"]["buckets"]} for b in r.get("aggregations", {}).get("u", {}).get("buckets", [])}
+    r = es("/logs-m365-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"m365.kind": "signin"}}, {"term": {"event.outcome": "success"}}, {"range": {"@timestamp": {"gte": "now-1h"}}}]}},
+        "aggs": {"u": {"terms": {"field": "user.name", "size": 2000}, "aggs": {"c": {"terms": {"field": "source.geo.country_iso_code", "size": 50}}}}}})
+    for b in r.get("aggregations", {}).get("u", {}).get("buckets", []):
+        if b["key"] not in known:
+            continue  # (no history for them yet: nothing is new)
+        for x in b["c"]["buckets"]:
+            if x["key"] not in known[b["key"]]:
+                found.append(("office-new:" + slug(b["key"] + "-" + x["key"]), "warning", "%s signed in from a new country (%s)" % (b["key"], x["key"]),
+                              "Microsoft 365: %s signed in from %s, where they have not signed in for at least 30 days." % (b["key"], x["key"]), "sentora-m365"))
 
     # the panel's logs gone quiet (rsyslog stopped forwarding); its health lines come another way and do not count
     m = int(L["quiet_minutes"])

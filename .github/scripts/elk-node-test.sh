@@ -110,7 +110,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -194,6 +194,8 @@ n=$(waitcnt 'logs-fortigate-*' '{"query":{"match_all":{}}}' 15)
     && ok "a FortiClient VPN user" || bad "the FortiClient user was not read"
 [ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"fortigate.vpn.kind":"site-to-site"}},{"term":{"fortigate.vpn.name":"OfficeToBranch"}}],"must_not":[{"exists":{"field":"user.name"}}]}}}')" = 1 ] \
     && ok "a tunnel to another site is a tunnel, not a person" || bad "the site-to-site tunnel was read as a person"
+[ "$(cnt 'logs-fortigate-*' '{"query":{"bool":{"filter":[{"term":{"fortigate.hour_n":9}},{"term":{"fortigate.weekday":"5 Fri"}}]}}}')" -ge 1 ] \
+    && ok "the FortiGate's hour and weekday (for the heat map)" || bad "no hour and weekday on the FortiGate's lines"
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/other.crt" "$W/other.key" "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" - - "$REPO/tests/elk/fortigate.txt" > /dev/null 2>&1
 sleep 8; es -X POST 'https://127.0.0.1:9200/logs-fortigate-*/_refresh' > /dev/null 2>&1
@@ -218,6 +220,16 @@ n=$(waitcnt 'logs-m365-*' '{"query":{"match_all":{}}}' 9)
 [ "$(cnt 'logs-m365-*' '{"query":{"bool":{"filter":[{"term":{"m365.kind":"signin"}},{"term":{"event.outcome":"failure"}},{"exists":{"field":"source.geo.location"}}]}}}')" = 1 ] && ok "a failed sign-in with its place" || bad "the failed sign-in was not read"
 in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/m365.json' | grep -q "^root:sentora-elk-reader 640$" && ok "the app's secret is root's and the reader's only" || bad "m365.json: $(in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/m365.json')"
 in_box 'cat /etc/sentora-elk-reader/m365.json' | grep -q test-secret && ! grep -q test-secret "$OUT/m365-on.txt" && ok "the secret is kept and never shown" || bad "the secret was shown or not kept"
+# Veeam's API (backup coverage): the stand-in on 9419 with its own certificate; the fingerprint accepted, the password given
+docker cp "$REPO/tests/elk/fakeveeam.py" "$NAME:/root/fakeveeam.py"
+in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout fv.key -out fv.crt -subj /CN=VBR01 -days 2 2> /dev/null; (python3 -I fakeveeam.py 9419 fv.crt fv.key > /dev/null 2>&1 &)'
+for _ in $(seq 1 20); do in_box 'ss -ltn | grep -q ":9419 "' && break; sleep 1; done
+printf 'yes\nveeam-test\n' | docker exec -i "$NAME" sentora-elk-node veeam-api 127.0.0.1 'OFFICE\viewer' > "$OUT/veeam-api.txt" 2>&1
+grep -q "SHA-256" "$OUT/veeam-api.txt" && grep -q "4 machine(s) with backups, 2 job(s)" "$OUT/veeam-api.txt" && ok "Veeam's API: fingerprint shown and pinned, machines and jobs read" || bad "veeam-api: $(tail -6 "$OUT/veeam-api.txt")"
+in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/veeam.json' | grep -q "^root:sentora-elk-reader 640$" && ok "Veeam's password is root's and the reader's only" || bad "veeam.json is open"
+printf 'no\n' | docker exec -i "$NAME" sentora-elk-node veeam-api 127.0.0.1 'OFFICE\viewer' > "$OUT/veeam-api-no.txt" 2>&1
+grep -q "Not accepted" "$OUT/veeam-api-no.txt" && ok "a fingerprint not accepted changes nothing" || bad "veeam-api without yes: $(tail -3 "$OUT/veeam-api-no.txt")"
+in_box 'sentora-elk-node alerts' | grep -q "OLDAPP02 has no backup" && ok "a machine without a recent backup is an alert" || bad "no alert for the stale backup"
 # the panel sees which are on (with the alerts)
 pphp 'require_once "modules/log_forwarder/code/alerts.php"; elk_alerts::Run(); echo json_encode(elk_alerts::State()["sources"] ?? null), "\n";' > "$OUT/panel-sources.txt" 2>&1
 grep -q '"fortigate":"on"' "$OUT/panel-sources.txt" && ok "the panel's page knows the FortiGate is on" || bad "panel sources: $(cat "$OUT/panel-sources.txt")"
@@ -267,6 +279,7 @@ chk "web firewall: rules with their kind of attack" '{"bool":{"filter":[{"term":
 chk "spam scores" '{"bool":{"filter":[{"term":{"sentora.mail.status":"spam"}},{"exists":{"field":"sentora.mail.spam_score"}}]}}'
 chk "receiving domains of mail" '{"exists":{"field":"email.to.domain"}}'
 chk "search words read from the visits (Magento and WordPress)" '{"terms":{"sentora.search.term":["band saw blade","cold saw"]}}'
+chk "a Magento buying step read from the visits" '{"term":{"sentora.store.step":"search"}}'
 
 say "What it must refuse"
 printf '# marker\nother\t\t\tline from a stranger\n' > "$W/stranger.tsv"

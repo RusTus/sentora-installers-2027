@@ -13,6 +13,7 @@ import os
 DV = {"type": "data_view_reference", "ref_id": "sentora-logs"}
 WEB = 'sentora.log : "web-access"'
 DASHBOARDS = [
+    ("sentora-today", "Today"),
     ("sentora-overview", "Overview"),
     ("sentora-worldmap", "World map"),
     ("sentora-uptime", "Uptime"),
@@ -20,6 +21,7 @@ DASHBOARDS = [
     ("sentora-mail", "Mail"),
     ("sentora-delivery", "Mail delivery"),
     ("sentora-security", "Security"),
+    ("sentora-attackers", "Attackers"),
     ("sentora-firewall", "Web firewall"),
     ("sentora-panel", "Panel and server"),
     ("sentora-health", "Server health"),
@@ -434,9 +436,10 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
 
 # ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
 # Their own links bar; "Overview" leads back to the panel's boards.
-SOURCES = [("sentora-overview", "Panel: Overview"), ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"),
-           ("sentora-threats", "FortiGate: threats"), ("sentora-veeam", "Veeam backups"), ("sentora-m365", "Microsoft 365"),
-           ("sentora-shop", "Online store")]
+SOURCES = [("sentora-today", "Today"), ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
+           ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"), ("sentora-threats", "FortiGate: threats"),
+           ("sentora-internet", "Internet use"), ("sentora-veeam", "Veeam backups"), ("sentora-coverage", "Backup coverage"),
+           ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
 FGT = {"type": "data_view_reference", "ref_id": "sentora-fortigate"}
 VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
 M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
@@ -445,7 +448,7 @@ NAMES.update({"url.domain": "Site", "fortigate.category": "Category", "network.a
               "veeam_job.name": "Job", "veeam_job.why": "Why", "m365.reason": "Why", "veeam_job.result": "Result", "host.name": "Machine", "m365.app": "App", "error.message": "Why",
               "m365.issue.service": "Service", "m365.issue.title": "Problem", "m365.client_app": "Client", "fortigate.subtype": "Kind",
               "sentora.shop.status": "Status", "sentora.shop.country": "Country", "sentora.shop.sku": "Product", "sentora.search.term": "Searched for",
-              "sentora.shop.term": "Searched for", "sentora.shop.product": "Product", "sentora.shop.status": "Status"})
+              "sentora.shop.term": "Searched for", "sentora.store.step": "Step", "data_stream.dataset": "Seen by", "sentora.shop.product": "Product", "sentora.shop.status": "Status"})
 
 
 def on(dv, cfg):
@@ -577,6 +580,11 @@ BOARDS["sentora-m365"] = build_src("sentora-m365", "Microsoft 365", [
                            {"operation": "last_value", "time_field": "@timestamp", "field": "m365.mail.received", "label": "Received"},
                            {"operation": "last_value", "time_field": "@timestamp", "field": "m365.mail.read", "label": "Read"}],
                "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 50, "label": "Person"}]})],
+    [(48, 12, {"type": "data_table", "title": "People signing in from more than one country", "data_source": M365,
+               "query": q(SIGN + ' and event.outcome : "success" and source.geo.country_iso_code : *'),
+               "metrics": [{"operation": "unique_count", "field": "source.geo.country_iso_code", "label": "Countries"}, {"operation": "count", "label": "Sign-ins"}],
+               "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 15, "label": "Person", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}},
+                        {"operation": "terms", "fields": ["source.geo.country_iso_code"], "limit": 5, "label": "Country"}]})],
     [(48, 10, on(M365, table("Microsoft 365 problems open now", 'm365.kind : "service-issue" and @timestamp >= "now-2h"', ["m365.issue.service", "m365.issue.title"], 20, "Seen")))],
     [(48, 3, note("Read from Microsoft Graph every 5 minutes (sign-ins, service problems) and every 6 hours (Teams and mail, Microsoft's "
                   "daily reports, a day or two behind) by sentora-elk-node m365. Sign-ins need Entra ID P1 or P2."))],
@@ -615,6 +623,124 @@ BOARDS["sentora-shop"] = build_src("sentora-shop", "Online store", [
                   "Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."))],
 ])
 BOARDS["sentora-shop"]["time_range"] = {"from": "now-30d", "to": "now"}
+
+# ---- Today: the morning look at everything, one page (each tile opens its own board through the links above)
+ALL = {"type": "data_view_reference", "ref_id": "sentora-all"}
+BAD = ('(event.outcome : "failure" or event.action : waf-* or fortigate.subtype : "ips" or event.action : "ban") and source.ip : * and '
+       'not source.ip : ("10.0.0.0/8" or "172.16.0.0/12" or "192.168.0.0/16" or "127.0.0.0/8")')
+FAILED_LOGINS = 'event.outcome : "failure" and event.action : * and not event.action : waf-*'
+BOARDS["sentora-today"] = build_src("sentora-today", "Today", [
+    [(8, 5, on(SHOP, metric("Orders", ORD, ""))),
+     (8, 5, on(SHOP, metric("Sales", ORD, "", {"operation": "sum", "field": "sentora.shop.base_total", "format": MONEY}))),
+     (8, 5, up({"type": "metric", "title": "Websites up", "data_source": UPDV, "query": q(SITE),
+                "metrics": [{"type": "primary", "operation": "formula", "label": "of the checks", "formula": "count(kql='monitor.status : \"up\"') / count()",
+                             "format": {"type": "percent"}}]})),
+     (8, 5, on(VEEAM, metric("Backup jobs failed", FIN + ' and veeam_job.result : "Failed"', ""))),
+     (8, 5, on(M365, metric("Microsoft problems open", 'm365.kind : "service-issue" and @timestamp >= "now-2h"', "", {"operation": "unique_count", "field": "m365.issue.id"}))),
+     (8, 5, on(DV, metric("Average CPU busy", HEALTH, "", {"operation": "average", "field": "sentora.health.cpu_pct", "format": {"type": "number", "decimals": 0}})))],
+    [(8, 5, on(DV, metric("Failed panel and server logins", FAILED_LOGINS, ""))),
+     (8, 5, on(FGT, metric("Failed VPN logins", 'event.category : "vpn" and event.outcome : "failure"', ""))),
+     (8, 5, on(M365, metric("Failed Microsoft sign-ins", 'm365.kind : "signin" and event.outcome : "failure"', ""))),
+     (8, 5, on(DV, metric("Web firewall stopped", 'event.action : "waf-blocked"', ""))),
+     (8, 5, on(FGT, metric("Attacks stopped (FortiGate)", 'fortigate.subtype : "ips"', ""))),
+     (8, 5, on(FGT, metric("VPN users now", VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats") and @timestamp >= "now-15m"', "",
+                             {"operation": "unique_count", "field": "user.name"})))],
+    [(16, 12, up(table("Websites with failed checks", SITE + " and " + DOWN, ["monitor.name"], 10, "Failed"))),
+     (16, 12, on(VEEAM, table("Backup jobs that failed or warned", FIN + ' and veeam_job.result : ("Failed" or "Warning")', ["veeam_job.name", "veeam_job.result"], 10, "Times"))),
+     (16, 12, {"type": "data_table", "title": "Addresses attacking in several places", "data_source": ALL, "query": q(BAD),
+               "metrics": [{"operation": "unique_count", "field": "data_stream.dataset", "label": "Places"}, {"operation": "count", "label": "Tries"}],
+               "rows": [{"operation": "terms", "fields": ["source.ip"], "limit": 10, "label": "Address", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
+    [(24, 12, on(SHOP, bars("Orders by status", 'sentora.shop.kind : "order"', "sentora.shop.status", 5, "Orders"))),
+     (24, 12, on(DV, bars("Visits to the websites (people and bots)", WEB, "sentora.visitor", 2, "Visits")))],
+    [(48, 3, note("Everything at a glance, for the last 24 hours (change it at the top right). Alerts for what needs a look come as notices in the panel and by mail."))],
+])
+
+# ---- Store funnel: how visitors become orders (Magento's own addresses in the visits), and bots in the store
+PEOPLE = WEB + ' and sentora.visitor : "person"'
+def step(n):
+    return "count(kql='sentora.store.step : \"%s\"')" % n
+BOARDS["sentora-funnel"] = build_src("sentora-funnel", "Store funnel", [
+    [(12, 5, on(DV, metric("Searches", PEOPLE + ' and sentora.store.step : "search"', ""))),
+     (12, 5, on(DV, metric("Added to cart", PEOPLE + ' and sentora.store.step : "cart-add"', ""))),
+     (12, 5, on(DV, metric("Reached checkout", PEOPLE + ' and sentora.store.step : "checkout"', ""))),
+     (12, 5, on(DV, metric("Orders placed", PEOPLE + ' and sentora.store.step : "order-placed"', "")))],
+    [(48, 10, {"type": "data_table", "title": "The funnel, by store (people only, bots left out)", "data_source": DV,
+               "query": q(PEOPLE + " and sentora.domain : *"),
+               "metrics": [{"operation": "count", "label": "Page views"},
+                           {"operation": "formula", "formula": step("search"), "label": "Searches"},
+                           {"operation": "formula", "formula": step("cart-add"), "label": "Cart adds"},
+                           {"operation": "formula", "formula": step("checkout"), "label": "Checkouts"},
+                           {"operation": "formula", "formula": step("order-placed"), "label": "Orders"},
+                           {"operation": "formula", "formula": step("order-placed") + " / " + step("cart-add"), "label": "Carts that became orders", "format": {"type": "percent"}},
+                           {"operation": "formula", "formula": step("cart-add") + " - " + step("order-placed"), "label": "Carts left"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.domain"], "limit": 5, "label": "Store",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
+    [(48, 12, on(DV, bars("Steps over time (people)", PEOPLE + " and sentora.store.step : *", "sentora.store.step", 6, "Visits")))],
+    [(24, 14, on(DV, table("Bots in the store's buying pages", WEB + ' and sentora.visitor : "bot" and sentora.store.step : *', ["user_agent.name", "sentora.store.step"], 15, "Hits"))),
+     (24, 14, on(DV, table("Busiest bots on the websites", WEB + ' and sentora.visitor : "bot"', ["user_agent.name", "sentora.domain"], 15, "Hits")))],
+    [(48, 3, note("Steps come from Magento's own addresses (search, add to cart, cart, checkout, order placed); bots are left out of the funnel. "
+                  "A bot that keeps adding to carts wastes the server's time: QuickFig's Who is crawling can block it."))],
+])
+
+# ---- Attackers across everything: one address, seen by the panel, the FortiGate and Microsoft 365
+BOARDS["sentora-attackers"] = build_src("sentora-attackers", "Attackers across everything", [
+    [(12, 5, on(ALL, metric("Attacking addresses", BAD, "", {"operation": "unique_count", "field": "source.ip"}))),
+     (12, 5, on(ALL, metric("Tries", BAD, ""))),
+     (12, 5, on(ALL, metric("Countries", BAD, "", {"operation": "unique_count", "field": "source.geo.country_iso_code"}))),
+     (12, 5, on(ALL, metric("Banned (fail2ban)", 'event.action : "ban"', "")))],
+    [(28, 16, {"type": "data_table", "title": "Who attacks the most places (block these first)", "data_source": ALL, "query": q(BAD),
+               "metrics": [{"operation": "unique_count", "field": "data_stream.dataset", "label": "Places"}, {"operation": "count", "label": "Tries"},
+                           {"operation": "max", "field": "@timestamp", "label": "Last seen"}],
+               "rows": [{"operation": "terms", "fields": ["source.ip"], "limit": 25, "label": "Address", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}},
+                        {"operation": "terms", "fields": ["source.geo.country_iso_code"], "limit": 1, "label": "Country"}]}),
+     (20, 16, on(ALL, world("Where they come from", BAD, "Tries")))],
+    [(24, 12, on(ALL, bars("Tries over time, by where they were seen", BAD, "data_stream.dataset", 3, "Tries"))),
+     (24, 12, on(ALL, table("What they tried", BAD, ["data_stream.dataset", "event.action"], 15, "Tries")))],
+    [(48, 3, note("Failed logins (panel, SSH, mail, FTP, VPN, Microsoft 365), requests the web firewall stopped, attacks the FortiGate stopped and "
+                  "fail2ban bans, joined by address; inside addresses left out. An address in two places or more within an hour is also an alert. "
+                  "sentora = this panel, fortigate = the FortiGate, m365 = Microsoft 365."))],
+])
+
+# ---- Internet use at the office (FortiGate): when it is busiest, who and what uses it most
+FUN = ('(fortigate.appcat : ("Video/Audio" or "Social.Media" or "Game" or "P2P") or '
+       'fortigate.category : ("Streaming Media and Download" or "Social Networking" or "Games" or "Entertainment" or "Peer-to-peer File Sharing"))')
+BOARDS["sentora-internet"] = build_src("sentora-internet", "Internet use at the office", [
+    [(12, 5, on(FGT, metric("Data moved", "network.bytes : *", "", {"operation": "sum", "field": "network.bytes", "format": {"type": "bytes"}}))),
+     (12, 5, on(FGT, metric("Streaming, social, games", FUN + " and network.bytes : *", "", {"operation": "sum", "field": "network.bytes", "format": {"type": "bytes"}}))),
+     (12, 5, on(FGT, metric("People online", "user.name : * and network.bytes : *", "", {"operation": "unique_count", "field": "user.name"}))),
+     (12, 5, on(FGT, metric("Sites visited", "url.domain : *", "", {"operation": "unique_count", "field": "url.domain"})))],
+    [(48, 13, {"type": "heatmap", "title": "When the internet is busiest (data moved, by hour and day, the FortiGate's time)", "data_source": FGT,
+               "query": q("network.bytes : * and fortigate.hour_n : *"),
+               "metric": {"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}},
+               "x": {"operation": "histogram", "field": "fortigate.hour_n", "granularity": "auto", "label": "Hour"},
+               "y": {"operation": "terms", "fields": ["fortigate.weekday"], "limit": 7, "label": "Day", "rank_by": {"type": "alphabetical", "direction": "asc"}}})],
+    [(24, 14, sum_table("Who uses the most", FGT, "user.name : * and network.bytes : *", ["user.name"], "network.bytes", "Data", 15, {"type": "bytes"})),
+     (24, 14, sum_table("Streaming, social and games, by person", FGT, FUN + " and user.name : * and network.bytes : *", ["user.name", "network.application"], "network.bytes", "Data", 15, {"type": "bytes"}))],
+    [(24, 12, sum_table("Kinds of apps", FGT, "fortigate.appcat : * and network.bytes : *", ["fortigate.appcat"], "network.bytes", "Data", 12, {"type": "bytes"})),
+     (24, 12, {"type": "xy", "title": "Data over time", "query": q("network.bytes : *"), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": FGT, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}]}]})],
+])
+
+# ---- Backup coverage (Veeam's API: sentora-elk-node veeam-api): every machine's newest backup, every job's state
+COVER = 'event.action : "coverage" and @timestamp >= "now-2h"'
+JOBS = 'event.action : "job-state" and @timestamp >= "now-2h"'
+BOARDS["sentora-coverage"] = build_src("sentora-coverage", "Backup coverage", [
+    [(12, 5, on(VEEAM, metric("Machines backed up", COVER, "", {"operation": "unique_count", "field": "host.name"}))),
+     (12, 5, on(VEEAM, metric("Without a backup for a day", COVER + " and veeam_job.hours_since > 26", "", {"operation": "unique_count", "field": "host.name"}))),
+     (12, 5, on(VEEAM, metric("Jobs", JOBS, "", {"operation": "unique_count", "field": "veeam_job.name"}))),
+     (12, 5, on(VEEAM, metric("Jobs whose last run failed", JOBS + ' and veeam_job.result : "Failed"', "", {"operation": "unique_count", "field": "veeam_job.name"})))],
+    [(26, 18, {"type": "data_table", "title": "Every machine: its newest backup (oldest first)", "data_source": VEEAM, "query": q(COVER),
+               "metrics": [{"operation": "min", "field": "veeam_job.hours_since", "label": "Hours ago", "format": {"type": "number", "decimals": 0}},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "veeam_job.last_backup", "label": "Newest backup"}],
+               "rows": [{"operation": "terms", "fields": ["host.name"], "limit": 200, "label": "Machine", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
+      (22, 18, {"type": "data_table", "title": "Every job: last result and next run", "data_source": VEEAM,
+               "query": q('event.action : "job-state" and @timestamp >= "now-70m"'),
+               "metrics": [{"operation": "count", "label": "Readings"}],
+               "rows": [{"operation": "terms", "fields": [f], "limit": lim, "label": lab} for f, lim, lab in
+                        (("veeam_job.name", 100, "Job"), ("veeam_job.result", 1, "Last result"), ("veeam_job.last_run", 1, "Last run"), ("veeam_job.next_run", 1, "Next run"))]})],
+    [(48, 3, note("Read from Veeam's API every hour (sentora-elk-node veeam-api). A machine without a backup for over a day is also an alert in the panel."))],
+])
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))

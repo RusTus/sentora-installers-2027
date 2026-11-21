@@ -1,0 +1,677 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Orders",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "format": {
+       "type": "percent"
+      },
+      "formula": "count(kql='monitor.status : \"up\"') / count()",
+      "label": "of the checks",
+      "operation": "formula",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\"",
+     "language": "kql"
+    },
+    "title": "Websites up",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : \"Failed\"",
+     "language": "kql"
+    },
+    "title": "Backup jobs failed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "m365.issue.id",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"service-issue\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Microsoft problems open",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.health.cpu_pct",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Average CPU busy",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : * and not event.action : waf-*",
+     "language": "kql"
+    },
+    "title": "Failed panel and server logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed VPN logins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 8,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed Microsoft sign-ins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 16,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-blocked\"",
+     "language": "kql"
+    },
+    "title": "Web firewall stopped",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 24,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"ips\"",
+     "language": "kql"
+    },
+    "title": "Attacks stopped (FortiGate)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 32,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "VPN users now",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 40,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Failed",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and monitor.status : \"down\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "monitor.name"
+      ],
+      "label": "Website",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Websites with failed checks",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 0,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : (\"Failed\" or \"Warning\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "veeam_job.name"
+      ],
+      "label": "Job",
+      "limit": 10,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "veeam_job.result"
+      ],
+      "label": "Result",
+      "limit": 10,
+      "operation": "terms"
+     }
+    ],
+    "title": "Backup jobs that failed or warned",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 16,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "data_stream.dataset",
+      "label": "Places",
+      "operation": "unique_count"
+     },
+     {
+      "label": "Tries",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "source.ip"
+      ],
+      "label": "Address",
+      "limit": 10,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Addresses attacking in several places",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.shop.status"
+       ],
+       "label": "Status",
+       "limit": 5,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Orders",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.shop.kind : \"order\"",
+     "language": "kql"
+    },
+    "title": "Orders by status",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 24
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.visitor"
+       ],
+       "label": "Visitor",
+       "limit": 2,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Visits",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\"",
+     "language": "kql"
+    },
+    "title": "Visits to the websites (people and bots)",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 24
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "Everything at a glance, for the last 24 hours (change it at the top right). Alerts for what needs a look come as notices in the panel and by mail."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 36
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Today"
+}
