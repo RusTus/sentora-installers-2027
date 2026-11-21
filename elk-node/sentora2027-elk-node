@@ -624,6 +624,7 @@ printf '%s\n' '[Unit]' "Description=Sentora Elk node: Microsoft 365 / Entra for 
     'RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX' 'UMask=0027' 'MemoryMax=256M' \
     '[Install]' 'WantedBy=multi-user.target' > /etc/systemd/system/sentora-elk-reader.service
 chmod 644 /etc/systemd/system/sentora-elk-reader.service
+mkdir -p /usr/local/lib/sentora-elk; chmod 700 /usr/local/lib/sentora-elk
 get sources/sentora-elk-sources.sh /usr/local/lib/sentora-elk/sources.sh.new && bash -n /usr/local/lib/sentora-elk/sources.sh.new || die "Could not get the sources tool."
 install -m 700 -o root -g root /usr/local/lib/sentora-elk/sources.sh.new /usr/local/lib/sentora-elk/sources.sh; rm -f /usr/local/lib/sentora-elk/sources.sh.new
 run systemctl daemon-reload
