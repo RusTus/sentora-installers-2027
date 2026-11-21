@@ -86,6 +86,14 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-vswall",
+      "label": "vSphere wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Panel: Overview",
       "options": {
@@ -152,6 +160,14 @@
      {
       "destination": "sentora-ad",
       "label": "Active Directory",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vsphere",
+      "label": "vSphere",
       "options": {
        "use_time_range": false
       },
@@ -389,7 +405,7 @@
     "type": "metric"
    },
    "grid": {
-    "h": 24,
+    "h": 15,
     "w": 48,
     "x": 0,
     "y": 8
@@ -461,10 +477,10 @@
     "type": "metric"
    },
    "grid": {
-    "h": 26,
+    "h": 16,
     "w": 48,
     "x": 0,
-    "y": 32
+    "y": 23
    },
    "type": "vis"
   },
@@ -539,10 +555,10 @@
     "type": "metric"
    },
    "grid": {
-    "h": 12,
+    "h": 9,
     "w": 24,
     "x": 0,
-    "y": 58
+    "y": 39
    },
    "type": "vis"
   },
@@ -591,10 +607,10 @@
     "type": "xy"
    },
    "grid": {
-    "h": 12,
+    "h": 9,
     "w": 24,
     "x": 24,
-    "y": 58
+    "y": 39
    },
    "type": "vis"
   }

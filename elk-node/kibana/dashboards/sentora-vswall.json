@@ -1,0 +1,783 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-adwall",
+      "label": "AD wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vswall",
+      "label": "vSphere wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-ad",
+      "label": "Active Directory",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vsphere",
+      "label": "vSphere",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"host\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "title": "Hosts",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"vm\" and vmw.on : true and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "VMs running",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"vm\" and vmw.on : false and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "VMs off",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"datastore\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "title": "Datastores",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1,
+         "lt": 3
+        },
+        {
+         "color": "#EB5757",
+         "gte": 3
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.alarms > 0 and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "With an alarm now",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1,
+         "lt": 5
+        },
+        {
+         "color": "#EB5757",
+         "gte": 5
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "vmw.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"vm\" and vmw.snapshot_days > 3 and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "Snapshots older than 3 days",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "formula": "average(vmw.cpu_pct) * 100",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "formula"
+    },
+    "query": {
+     "expression": "vmw.kind : \"host\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "Hosts' CPU (average)",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 0,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "formula": "average(vmw.mem_pct) * 100",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "formula"
+    },
+    "query": {
+     "expression": "vmw.kind : \"host\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "Hosts' memory (average)",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 12,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "vmw.name"
+     ],
+     "label": "Name",
+     "limit": 4,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 0.7
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 0.7,
+         "lt": 0.9
+        },
+        {
+         "color": "#EB5757",
+         "gte": 0.9
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "vmw.cpu_pct",
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "label": "CPU",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     },
+     {
+      "field": "vmw.mem_pct",
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "label": "memory",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"host\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "title": "Hosts (CPU now, memory under it)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 10,
+    "w": 24,
+    "x": 24,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 6,
+     "fields": [
+      "vmw.name"
+     ],
+     "label": "Name",
+     "limit": 12,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 0.7
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 0.7,
+         "lt": 0.9
+        },
+        {
+         "color": "#EB5757",
+         "gte": 0.9
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "vmw.used_pct",
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "label": "used",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     },
+     {
+      "field": "vmw.free_gb",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "GB free",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"datastore\" and @timestamp >= \"now-30m\"",
+     "language": "kql"
+    },
+    "title": "Datastores (how full)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 9,
+    "w": 48,
+    "x": 0,
+    "y": 18
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 9,
+     "fields": [
+      "vmw.name"
+     ],
+     "label": "Name",
+     "limit": 27,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-vsphere",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 0.7
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 0.7,
+         "lt": 0.9
+        },
+        {
+         "color": "#EB5757",
+         "gte": 0.9
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "vmw.cpu_pct",
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "label": "CPU",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     },
+     {
+      "field": "vmw.host",
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "vmw.kind : \"vm\" and vmw.on : true and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "Virtual machines (CPU now; grey on the right: its host)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 18,
+    "w": 48,
+    "x": 0,
+    "y": 27
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "title": "Sentora: vSphere wall"
+}

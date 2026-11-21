@@ -533,6 +533,8 @@ class module_controller extends ctrl_module
             'fortigate' => array('FortiGate', 'Sites people visit, VPN and FortiClient users, threats.', 'sentora-elk-node fortigate FORTIGATE-ADDRESS'),
             'veeam' => array('Veeam Backup & Replication', 'Backup jobs and their results; a failed job is an alert here.', 'sentora-elk-node veeam VEEAM-SERVER-ADDRESS'),
             'm365' => array('Microsoft 365 / Entra', 'Sign-ins on a map, Teams and mail activity, Microsoft\'s open problems.', 'sentora-elk-node m365 TENANT-ID APP-ID'),
+            'windows' => array('Active Directory', 'Logons, lockouts, admin group and account changes from the domain controllers (Winlogbeat on each).', 'sentora-elk-node windows DC-ADDRESS'),
+            'vsphere' => array('VMware vSphere', 'Hosts, VMs and datastores from vCenter each minute: CPU, memory, space, alarms, snapshots.', 'sentora-elk-node vsphere VCENTER-ADDRESS USER'),
         );
         $out = '<div class="ek-card"><h3>' . self::t('More sources on the Elk node') . '</h3>'
             . '<p class="ek-muted ek-after-top">' . self::t('Besides this panel, the Elk node can show these, each on its own dashboards. Each is switched on on the node, as root; the command then shows the steps for the other side.') . '</p><div class="ek-groups">';

@@ -1,0 +1,100 @@
+{
+  "index_patterns": [
+    "logs-vsphere-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "_meta": {
+    "description": "Sentora Elk node: VMware vCenter / ESXi, read each minute by Metricbeat (sentora-elk-node vsphere)"
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0,
+      "index.default_pipeline": "logs@default-pipeline"
+    },
+    "mappings": {
+      "properties": {
+        "vsphere": {
+          "type": "flattened",
+          "ignore_above": 1024
+        },
+        "vmw": {
+          "properties": {
+            "kind": {
+              "type": "keyword"
+            },
+            "name": {
+              "type": "keyword"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "health": {
+              "type": "double"
+            },
+            "cpu_pct": {
+              "type": "double"
+            },
+            "mem_pct": {
+              "type": "double"
+            },
+            "vms": {
+              "type": "integer"
+            },
+            "hosts": {
+              "type": "integer"
+            },
+            "uptime_days": {
+              "type": "double"
+            },
+            "host": {
+              "type": "keyword"
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "os": {
+              "type": "keyword"
+            },
+            "mem_gb": {
+              "type": "double"
+            },
+            "snapshots": {
+              "type": "integer"
+            },
+            "snapshot_days": {
+              "type": "double"
+            },
+            "used_pct": {
+              "type": "double"
+            },
+            "free_gb": {
+              "type": "double"
+            },
+            "total_gb": {
+              "type": "double"
+            },
+            "fstype": {
+              "type": "keyword"
+            },
+            "alarms": {
+              "type": "integer"
+            },
+            "alarm": {
+              "type": "keyword"
+            },
+            "alarm_status": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  }
+}

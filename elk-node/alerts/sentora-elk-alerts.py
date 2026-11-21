@@ -47,7 +47,10 @@ LIMITS = {
     "backup_hours": 26,      # Veeam: a machine whose newest backup is older than this
     "repo_pct": 90,          # Veeam: a repository this full
     "ad_fail_user": 15,      # Active Directory: failed logons of one account in 15 minutes (someone guessing its password)
-    "ad_quiet_hours": 6,     # Active Directory: a domain controller that sent nothing for this long (while it did the day before)
+    "ad_quiet_hours": 6,
+    "vs_ds_pct": 90,         # vSphere: a datastore this full (an outage at 97)
+    "vs_host_pct": 90,       # vSphere: a host's CPU or memory this busy, on average over 15 minutes
+    "vs_snapshot_days": 7,   # vSphere: a VM snapshot older than this (snapshots grow and slow the VM)     # Active Directory: a domain controller that sent nothing for this long (while it did the day before)
 }
 
 
@@ -260,6 +263,41 @@ def check():
             found.append(("ad-quiet:" + slug(b["key"]), "warning", "%s sent nothing for %d hours" % (b["key"], q_h),
                           "The domain controller %s has sent no security event for over %d hours. On it: Get-Service winlogbeat (and its log in C:\\ProgramData\\winlogbeat\\logs)."
                           % (b["key"], q_h), "sentora-adwall"))
+
+    # VMware vSphere (when read): datastores, hosts, alarms, old snapshots, vCenter gone quiet
+    r = es("/logs-vsphere-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [{"range": {"@timestamp": {"gte": "now-15m"}}}]}},
+        "aggs": {"k": {"terms": {"field": "vmw.kind", "size": 10}, "aggs": {"n": {"terms": {"field": "vmw.name", "size": 2000},
+            "aggs": {"t": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["vmw"]}},
+                     "cpu": {"avg": {"field": "vmw.cpu_pct"}}, "mem": {"avg": {"field": "vmw.mem_pct"}}}}}}}})
+    for k in r.get("aggregations", {}).get("k", {}).get("buckets", []):
+        for b in k["n"]["buckets"]:
+            w = (b["t"]["hits"]["hits"][0]["_source"].get("vmw") or {}) if b["t"]["hits"]["hits"] else {}
+            name, kind = b["key"], k["key"]
+            u = w.get("used_pct")
+            if kind == "datastore" and isinstance(u, (int, float)) and u * 100 >= L["vs_ds_pct"]:
+                found.append(("vsphere-ds:" + slug(name), "outage" if u >= 0.97 else "warning", "Datastore %s is %d%% full" % (name[:80], u * 100),
+                              "The vSphere datastore %s is %.0f%% full (%.0f GB free; the alert starts at %d%%): VMs on it stop when it is full."
+                              % (name[:120], u * 100, w.get("free_gb") or 0, L["vs_ds_pct"]), "sentora-vswall"))
+            if kind == "host" and w.get("status") == "red":
+                found.append(("vsphere-host:" + slug(name), "outage", "vSphere host %s is red" % name[:80],
+                              "vCenter shows the host %s in red: look at it in vCenter (its alarms say why)." % name[:120], "sentora-vswall"))
+            if kind == "host":
+                busy = max(b["cpu"].get("value") or 0, b["mem"].get("value") or 0)
+                if busy * 100 >= L["vs_host_pct"]:
+                    found.append(("vsphere-busy:" + slug(name), "warning", "vSphere host %s is %d%% busy" % (name[:80], busy * 100),
+                                  "The host %s used %.0f%% of its CPU and %.0f%% of its memory on average over 15 minutes: its VMs may be slow."
+                                  % (name[:120], (b["cpu"].get("value") or 0) * 100, (b["mem"].get("value") or 0) * 100), "sentora-vswall"))
+            if w.get("alarm_status") == "red":
+                found.append(("vsphere-alarm:" + slug(kind + "-" + name), "warning", "vSphere: %s on %s" % (str(w.get("alarm") or "an alarm")[:60], name[:60]),
+                              "vCenter has a red alarm on the %s %s: %s." % ({"vm": "VM"}.get(kind, kind), name[:120], str(w.get("alarm") or "?")[:200]), "sentora-vsphere"))
+            sd = w.get("snapshot_days")
+            if kind == "vm" and isinstance(sd, (int, float)) and sd > L["vs_snapshot_days"]:
+                found.append(("vsphere-snap:" + slug(name), "warning", "%s has a snapshot %d days old" % (name[:80], sd),
+                              "The VM %s has a snapshot %.0f days old (the alert starts after %d days). Old snapshots keep growing and slow the VM: "
+                              "delete it in vCenter once it is not needed." % (name[:120], sd, L["vs_snapshot_days"]), "sentora-vsphere"))
+    if count("logs-vsphere-*", "now-1d", []) > 0 and count("logs-vsphere-*", "now-15m", []) == 0:
+        found.append(("vsphere-quiet:vcenter", "warning", "Nothing from vCenter for 15 minutes",
+                      "The Elk node has read nothing from vCenter for 15 minutes. On the Elk node: journalctl -u sentora-vsphere -n 30.", "sentora-vswall"))
 
     # an address that attacks in more than one place (the panel, the FortiGate, Microsoft 365) within an hour
     bad = {"bool": {"should": [{"term": {"event.outcome": "failure"}}, {"prefix": {"event.action": "waf-"}},

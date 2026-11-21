@@ -441,11 +441,11 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
 # ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
 # Their own links bar; "Overview" leads back to the panel's boards.
 SOURCES = [("sentora-today", "Today"), ("sentora-week", "Week"), ("sentora-flows", "Flows"), ("sentora-serverwall", "Server wall"), ("sentora-backupwall", "Backup wall"),
-           ("sentora-netwall", "Network wall"), ("sentora-secwall", "Security wall"), ("sentora-m365wall", "Microsoft 365 wall"), ("sentora-saleswall", "Sales wall"), ("sentora-adwall", "AD wall"),
+           ("sentora-netwall", "Network wall"), ("sentora-secwall", "Security wall"), ("sentora-m365wall", "Microsoft 365 wall"), ("sentora-saleswall", "Sales wall"), ("sentora-adwall", "AD wall"), ("sentora-vswall", "vSphere wall"),
            ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
            ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"), ("sentora-threats", "FortiGate: threats"),
            ("sentora-internet", "Internet use"), ("sentora-veeam", "Veeam backups"), ("sentora-coverage", "Backup coverage"),
-           ("sentora-ad", "Active Directory"), ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
+           ("sentora-ad", "Active Directory"), ("sentora-vsphere", "vSphere"), ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
 FGT = {"type": "data_view_reference", "ref_id": "sentora-fortigate"}
 VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
 M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
@@ -801,14 +801,14 @@ BOARDS["sentora-backupwall"] = build_src("sentora-backupwall", "Backup wall", [
      (12, 6, tile("Jobs with warnings", VEEAM, JOBQ + ' and veeam_job.health >= 0.5 and veeam_job.health < 1', {"operation": "unique_count", "field": "veeam_job.name"}, {"type": "static", "color": YELLOW})),
      (12, 6, tile("Jobs failed", VEEAM, JOBQ + ' and veeam_job.health < 0.5', {"operation": "unique_count", "field": "veeam_job.name"}, {"type": "static", "color": RED})),
      (12, 6, tile("Machines protected", VEEAM, COVER, {"operation": "unique_count", "field": "host.name"}, {"type": "static", "color": BLUE}))],
-    [(48, 24, tile("Backup jobs (each one's last result)", VEEAM, JOBQ, last("veeam_job.health"), HEALTHY, "health", PCT,
+    [(48, 15, tile("Backup jobs (each one's last result)", VEEAM, JOBQ, last("veeam_job.health"), HEALTHY, "health", PCT,
                    secondary=dict(last("veeam_job.result"), label="last result"), by="veeam_job.name", limit=15, columns=5))],
-    [(48, 26, tile("Machines (hours since their newest backup)", VEEAM, COVER, {"operation": "min", "field": "veeam_job.hours_since"},
+    [(48, 16, tile("Machines (hours since their newest backup)", VEEAM, COVER, {"operation": "min", "field": "veeam_job.hours_since"},
                    bands((None, 26, GREEN), (26, 48, YELLOW), (48, None, RED)), "hours ago", {"type": "number", "decimals": 0},
                    secondary=dict(last("veeam_job.platform"), label=""), by="host.name", limit=24, columns=6))],
-    [(24, 12, tile("Repositories (how full)", VEEAM, REPOQ, last("veeam_repo.used_pct"), BUSY, "used", {"type": "number", "decimals": 0, "suffix": "%"},
+    [(24, 9, tile("Repositories (how full)", VEEAM, REPOQ, last("veeam_repo.used_pct"), BUSY, "used", {"type": "number", "decimals": 0, "suffix": "%"},
                    secondary=dict(last("veeam_repo.free_gb"), label="GB free", format={"type": "number", "decimals": 0}), by="veeam_repo.name", limit=6, columns=3)),
-     (24, 12, {"type": "xy", "title": "Job results over the last days", "query": q('event.action : "job-finished"'), "legend": {"visibility": "visible", "position": "right"},
+     (24, 9, {"type": "xy", "title": "Job results over the last days", "query": q('event.action : "job-finished"'), "legend": {"visibility": "visible", "position": "right"},
                "layers": [{"type": "bar_stacked", "data_source": VEEAM, "x": {"operation": "date_histogram", "field": "@timestamp"},
                            "y": [{"operation": "count", "label": "Jobs"}],
                            "breakdown_by": {"operation": "terms", "fields": ["veeam_job.result"], "limit": 3, "label": "Result",
@@ -903,7 +903,7 @@ BOARDS["sentora-netwall"] = build_src("sentora-netwall", "Network wall", [
      (16, 14, blocks("Apps now (15 minutes)", FGT, "network.application : * and network.bytes : *" + NOW15, ["fortigate.appcat", "network.application"],
                      {"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}, 6)),
      (16, 14, ring("Kinds of sites now (15 minutes)", FGT, "fortigate.category : *" + NOW15, "fortigate.category", None, 8))],
-    [(48, 11, area("Internet use, by kind of app", FGT, "fortigate.appcat : * and network.bytes : *",
+    [(48, 10, area("Internet use, by kind of app", FGT, "fortigate.appcat : * and network.bytes : *",
                    [{"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}], "fortigate.appcat", 6))],
 ])
 BOARDS["sentora-netwall"]["time_range"] = {"from": "now-6h", "to": "now"}
@@ -1071,6 +1071,70 @@ BOARDS["sentora-ad"] = build_src("sentora-ad", "Active Directory", [
 ])
 BOARDS["sentora-ad"]["time_range"] = {"from": "now-7d", "to": "now"}
 
+# ---- VMware vSphere (vCenter read by Metricbeat each minute: sentora-elk-node vsphere)
+VSD = {"type": "data_view_reference", "ref_id": "sentora-vsphere"}
+NAMES.update({"vmw.name": "Name", "vmw.host": "Host", "vmw.kind": "Kind", "vmw.alarm": "Alarm", "vmw.os": "System", "vmw.status": "State"})
+HOSTQ, VMQ, DSQ = 'vmw.kind : "host"', 'vmw.kind : "vm"', 'vmw.kind : "datastore"'
+BUSY1 = bands((None, 0.7, GREEN), (0.7, 0.9, YELLOW), (0.9, None, RED))
+NOW30 = ' and @timestamp >= "now-30m"'
+BOARDS["sentora-vswall"] = build_src("sentora-vswall", "vSphere wall", [
+    [(8, 6, tile("Hosts", VSD, HOSTQ + NOW30, {"operation": "unique_count", "field": "vmw.name"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("VMs running", VSD, VMQ + " and vmw.on : true" + ' and @timestamp >= "now-5m"', {"operation": "unique_count", "field": "vmw.name"}, {"type": "static", "color": GREEN})),
+     (8, 6, tile("VMs off", VSD, VMQ + " and vmw.on : false" + ' and @timestamp >= "now-5m"', {"operation": "unique_count", "field": "vmw.name"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("Datastores", VSD, DSQ + NOW30, {"operation": "unique_count", "field": "vmw.name"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("With an alarm now", VSD, "vmw.alarms > 0" + ' and @timestamp >= "now-5m"', {"operation": "unique_count", "field": "vmw.name"}, LOW(1, 3))),
+     (8, 6, tile("Snapshots older than 3 days", VSD, VMQ + " and vmw.snapshot_days > 3" + ' and @timestamp >= "now-5m"', {"operation": "unique_count", "field": "vmw.name"}, LOW(1, 5)))],
+    [(12, 10, dial("Hosts' CPU (average)", VSD, HOSTQ + NOW30, {"operation": "formula", "formula": "average(vmw.cpu_pct) * 100"}, BUSY)),
+     (12, 10, dial("Hosts' memory (average)", VSD, HOSTQ + NOW30, {"operation": "formula", "formula": "average(vmw.mem_pct) * 100"}, BUSY)),
+     (24, 10, tile("Hosts (CPU now, memory under it)", VSD, HOSTQ + NOW30, last("vmw.cpu_pct"), BUSY1, "CPU", PCT,
+                   secondary=dict(last("vmw.mem_pct"), label="memory", format=PCT), by="vmw.name", limit=4, columns=4))],
+    [(48, 9, tile("Datastores (how full)", VSD, DSQ + NOW30, last("vmw.used_pct"), BUSY1, "used", PCT,
+                   secondary=dict(last("vmw.free_gb"), label="GB free", format={"type": "number", "decimals": 0}), by="vmw.name", limit=12, columns=6))],
+    [(48, 18, tile("Virtual machines (CPU now; grey on the right: its host)", VSD, VMQ + " and vmw.on : true" + ' and @timestamp >= "now-5m"', last("vmw.cpu_pct"), BUSY1, "CPU", PCT,
+                   secondary=dict(last("vmw.host"), label=""), by="vmw.name", limit=27, columns=9))],
+])
+BOARDS["sentora-vswall"]["time_range"] = {"from": "now-6h", "to": "now"}
+BOARDS["sentora-vswall"]["refresh_interval"] = {"pause": False, "value": 60000}
+
+def lasts(title, kql, cols, rows_field, limit=50, rank=None):
+    t = {"type": "data_table", "title": title, "data_source": VSD, "query": q(kql),
+         # (a table can not sort by a last value: the column it sorts by is the highest instead)
+         "metrics": [dict(last(f) if i != rank else {"operation": "max", "field": f}, label=lab, **({"format": fm} if fm else {}))
+                     for i, (f, lab, fm) in enumerate(cols)],
+         "rows": [{"operation": "terms", "fields": [rows_field], "limit": limit, "label": NAMES.get(rows_field, rows_field)}]}
+    t["rows"][0]["rank_by"] = {"type": "metric", "metric_index": rank, "direction": "desc"} if rank is not None else {"type": "alphabetical", "direction": "asc"}
+    return t
+GB = {"type": "number", "decimals": 0}
+BOARDS["sentora-vsphere"] = build_src("sentora-vsphere", "vSphere", [
+    [(24, 12, lasts("Hosts", HOSTQ + NOW30, [("vmw.cpu_pct", "CPU", PCT), ("vmw.mem_pct", "Memory", PCT), ("vmw.vms", "VMs", None),
+                                              ("vmw.uptime_days", "Days up", {"type": "number", "decimals": 0}), ("vmw.status", "State", None)], "vmw.name", 20)),
+     (24, 12, lasts("Datastores", DSQ + NOW30, [("vmw.used_pct", "Used", PCT), ("vmw.free_gb", "GB free", GB), ("vmw.total_gb", "GB in all", GB),
+                                                  ("vmw.vms", "VMs", None), ("vmw.status", "State", None)], "vmw.name", 30, rank=0))],
+    [(24, 14, {"type": "data_table", "title": "Busiest VMs (average CPU and memory)", "data_source": VSD, "query": q(VMQ + " and vmw.on : true"),
+               "metrics": [{"operation": "average", "field": "vmw.cpu_pct", "label": "CPU", "format": PCT}, {"operation": "average", "field": "vmw.mem_pct", "label": "Memory", "format": PCT},
+                           dict(last("vmw.host"), label="Host")],
+               "rows": [{"operation": "terms", "fields": ["vmw.name"], "limit": 20, "label": "VM", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
+     (24, 14, blocks("Memory given to VMs, by host", VSD, VMQ + NOW30, ["vmw.host", "vmw.name"], {"operation": "max", "field": "vmw.mem_gb", "label": "GB"}, 12))],
+    [(16, 12, lasts("Alarms now", "vmw.alarms > 0" + ' and @timestamp >= "now-15m"', [("vmw.alarm", "Alarm", None), ("vmw.alarm_status", "Level", None), ("vmw.kind", "Kind", None)], "vmw.name", 30)),
+     (16, 12, lasts("Snapshots (oldest first)", VMQ + " and vmw.snapshots > 0" + NOW30, [("vmw.snapshot_days", "Days old", {"type": "number", "decimals": 1}), ("vmw.snapshots", "Snapshots", None)], "vmw.name", 30, rank=0)),
+     (16, 12, lasts("VMs that are off", VMQ + " and vmw.on : false" + ' and @timestamp >= "now-5m"', [("vmw.host", "Host", None), ("vmw.os", "System", None)], "vmw.name", 50))],
+    [(24, 11, {"type": "xy", "title": "Hosts' CPU over time", "query": q(HOSTQ), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "line", "data_source": VSD, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "average", "field": "vmw.cpu_pct", "label": "CPU", "format": PCT}],
+                           "breakdown_by": {"operation": "terms", "fields": ["vmw.name"], "limit": 8, "label": "Host"}}]}),
+     (24, 11, ring("Running VMs per host", VSD, VMQ + " and vmw.on : true" + ' and @timestamp >= "now-5m"', "vmw.host", {"operation": "unique_count", "field": "vmw.name", "label": "VMs"}, 8))],
+    [(24, 11, {"type": "xy", "title": "Hosts' memory over time", "query": q(HOSTQ), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "line", "data_source": VSD, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "average", "field": "vmw.mem_pct", "label": "Memory", "format": PCT}],
+                           "breakdown_by": {"operation": "terms", "fields": ["vmw.name"], "limit": 8, "label": "Host"}}]}),
+     (24, 11, {"type": "xy", "title": "Datastores filling up", "query": q(DSQ), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "line", "data_source": VSD, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "max", "field": "vmw.used_pct", "label": "Used", "format": PCT}],
+                           "breakdown_by": {"operation": "terms", "fields": ["vmw.name"], "limit": 10, "label": "Datastore"}}]})],
+    [(48, 3, note("Read from vCenter every minute by Metricbeat on the Elk node with a read-only user (sentora-elk-node vsphere VCENTER USER). "
+                  "Alerts in the panel: a datastore filling up, a host in red or too busy, a red alarm, a snapshot older than a week, vCenter gone quiet."))],
+])
+
 # ---- Flows (Sankey): where things come from, where they go, how they end. Vega (Kibana's custom charts), saved as
 # visualizations and put on the Flows board by addvis.py (the dashboards API takes no Vega panel).
 def sankey(title, index, must, fields, sizes=(8, 6, 6), metric=None, unit=""):
@@ -1187,11 +1251,11 @@ FLOWS = {
 FLOWS["sentora-flow-ad"] = sankey("Failed logons: from where \u2192 account \u2192 why", "logs-windows-*",
                                   [{"term": {"event.outcome": "failure"}}, {"exists": {"field": "windows.reason"}}],
                                   ["windows.from", "user.name", "windows.reason"], (10, 10, 6))
-FLOW_PLACES = [("sentora-flow-attacks", 0, 2, 48, 22), ("sentora-flow-visits", 0, 24, 24, 22), ("sentora-flow-internet", 24, 24, 24, 22), ("sentora-flow-ad", 0, 46, 48, 22)]
+FLOW_PLACES = [("sentora-flow-attacks", 0, 2, 24, 22), ("sentora-flow-ad", 24, 2, 24, 22), ("sentora-flow-visits", 0, 24, 24, 22), ("sentora-flow-internet", 24, 24, 24, 22)]
 BOARDS["sentora-flows"] = build_src("sentora-flows", "Flows", [
     [(48, 1, note(" "))]])
 BOARDS["sentora-flows"]["panels"] = BOARDS["sentora-flows"]["panels"][:1] + [
-    {"type": "markdown", "grid": {"x": 0, "y": 68, "w": 48, "h": 3}, "config": {"content":
+    {"type": "markdown", "grid": {"x": 0, "y": 46, "w": 48, "h": 2}, "config": {"content":
         "Each band runs from where something comes from to where it went: the wider, the more. Point at a band for its number. "
         "Attacks: failed logins, the web firewall, FortiGate attacks and bans (inside addresses left out). Internet: data moved through the FortiGate."}}]
 

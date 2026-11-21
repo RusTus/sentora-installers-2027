@@ -86,6 +86,14 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-vswall",
+      "label": "vSphere wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Panel: Overview",
       "options": {
@@ -158,6 +166,14 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-vsphere",
+      "label": "vSphere",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-m365",
       "label": "Microsoft 365",
       "options": {
@@ -196,10 +212,10 @@
     "content": "Each band runs from where something comes from to where it went: the wider, the more. Point at a band for its number. Attacks: failed logins, the web firewall, FortiGate attacks and bans (inside addresses left out). Internet: data moved through the FortiGate."
    },
    "grid": {
-    "h": 3,
+    "h": 2,
     "w": 48,
     "x": 0,
-    "y": 68
+    "y": 46
    },
    "type": "markdown"
   }

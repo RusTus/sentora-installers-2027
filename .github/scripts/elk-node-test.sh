@@ -29,7 +29,7 @@ cleanup() {
     docker exec "$NAME" sh -c 'cat /var/log/logstash/logstash-plain.log' > "$OUT/logstash-plain.log" 2>&1
     docker logs "$PNAME" > "$OUT/panel-first-start.log" 2>&1
     docker exec "$PNAME" sh -c 'cat /etc/rsyslog.d/60-sentora-logforward.conf; journalctl -u rsyslog --no-pager | tail -40' > "$OUT/panel-rsyslog.txt" 2>&1
-    [ -n "${TEST_KEEP:-}" ] || { docker rm -f "$NAME" "$PNAME" > /dev/null 2>&1; rm -rf "$W"; }
+    [ -n "${TEST_KEEP:-}" ] || { docker rm -f "$NAME" "$PNAME" elk-vcsim elk-fb-dc elk-fb-wrongip elk-fb-other > /dev/null 2>&1; rm -rf "$W"; }
 }
 trap cleanup EXIT
 
@@ -112,7 +112,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 [ "$(KB '/api/saved_objects/dashboard/sentora-flows' | grep -o '"id":"sentora-flow-[a-z]*"' | sort -u | wc -l)" = 4 ] && ok "the four flow charts are on the Flows dashboard" || bad "the flow charts are not on the Flows dashboard"
 KB '/api/saved_objects/visualization/sentora-flow-attacks' | grep -q 'vega.github.io/schema' && ok "the flow charts are Vega charts" || bad "the attacks flow chart is not a Vega chart"
@@ -207,7 +207,9 @@ sleep 8; es -X POST 'https://127.0.0.1:9200/logs-fortigate-*/_refresh' > /dev/nu
 # Veeam: its events over TLS on 6517 (no certificate of its own); a failed job becomes an alert
 in_box "sentora-elk-node veeam $GW" > "$OUT/veeam-on.txt" 2>&1 && grep -q "Event Forwarding" "$OUT/veeam-on.txt" && ok "sentora-elk-node veeam: switched on, with Veeam's steps" || bad "veeam on: $(tail -5 "$OUT/veeam-on.txt")"
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6517 " && ss -ltn | grep -q "127.0.0.1:5517 "' && break; sleep 3; done
-python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6517 "$W/node-ca.crt" - - "$REPO/tests/elk/veeam.txt" > "$OUT/veeam-send.txt" 2>&1
+# (the lines dated today: the failed-job alert looks at the last 26 hours)
+sed "s/ 2026-11-20T/ $(date -u +%Y-%m-%d)T/" "$REPO/tests/elk/veeam.txt" > "$W/veeam-today.txt"
+python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6517 "$W/node-ca.crt" - - "$W/veeam-today.txt" > "$OUT/veeam-send.txt" 2>&1
 n=$(waitcnt 'logs-veeam-*' '{"query":{"match_all":{}}}' 7)
 [ "$n" = 7 ] && ok "Veeam's 7 events arrived" || bad "Veeam events: $n of 7 ($(cat "$OUT/veeam-send.txt"))"
 [ "$(cnt 'logs-veeam-*' '{"query":{"bool":{"filter":[{"term":{"veeam_job.name":"Offsite Copy"}},{"term":{"veeam_job.result":"Failed"}}]}}}')" = 1 ] && ok "a failed job with its name and result" || bad "the failed job was not read"
@@ -250,7 +252,26 @@ grep -q "mlee is locked out" "$OUT/ad-alerts.txt" && grep -q "Eve Example was ad
 fbsend wrongip "$W/dcx.crt" "$W/dcx.key"; fbsend other "$W/other.crt" "$W/other.key"
 sleep 30; docker rm -f elk-fb-wrongip elk-fb-other > /dev/null 2>&1; es -X POST 'https://127.0.0.1:9200/logs-windows-*/_refresh' > /dev/null 2>&1
 [ "$(cnt 'logs-windows-*' '{"query":{"match_all":{}}}')" = 13 ] && ok "6518 takes nothing with another address's or another authority's certificate" || bad "6518 took events it should not have"
-in_box 'sentora-elk-node sources' > "$OUT/sources.txt" 2>&1; grep -q "^fortigate *on" "$OUT/sources.txt" && grep -q "^veeam *on" "$OUT/sources.txt" && grep -q "^windows *on ($GW)" "$OUT/sources.txt" && ok "sentora-elk-node sources lists them" || bad "sources: $(cat "$OUT/sources.txt")"
+# VMware vCenter: Metricbeat on the node reads it (VMware's own simulator, vcsim, stands in: 4 hosts, 12 VMs, 2 datastores)
+docker rm -f elk-vcsim > /dev/null 2>&1
+docker run -d --name elk-vcsim vmware/vcsim:latest -l 0.0.0.0:443 -cluster 1 -host 3 -vm 6 -ds 2 > /dev/null
+VC=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' elk-vcsim)
+for _ in $(seq 1 20); do in_box "timeout 3 bash -c '</dev/tcp/$VC/443'" 2> /dev/null && break; sleep 2; done
+printf 'no\n' | docker exec -i "$NAME" sentora-elk-node vsphere "$VC" user > "$OUT/vsphere-no.txt" 2>&1
+grep -q "Not accepted" "$OUT/vsphere-no.txt" && in_box '! test -e /etc/sentora-elk/sources/vsphere' && ok "a vCenter certificate not confirmed changes nothing" || bad "vsphere without yes: $(tail -3 "$OUT/vsphere-no.txt")"
+printf 'yes\npass\n' | docker exec -i "$NAME" sentora-elk-node vsphere "$VC" user > "$OUT/vsphere-on.txt" 2>&1
+grep -q "SHA-256" "$OUT/vsphere-on.txt" && grep -q "vCenter answers:.*host" "$OUT/vsphere-on.txt" && ok "sentora-elk-node vsphere: certificate shown, vCenter answers" || bad "vsphere on: $(tail -6 "$OUT/vsphere-on.txt")"
+in_box 'systemctl is-active --quiet sentora-vsphere && ps -o user= -C metricbeat | grep -qx sentora-vsphere' && ok "Metricbeat reads vCenter as its own user" || bad "sentora-vsphere: $(in_box 'systemctl status sentora-vsphere --no-pager 2>&1 | tail -5')"
+in_box "grep -q '^$VC example.com # sentora-vsphere\$' /etc/hosts && grep -q 'https://example.com/sdk' /etc/sentora-elk-vsphere/metricbeat.yml && grep -q 'insecure: false' /etc/sentora-elk-vsphere/metricbeat.yml" \
+    && ok "it connects by the certificate's own name, checking it (insecure: false)" || bad "vsphere name or check: $(in_box 'grep sentora-vsphere /etc/hosts; grep -E "hosts|insecure" /etc/sentora-elk-vsphere/metricbeat.yml')"
+in_box 'stat -c "%U:%G %a" /etc/sentora-elk-vsphere/metricbeat.yml' | grep -q "^root:sentora-vsphere 640$" && ! grep -q "pass" <(in_box 'cat /etc/sentora-elk-vsphere/../sentora-elk/sources/vsphere') && ok "vCenter's password is root's and Metricbeat's only" || bad "metricbeat.yml is open"
+vsn() { es "'https://127.0.0.1:9200/logs-vsphere-*/_search?size=0' -d '{\"query\":{\"term\":{\"vmw.kind\":\"$1\"}},\"aggs\":{\"n\":{\"cardinality\":{\"field\":\"vmw.name\"}}}}'" 2> /dev/null | sed -n 's/.*"n":{"value":\([0-9]*\)}.*/\1/p'; }
+for _ in $(seq 1 30); do [ "$(vsn vm)" = 12 ] && break; sleep 5; done
+[ "$(vsn host)" = 4 ] && [ "$(vsn vm)" = 12 ] && [ "$(vsn datastore)" = 2 ] && ok "vCenter's 4 hosts, 12 VMs and 2 datastores arrived" || bad "vsphere: hosts $(vsn host), VMs $(vsn vm), datastores $(vsn datastore)"
+[ "$(cnt 'logs-vsphere-*' '{"query":{"bool":{"filter":[{"term":{"vmw.kind":"host"}},{"exists":{"field":"vmw.cpu_pct"}},{"exists":{"field":"vmw.mem_pct"}}]}}}')" -ge 4 ] && ok "hosts with their CPU and memory" || bad "hosts without CPU or memory"
+in_box 'echo "{\"vs_ds_pct\": 1}" > /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > "$OUT/vs-alerts.txt" 2>&1; in_box 'rm -f /etc/sentora-elk-alerts/limits.json'
+grep -q "Datastore LocalDS_0 is" "$OUT/vs-alerts.txt" && ok "a datastore over its limit is an alert" || bad "no datastore alert: $(grep -i vsphere "$OUT/vs-alerts.txt" | head -3)"
+in_box 'sentora-elk-node sources' > "$OUT/sources.txt" 2>&1; grep -q "^fortigate *on" "$OUT/sources.txt" && grep -q "^veeam *on" "$OUT/sources.txt" && grep -q "^windows *on ($GW)" "$OUT/sources.txt" && grep -q "^vsphere *on ($VC)" "$OUT/sources.txt" && ok "sentora-elk-node sources lists them" || bad "sources: $(cat "$OUT/sources.txt")"
 # Microsoft 365: the reader against the test's stand-in for Microsoft (login, Graph, reports)
 docker cp "$REPO/tests/elk/fakegraph.py" "$NAME:/root/fakegraph.py"
 in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout fg.key -out fg.crt -subj /CN=localhost -addext subjectAltName=DNS:localhost -days 2 2> /dev/null; install -m 644 fg.crt /usr/local/share/fg-test.crt; (python3 -I fakegraph.py 18443 fg.crt fg.key > /dev/null 2>&1 &)'

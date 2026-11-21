@@ -331,6 +331,8 @@ run apt-get update || die "Could not read Elastic's package list (see $LOG)."
 ui_step "Elasticsearch, Logstash and Kibana"
 # (the packages print a first password for the built-in user: it is replaced below, and this log is root's)
 run $PKG_INSTALL elasticsearch logstash kibana heartbeat-elastic || die "Could not install the Elastic stack (see $LOG)."
+# (Metricbeat, there once vCenter is read: kept as new as the rest)
+dpkg -s metricbeat > /dev/null 2>&1 && { run $PKG_INSTALL metricbeat || echo "WARNING: Metricbeat (vCenter's reader) was not updated"; }
 note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana heartbeat-elastic 2> /dev/null)"
 # Elasticsearch maps its files into memory: the kernel must allow enough maps
 echo 'vm.max_map_count = 262144' > /etc/sysctl.d/90-sentora-elk.conf; chmod 644 /etc/sysctl.d/90-sentora-elk.conf
@@ -403,10 +405,10 @@ wait_for 120 bash -c "esapi GET /_cluster/health | grep -Eq '\"status\":\"(green
 
 ui_step "Sentora's logs in Elasticsearch: template, keeping time, users"
 mkdir -p "$CONF/files"
-for f in elasticsearch/ilm-policy.json elasticsearch/index-template.json logstash/sentora.conf elasticsearch/fortigate-template.json elasticsearch/veeam-template.json elasticsearch/m365-template.json elasticsearch/shop-template.json elasticsearch/windows-template.json company/fortigate.conf company/veeam.conf company/windows.conf; do
+for f in elasticsearch/ilm-policy.json elasticsearch/index-template.json logstash/sentora.conf elasticsearch/fortigate-template.json elasticsearch/veeam-template.json elasticsearch/m365-template.json elasticsearch/shop-template.json elasticsearch/windows-template.json elasticsearch/vsphere-template.json company/fortigate.conf company/veeam.conf company/windows.conf company/vsphere.conf; do
     get "$f" "$CONF/files/$(basename "$f")" || die "Could not get $f."
 done
-python3 -I -c 'import json,sys; [json.load(open(f)) for f in sys.argv[1:]]' "$CONF/files/ilm-policy.json" "$CONF/files/index-template.json" "$CONF/files/fortigate-template.json" "$CONF/files/veeam-template.json" "$CONF/files/m365-template.json" "$CONF/files/shop-template.json" "$CONF/files/windows-template.json" || die "Sentora's Elasticsearch files are damaged."
+python3 -I -c 'import json,sys; [json.load(open(f)) for f in sys.argv[1:]]' "$CONF/files/ilm-policy.json" "$CONF/files/index-template.json" "$CONF/files/fortigate-template.json" "$CONF/files/veeam-template.json" "$CONF/files/m365-template.json" "$CONF/files/shop-template.json" "$CONF/files/windows-template.json" "$CONF/files/vsphere-template.json" || die "Sentora's Elasticsearch files are damaged."
 [ -n "$RETENTION" ] && echo "$RETENTION" > "$CONF/retention"
 [ -s "$CONF/retention" ] || echo 30 > "$CONF/retention"
 DAYS=$(cat "$CONF/retention")
@@ -414,13 +416,13 @@ sed "s/RETENTION_DAYS/$DAYS/g" "$CONF/files/ilm-policy.json" > "$CONF/files/ilm.
 esapi PUT /_ilm/policy/sentora-logs "$CONF/files/ilm.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the keeping time (see $LOG)."
 esapi PUT /_index_template/logs-sentora "$CONF/files/index-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused Sentora's template (see $LOG)."
 # (other sources: a FortiGate, Veeam, Microsoft 365; each its own data stream, used once it is switched on)
-for t in fortigate veeam m365 windows; do
+for t in fortigate veeam m365 windows vsphere; do
     esapi PUT "/_index_template/logs-$t" "$CONF/files/$t-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the $t template (see $LOG)."
 done
 # (an online store on the panel: one copy of each order, product line and search, in the index sentora-shop)
 esapi PUT /_index_template/sentora-shop "$CONF/files/shop-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the store's template (see $LOG)."
 # Logstash may only add lines to Sentora's logs; the administrators read them (and use Kibana) and change nothing else
-printf '%s' '{"cluster":["monitor","manage_index_templates","manage_ilm"],"indices":[{"names":["logs-sentora-*","logs-fortigate-*","logs-veeam-*","logs-windows-*"],"privileges":["create_doc","create_index","auto_configure","view_index_metadata"]},{"names":["sentora-shop"],"privileges":["index","create_index","view_index_metadata"]}]}' > "$CONF/files/role-writer.json"
+printf '%s' '{"cluster":["monitor","manage_index_templates","manage_ilm"],"indices":[{"names":["logs-sentora-*","logs-fortigate-*","logs-veeam-*","logs-windows-*","logs-vsphere-*"],"privileges":["create_doc","create_index","auto_configure","view_index_metadata"]},{"names":["sentora-shop"],"privileges":["index","create_index","view_index_metadata"]}]}' > "$CONF/files/role-writer.json"
 printf '%s' '{"cluster":["monitor"],"indices":[{"names":["logs-sentora-*"],"privileges":["read","view_index_metadata","monitor"]}],"applications":[{"application":"kibana-.kibana","privileges":["all"],"resources":["*"]}]}' > "$CONF/files/role-reader.json"
 esapi PUT /_security/role/sentora_logstash_writer "$CONF/files/role-writer.json" | grep -q '"role"' || die "Could not make Logstash's role."
 esapi PUT /_security/role/sentora_admin "$CONF/files/role-reader.json" | grep -q '"role"' || die "Could not make the administrators' role."
@@ -434,7 +436,7 @@ esapi PUT /_security/role/sentora_heartbeat_writer "$CONF/files/role-hb.json" | 
 printf '{"password":"%s","roles":["sentora_heartbeat_writer"],"full_name":"Heartbeat (uptime checks)"}' "$(cat "$CONF/heartbeat.pw")" > "$CONF/files/u.json"
 esapi PUT /_security/user/sentora_heartbeat "$CONF/files/u.json" | grep -q '"created"' || die "Could not make Heartbeat's user."
 # the administrators read the uptime results too
-printf '%s' '{"cluster":["monitor"],"indices":[{"names":["logs-sentora-*","heartbeat-*","logs-fortigate-*","logs-veeam-*","logs-m365-*","logs-windows-*","sentora-shop"],"privileges":["read","view_index_metadata","monitor"]}],"applications":[{"application":"kibana-.kibana","privileges":["all"],"resources":["*"]}]}' > "$CONF/files/role-reader.json"
+printf '%s' '{"cluster":["monitor"],"indices":[{"names":["logs-sentora-*","heartbeat-*","logs-fortigate-*","logs-veeam-*","logs-m365-*","logs-windows-*","logs-vsphere-*","sentora-shop"],"privileges":["read","view_index_metadata","monitor"]}],"applications":[{"application":"kibana-.kibana","privileges":["all"],"resources":["*"]}]}' > "$CONF/files/role-reader.json"
 esapi PUT /_security/role/sentora_admin "$CONF/files/role-reader.json" | grep -q '"role"' || die "Could not update the administrators' role."
 NEWADMINPW=''
 if ! esapi GET "/_security/user/$ADMIN_USER" | grep -q "\"$ADMIN_USER\""; then
@@ -459,7 +461,7 @@ EOF
 chmod 644 /etc/systemd/system/logstash.service.d/sentora.conf
 # (the rules are checked before they are used)
 LSDATA=$(mktemp -d); chown logstash: "$LSDATA"
-for f in /etc/logstash/conf.d/sentora.conf "$CONF/files/fortigate.conf" "$CONF/files/veeam.conf" "$CONF/files/windows.conf"; do
+for f in /etc/logstash/conf.d/sentora.conf "$CONF/files/fortigate.conf" "$CONF/files/veeam.conf" "$CONF/files/windows.conf" "$CONF/files/vsphere.conf"; do
     # (the Windows rules with a test address and files that are there, for the check only)
     sed -e 's/SENTORA_DC_LIST/"192.0.2.1"/' -e "s#/etc/logstash/sentora/windows/[a-z-]*\.\(crt\|key\)#/etc/logstash/sentora/http_ca.crt#" "$f" > "$LSDATA/check.conf.new"
     install -m 640 -o root -g logstash "$LSDATA/check.conf.new" "$LSDATA/check.conf"; rm -f "$LSDATA/check.conf.new"
@@ -556,7 +558,7 @@ note "The panel sends its list of websites within the hour; the checks follow wi
 
 ui_step "Alerts for the panel (port 6515: the panel's certificate only)"
 # Elasticsearch: a user that may only read Sentora's logs and the uptime results
-printf '%s' '{"indices":[{"names":["logs-sentora-*","heartbeat-*","logs-veeam-*","logs-fortigate-*","logs-m365-*","logs-windows-*"],"privileges":["read"]}]}' > "$CONF/files/role-alerts.json"
+printf '%s' '{"indices":[{"names":["logs-sentora-*","heartbeat-*","logs-veeam-*","logs-fortigate-*","logs-m365-*","logs-windows-*","logs-vsphere-*"],"privileges":["read"]}]}' > "$CONF/files/role-alerts.json"
 esapi PUT /_security/role/sentora_alerts_reader "$CONF/files/role-alerts.json" | grep -q '"role"' || die "Could not make the alerts' role."
 [ -s "$CONF/alerts.pw" ] || { pw > "$CONF/alerts.pw"; chmod 600 "$CONF/alerts.pw"; }
 printf '{"password":"%s","roles":["sentora_alerts_reader"],"full_name":"Alerts for the panel (read only)"}' "$(cat "$CONF/alerts.pw")" > "$CONF/files/u.json"
@@ -636,7 +638,7 @@ run systemctl daemon-reload
 # Logstash: Sentora's pipeline plus one per source switched on (and the newest of their settings)
 bash /usr/local/lib/sentora-elk/sources.sh refresh || echo "WARNING: the other sources were not set up again (sentora-elk-node sources)"
 on=$(bash /usr/local/lib/sentora-elk/sources.sh sources | awk '$2 == "on" {print $1}' | tr '\n' ' ')
-note "On: ${on:-none}. sentora-elk-node fortigate ADDRESS | veeam ADDRESS | m365 TENANT-ID APP-ID | windows DC-ADDRESS switch one on."
+note "On: ${on:-none}. sentora-elk-node fortigate ADDRESS | veeam ADDRESS | m365 TENANT-ID APP-ID | windows DC-ADDRESS | vsphere VCENTER USER switch one on."
 
 ui_step "Sentora's dashboards"
 printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
@@ -644,7 +646,7 @@ kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-l
 printf '%s' '{"data_view":{"id":"sentora-uptime","name":"Sentora uptime checks","title":"heartbeat-*","timeFieldName":"@timestamp","runtimeFieldMap":{"sentora.cert_days":{"type":"double","script":{"source":"def f = \"tls.server.x509.not_after\"; if (doc.containsKey(f) && doc[f].size() > 0) { emit((doc[f].value.toInstant().toEpochMilli() - doc[\"@timestamp\"].value.toInstant().toEpochMilli()) / 86400000.0); }"}}}},"override":true}' > "$CONF/files/dv2.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv2.json" | grep -q '"sentora-uptime"' || die "Kibana refused the uptime data view (see $LOG)."
 # (the other sources' data views, for their dashboards)
-for v in "sentora-fortigate|FortiGate|logs-fortigate-*" "sentora-veeam|Veeam|logs-veeam-*" "sentora-m365|Microsoft 365|logs-m365-*" "sentora-shop|Online store|sentora-shop" "sentora-windows|Active Directory|logs-windows-*" "sentora-all|Everything (panel, FortiGate, Microsoft 365)|logs-sentora-*,logs-fortigate-*,logs-m365-*"; do
+for v in "sentora-fortigate|FortiGate|logs-fortigate-*" "sentora-veeam|Veeam|logs-veeam-*" "sentora-m365|Microsoft 365|logs-m365-*" "sentora-shop|Online store|sentora-shop" "sentora-windows|Active Directory|logs-windows-*" "sentora-vsphere|VMware vSphere|logs-vsphere-*" "sentora-all|Everything (panel, FortiGate, Microsoft 365)|logs-sentora-*,logs-fortigate-*,logs-m365-*"; do
     IFS='|' read -r dvid dvname dvpat <<< "$v"
     printf '{"data_view":{"id":"%s","name":"%s","title":"%s","timeFieldName":"@timestamp"},"override":true}' "$dvid" "$dvname" "$dvpat" > "$CONF/files/dv3.json"
     kbapi POST /api/data_views/data_view "$CONF/files/dv3.json" | grep -q "\"$dvid\"" || die "Kibana refused the data view $dvid (see $LOG)."
@@ -655,7 +657,7 @@ out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "el
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad; do
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
@@ -675,11 +677,11 @@ for v in sentora-flow-attacks sentora-flow-visits sentora-flow-internet sentora-
 done
 get kibana/addvis.py "$CONF/files/addvis.py" || die "Could not get addvis.py."
 kbapi GET /api/saved_objects/dashboard/sentora-flows > "$CONF/files/fl.json" \
-    && python3 -I "$CONF/files/addvis.py" "$CONF/files/fl.json" visualization:sentora-flow-attacks:0:2:48:22 visualization:sentora-flow-visits:0:24:24:22 \
-        visualization:sentora-flow-internet:24:24:24:22 visualization:sentora-flow-ad:0:46:48:22 > "$CONF/files/fl-new.json" \
+    && python3 -I "$CONF/files/addvis.py" "$CONF/files/fl.json" visualization:sentora-flow-attacks:0:2:24:22 visualization:sentora-flow-ad:24:2:24:22 \
+        visualization:sentora-flow-visits:0:24:24:22 visualization:sentora-flow-internet:24:24:24:22 > "$CONF/files/fl-new.json" \
     && kbapi PUT /api/saved_objects/dashboard/sentora-flows "$CONF/files/fl-new.json" | grep -q '"id":"sentora-flows"' || echo "WARNING: the flow charts are not on the Flows dashboard"
 rm -f "$CONF/files/fl.json" "$CONF/files/fl-new.json"
-note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage; the walls: Server, Backup, Network, Security, Microsoft 365, Sales; Week in review, Flows with $fl flow charts; Active Directory and its wall)."
+note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage; the walls: Server, Backup, Network, Security, Microsoft 365, Sales; Week in review, Flows with $fl flow charts; Active Directory, vSphere and their walls)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash
@@ -693,7 +695,7 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #   sentora-elk-node firewall          make the firewall rules again from those two lists
 #   sentora-elk-node monitors          the uptime checks made again from the panel's list of websites
 #   sentora-elk-node alerts            check for alerts now and show them (the panel fetches them every 5 minutes)
-#   sentora-elk-node fortigate ADDRESS | veeam ADDRESS | veeam-api ADDRESS USER | m365 TENANT APP | windows DC-ADDRESS | sources   other sources (also: SOURCE off)
+#   sentora-elk-node fortigate ADDRESS | veeam ADDRESS | veeam-api ADDRESS USER | m365 TENANT APP | windows DC-ADDRESS | vsphere VCENTER USER | sources   other sources (also: SOURCE off)
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
@@ -771,7 +773,7 @@ if new != old:
     os.replace(tmp, dst)
     print("%d website(s) checked every minute" % len(mon))
 ' ;;
-    fortigate|veeam|veeam-api|m365|windows|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
+    fortigate|veeam|veeam-api|m365|windows|vsphere|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
     alerts)
         runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py check ;;
     update)

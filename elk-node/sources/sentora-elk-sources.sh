@@ -11,6 +11,8 @@
 #                                        through Winlogbeat over TLS on 6518, its own certificate, from ADDRESS only;
 #                                        makes /root/sentora-dc-ADDRESS.ps1, the setup to run on that DC
 #   sentora-elk-node windows off [ADDRESS]   stop taking that DC (or all of them)
+#   sentora-elk-node vsphere ADDRESS USER   VMware vCenter (or one ESXi host): hosts, VMs, datastores each minute,
+#                                        read by Metricbeat with a read-only user; vCenter's certificate pinned
 #   sentora-elk-node SOURCE off          stop taking it (what came in stays until the keeping time ends)
 #   sentora-elk-node sources             what is on, and when each last sent something
 #
@@ -58,7 +60,7 @@ pipelines() {
         else
             rm -f /etc/logstash/sources.d/windows.conf
         fi
-        for s in fortigate veeam; do
+        for s in fortigate veeam vsphere; do
             if [ -s "$SRC/$s" ] && [ -f "$C/files/$s.conf" ]; then
                 install -m 640 -o root -g logstash "$C/files/$s.conf" "/etc/logstash/sources.d/$s.conf"
                 echo "- pipeline.id: $s"
@@ -159,10 +161,43 @@ reader() {
     fi
 }
 
+# vCenter's reader: Metricbeat as its own service and user, trusting only vCenter's certificate (SSL_CERT_FILE)
+VS=/etc/sentora-elk-vsphere
+vsphere_service() {
+    if [ ! -s "$SRC/vsphere" ] || [ ! -s "$VS/metricbeat.yml" ]; then
+        systemctl disable --now sentora-vsphere > /dev/null 2>&1; return 0
+    fi
+    cat > /etc/systemd/system/sentora-vsphere.service <<'UNIT_EOF'
+[Unit]
+Description=Sentora Elk node: VMware vCenter reader (Metricbeat, read only)
+After=network-online.target logstash.service
+Wants=network-online.target
+
+[Service]
+User=sentora-vsphere
+Group=sentora-vsphere
+Environment=SSL_CERT_FILE=/etc/sentora-elk-vsphere/vcenter.pem
+ExecStart=/usr/share/metricbeat/bin/metricbeat --environment systemd -c /etc/sentora-elk-vsphere/metricbeat.yml --path.home /usr/share/metricbeat --path.config /etc/sentora-elk-vsphere --path.data /var/lib/sentora-vsphere --path.logs /var/log/sentora-vsphere
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/sentora-vsphere /var/log/sentora-vsphere
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+    systemctl daemon-reload
+    systemctl enable sentora-vsphere > /dev/null 2>&1; systemctl restart sentora-vsphere
+}
+
 # which sources are on, for the alerts service (the panel shows it): on or off only, no addresses
 publish() {
     local s out='{'
-    for s in fortigate veeam m365 windows; do [ -s "$SRC/$s" ] && out="$out\"$s\": \"on\", " || out="$out\"$s\": \"off\", "; done
+    for s in fortigate veeam m365 windows vsphere; do [ -s "$SRC/$s" ] && out="$out\"$s\": \"on\", " || out="$out\"$s\": \"off\", "; done
     out="${out%, }}"
     [ -d /etc/sentora-elk-alerts ] && { printf '%s\n' "$out" > /etc/sentora-elk-alerts/sources.json; chown root:sentora-elk-alerts /etc/sentora-elk-alerts/sources.json; chmod 640 /etc/sentora-elk-alerts/sources.json; }
 }
@@ -174,6 +209,7 @@ apply() {
     /usr/local/sbin/sentora-elk-node firewall > /dev/null || say "The firewall rules were not made again: sentora-elk-node firewall"
     systemctl restart logstash
     reader
+    vsphere_service
 }
 
 case "${1:-sources}" in
@@ -306,6 +342,57 @@ case "${1:-sources}" in
         say "  (it looks for winlogbeat.exe in C:\\winlogbeat; another folder: add -Folder 'D:\\path')"
         say "It sets Winlogbeat up for this node, starts its service, checks the connection and shows which audit settings are off."
         say "Then: sentora-elk-node sources" ;;
+    vsphere)
+        a=${2:-}; u=${3:-}
+        if [ "$a" = off ]; then
+            rm -f "$SRC/vsphere"; sed -i '/# sentora-vsphere$/d' /etc/hosts; apply; say "vCenter is no longer read."; exit 0
+        fi
+        ip_ok "$a" && [[ "$u" =~ ^[A-Za-z0-9._@\\-]{1,128}$ ]] || { say "sentora-elk-node vsphere VCENTER-ADDRESS USER   (a vCenter user with the Read-only role is enough, e.g. sentora@vsphere.local)"; exit 2; }
+        pem=$(timeout 15 openssl s_client -connect "$a:443" -servername "$a" < /dev/null 2> /dev/null | openssl x509 2> /dev/null)
+        [ -n "$pem" ] || { say "vCenter does not answer on $a:443 (is it there, is port 443 open from this node?)."; exit 1; }
+        fp=$(printf '%s\n' "$pem" | openssl x509 -outform DER | sha256sum | cut -d' ' -f1)
+        # (the name to connect by: the address when the certificate names it, else its first DNS name, kept for that address)
+        san=$(printf '%s\n' "$pem" | openssl x509 -noout -ext subjectAltName 2> /dev/null)
+        if printf '%s' "$san" | grep -qE "IP Address:$a(,|\$|[[:space:]])"; then name=$a
+        else name=$(printf '%s' "$san" | grep -oE 'DNS:[A-Za-z0-9.-]+' | head -1 | cut -c5-)
+             [ -n "$name" ] || name=$(printf '%s\n' "$pem" | openssl x509 -noout -subject -nameopt multiline 2> /dev/null | sed -n 's/^ *commonName *= *//p' | head -1); fi
+        [[ "$name" =~ ^[A-Za-z0-9.-]{1,253}$ ]] || { say "vCenter's certificate names no usable host name."; exit 1; }
+        say "vCenter's certificate on $a, for $name, SHA-256:"
+        say "  $(echo "$fp" | sed 's/../&:/g; s/:$//' | tr a-f A-F)"
+        say "  (in a browser on your PC: open https://$a, click the padlock > certificate > details: SHA-256 fingerprint)"
+        read -r -p "Is it vCenter's? Type yes to accept it: " ans
+        [ "$ans" = yes ] || { say "Not accepted; nothing was changed."; exit 1; }
+        read -r -s -p "The password of $u: " vpw; echo
+        [ -n "$vpw" ] && [ ${#vpw} -le 200 ] && [[ "$vpw" != *$'\n'* ]] && [[ "$vpw" != *'${'* ]] || { say "That password can not be used here (no \${ in it)."; exit 2; }
+        if ! command -v /usr/share/metricbeat/bin/metricbeat > /dev/null; then
+            say "Installing Metricbeat (Elastic's, from the same place as the rest of the node)..."
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold metricbeat > $C/metricbeat-install.log 2>&1 || { say "Could not install Metricbeat (see $C/metricbeat-install.log)."; exit 1; }
+        fi
+        systemctl disable --now metricbeat > /dev/null 2>&1
+        getent passwd sentora-vsphere > /dev/null || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sentora-vsphere
+        install -d -m 750 -o root -g sentora-vsphere "$VS"
+        install -d -m 750 -o sentora-vsphere -g sentora-vsphere /var/lib/sentora-vsphere /var/log/sentora-vsphere
+        printf '%s\n' "$pem" > "$VS/vcenter.pem.new"; install -m 640 -o root -g sentora-vsphere "$VS/vcenter.pem.new" "$VS/vcenter.pem"; rm -f "$VS/vcenter.pem.new"
+        python3 -I -c 'import json,sys; n,u,p=sys.argv[1:4]; print("# Sentora Elk node: vCenter read by Metricbeat (sentora-elk-node vsphere). Made anew by that command.\nmetricbeat.modules:\n  - module: vsphere\n    metricsets: [\"host\", \"virtualmachine\", \"datastore\", \"cluster\", \"datastorecluster\", \"network\", \"resourcepool\"]\n    period: 60s\n    hosts: [%s]\n    username: %s\n    password: %s\n    insecure: false\noutput.logstash:\n  hosts: [\"127.0.0.1:5519\"]\nsetup.ilm.enabled: false\nsetup.template.enabled: false\nhttp.enabled: false\nlogging.level: warning\nlogging.to_files: true\nlogging.files:\n  path: /var/log/sentora-vsphere\n  keepfiles: 5" % (json.dumps("https://" + n + "/sdk"), json.dumps(u), json.dumps(p)))' "$name" "$u" "$vpw" > "$VS/metricbeat.yml.new"
+        install -m 640 -o root -g sentora-vsphere "$VS/metricbeat.yml.new" "$VS/metricbeat.yml"; rm -f "$VS/metricbeat.yml.new"; unset vpw
+        sed -i '/# sentora-vsphere$/d' /etc/hosts
+        [ "$name" = "$a" ] || echo "$a $name # sentora-vsphere" >> /etc/hosts
+        echo "$a $name $u" > "$SRC/vsphere"
+        apply || exit 1
+        say "Reading vCenter (the first figures take about a minute)..."
+        n=0
+        for _ in $(seq 1 40); do
+            n=$(es "https://127.0.0.1:9200/logs-vsphere-*/_count" -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+            [ "${n:-0}" -gt 0 ] && break; sleep 5
+        done
+        if [ "${n:-0}" -gt 0 ]; then
+            sleep 10
+            c=$(es "https://127.0.0.1:9200/logs-vsphere-*/_search?size=0" -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}},"aggs":{"k":{"terms":{"field":"vmw.kind"},"aggs":{"n":{"cardinality":{"field":"vmw.name"}}}}}}' 2> /dev/null \
+                | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(", ".join("%d %s" % (b["n"]["value"], b["key"]) for b in d["aggregations"]["k"]["buckets"]))' 2> /dev/null)
+            say "vCenter answers: ${c:-figures are coming in}."
+        else
+            say "Nothing from vCenter yet. Look at: journalctl -u sentora-vsphere -n 30   and /var/log/sentora-vsphere"
+        fi ;;
     sources)
         for s in fortigate veeam m365; do
             if [ -s "$SRC/$s" ]; then
@@ -323,9 +410,13 @@ case "${1:-sources}" in
                 printf '%-10s on (%s)   last: %s\n' "windows" "$d" "${last:-nothing yet}"
             done < "$SRC/windows"
         else printf '%-10s off\n' "windows"; fi
+        if [ -s "$SRC/vsphere" ]; then
+            last=$(es "https://127.0.0.1:9200/logs-vsphere-default/_search?size=1&sort=@timestamp:desc&filter_path=hits.hits._source.@timestamp" 2> /dev/null | sed -n 's/.*"@timestamp":"\([^"]*\)".*/\1/p')
+            printf '%-10s on (%s)   last: %s\n' "vsphere" "$(cut -d' ' -f1 "$SRC/vsphere")" "${last:-nothing yet}"
+        else printf '%-10s off\n' "vsphere"; fi
         if [ -s "$SRC/veeam-api" ]; then printf '%-10s on (%s)   backup coverage, read every hour\n' "veeam-api" "$(cat "$SRC/veeam-api")"; else printf '%-10s off\n' "veeam-api"; fi ;;
     refresh)
         # (the installer's --update: the newest pipelines and settings for what is on)
         apply > /dev/null ;;
-    *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

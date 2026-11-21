@@ -135,7 +135,7 @@ class elk_alerts
                 'since' => isset($a['since']) ? (int) $a['since'] : time());
         }
         $src = array();
-        foreach (array('fortigate', 'veeam', 'm365') as $k) {
+        foreach (array('fortigate', 'veeam', 'm365', 'windows', 'vsphere') as $k) {
             if (isset($d['sources'][$k]) && in_array($d['sources'][$k], array('on', 'off'), true)) {
                 $src[$k] = $d['sources'][$k];
             }
