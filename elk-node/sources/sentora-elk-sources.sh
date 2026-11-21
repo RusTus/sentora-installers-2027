@@ -70,6 +70,9 @@ rsyslog_conf() {
     install -m 640 -o root -g "$g" $C/ca.crt "$RS/ca.crt"
     cat $C/node.crt $C/ca.crt > "$RS/node.crt.new"; install -m 640 -o root -g "$g" "$RS/node.crt.new" "$RS/node.crt"; rm -f "$RS/node.crt.new"
     install -m 640 -o root -g "$g" $C/node.key "$RS/node.key"
+    # (Veeam's Windows checks the name it connects to: the certificate with this node's addresses, Kibana's)
+    cat $C/web.crt $C/ca.crt > "$RS/web.crt.new"; install -m 640 -o root -g "$g" "$RS/web.crt.new" "$RS/web.crt"; rm -f "$RS/web.crt.new"
+    install -m 640 -o root -g "$g" $C/web.key "$RS/web.key"
     local imtcp='module(load="imtcp")'
     # (loaded by another file already? only a line that is not a comment counts: Ubuntu ships it commented out)
     grep -lqsE '^[[:space:]]*(module\(load="imtcp"|\$ModLoad[[:space:]]+imtcp)' /etc/rsyslog.conf $(ls /etc/rsyslog.d/*.conf 2> /dev/null | grep -v 40-sentora-sources) 2> /dev/null && imtcp='# (imtcp is loaded by another file)'
@@ -97,7 +100,7 @@ rsyslog_conf() {
             # (Veeam offers TLS without a certificate of its own: its address only, here and in the firewall)
             echo "input(type=\"imtcp\" port=\"6517\" name=\"veeam\" ruleset=\"sentora_veeam\" MaxSessions=\"20\""
             echo "      StreamDriver.Name=\"gtls\" StreamDriver.Mode=\"1\" StreamDriver.AuthMode=\"anon\""
-            echo "      StreamDriver.CAFile=\"$RS/ca.crt\" StreamDriver.CertFile=\"$RS/node.crt\" StreamDriver.KeyFile=\"$RS/node.key\")"
+            echo "      StreamDriver.CAFile=\"$RS/ca.crt\" StreamDriver.CertFile=\"$RS/web.crt\" StreamDriver.KeyFile=\"$RS/web.key\")"
             echo "ruleset(name=\"sentora_veeam\") {"
             echo "    if \$fromhost-ip == \"$(cat "$SRC/veeam")\" then {"
             echo '        action(type="omfwd" target="127.0.0.1" port="5517" protocol="tcp" template="sentora_src_json"'
@@ -196,7 +199,8 @@ case "${1:-sources}" in
         say "On the Veeam server: copy /root/sentora-elk-ca.crt from this node and import it into the Windows certificate store"
         say "  (Local Computer > Trusted Root Certification Authorities), so Veeam trusts this node's certificate."
         say "In the Veeam console: menu > Options > Event Forwarding > Syslog server: Add"
-        say "  Server: $me   Port: 6517   Transport: TLS   (Veeam Backup & Replication 12.1 or newer)" ;;
+        say "  Server: $me   Port: 6517   Transport: TLS   (Veeam Backup & Replication 12.1 or newer)"
+        say "  (the node's certificate there carries the address $me; use that address, not another name)" ;;
     m365)
         t=${2:-}; a=${3:-}
         if [ "$t" = off ]; then rm -f "$SRC/m365" "$SRC/m365.secret"; install -m 640 -o root -g sentora-elk-reader /dev/null /etc/sentora-elk-reader/m365.json 2> /dev/null; publish; reader; say "Microsoft 365 is no longer read."; exit 0; fi
