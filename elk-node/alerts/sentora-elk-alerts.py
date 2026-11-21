@@ -43,9 +43,11 @@ LIMITS = {
     "fgt_admin_fail": 5,     # failed admin logins on a FortiGate in 15 minutes
     "fgt_vpn_fail": 20,      # failed VPN logins on a FortiGate in 15 minutes
     "attacker_events": 10,   # an address that tried this many times in an hour, in two places or more
-    "travel_hours": 3,
-    "backup_hours": 26,
-    "repo_pct": 90,          # Veeam: a repository this full      # Veeam: a machine whose newest backup is older than this       # Microsoft 365: two countries within this many hours is "impossible travel"
+    "travel_hours": 3,       # Microsoft 365: two countries within this many hours is "impossible travel"
+    "backup_hours": 26,      # Veeam: a machine whose newest backup is older than this
+    "repo_pct": 90,          # Veeam: a repository this full
+    "ad_fail_user": 15,      # Active Directory: failed logons of one account in 15 minutes (someone guessing its password)
+    "ad_quiet_hours": 6,     # Active Directory: a domain controller that sent nothing for this long (while it did the day before)
 }
 
 
@@ -218,15 +220,56 @@ def check():
             found.append(("fortigate:" + slug(what), "warning", "FortiGate: %d failed %s in 15 minutes" % (c, what),
                           "%d failed %s in the last 15 minutes: someone may be guessing passwords." % (c, what), board))
 
+    # Active Directory (when switched on): lockouts, admin groups, a cleared log, guessing, a domain controller gone quiet
+    r = es("/logs-windows-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 50, "sort": [{"@timestamp": "desc"}],
+        "_source": ["@timestamp", "event.action", "user.name", "host.name", "group.name", "windows.member", "windows.from", "windows.admin_group"],
+        "query": {"bool": {"filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}, {"bool": {"should": [
+            {"bool": {"filter": [{"term": {"event.action": "locked-out"}}, {"range": {"@timestamp": {"gte": "now-1h"}}}]}},
+            {"bool": {"filter": [{"term": {"event.action": "group-member-added"}}, {"term": {"windows.admin_group": True}}]}},
+            {"term": {"event.action": "log-cleared"}}], "minimum_should_match": 1}}]}}})
+    for h in r.get("hits", {}).get("hits", []):
+        x = h["_source"]
+        act, who, dc = (x.get("event") or {}).get("action"), (x.get("user") or {}).get("name") or "?", (x.get("host") or {}).get("name") or "?"
+        w = x.get("windows") or {}
+        if act == "locked-out":
+            found.append(("ad-lockout:" + slug(who), "warning", "%s is locked out" % who,
+                          "Active Directory locked the account %s out (too many wrong passwords, from %s; domain controller %s). If that was not them, someone "
+                          "is guessing its password." % (who, w.get("from") or "?", dc), "sentora-adwall"))
+        elif act == "group-member-added":
+            g = (x.get("group") or {}).get("name") or "?"
+            found.append(("ad-admin:" + slug(g + "-" + str(w.get("member") or "?")), "outage", "%s was added to %s" % (str(w.get("member") or "?")[:80], g[:60]),
+                          "%s added %s to the group %s (domain controller %s, %s). Admin groups rarely change: check it was meant."
+                          % (who, w.get("member") or "?", g, dc, x.get("@timestamp", "")[:16].replace("T", " ")), "sentora-ad"))
+        elif act == "log-cleared":
+            found.append(("ad-cleared:" + slug(dc), "outage", "The security log of %s was cleared" % dc,
+                          "%s cleared the security log of the domain controller %s. That hides what happened before: check who and why." % (who, dc), "sentora-ad"))
+    r = es("/logs-windows-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"range": {"@timestamp": {"gte": "now-15m"}}}, {"term": {"event.outcome": "failure"}}, {"exists": {"field": "user.name"}}],
+        "must_not": [{"term": {"event.action": "locked-out"}}]}},
+        "aggs": {"u": {"terms": {"field": "user.name", "size": 50, "min_doc_count": int(L["ad_fail_user"])}}}})
+    for b in r.get("aggregations", {}).get("u", {}).get("buckets", []):
+        found.append(("ad-guess:" + slug(b["key"]), "warning", "%d failed logons for %s" % (b["doc_count"], b["key"]),
+                      "%d failed logons for the account %s in the last 15 minutes: someone may be guessing its password (or a device keeps an old one)."
+                      % (b["doc_count"], b["key"]), "sentora-ad"))
+    q_h = int(L["ad_quiet_hours"])
+    r = es("/logs-windows-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [{"range": {"@timestamp": {"gte": "now-1d"}}}]}},
+        "aggs": {"d": {"terms": {"field": "host.name", "size": 50}, "aggs": {"last": {"max": {"field": "@timestamp"}}}}}})
+    for b in r.get("aggregations", {}).get("d", {}).get("buckets", []):
+        last = b["last"].get("value")
+        if last is not None and now - last / 1000 > q_h * 3600:
+            found.append(("ad-quiet:" + slug(b["key"]), "warning", "%s sent nothing for %d hours" % (b["key"], q_h),
+                          "The domain controller %s has sent no security event for over %d hours. On it: Get-Service winlogbeat (and its log in C:\\ProgramData\\winlogbeat\\logs)."
+                          % (b["key"], q_h), "sentora-adwall"))
+
     # an address that attacks in more than one place (the panel, the FortiGate, Microsoft 365) within an hour
     bad = {"bool": {"should": [{"term": {"event.outcome": "failure"}}, {"prefix": {"event.action": "waf-"}},
                                {"term": {"fortigate.subtype": "ips"}}, {"term": {"event.action": "ban"}}], "minimum_should_match": 1}}
     private = [{"term": {"source.ip": c}} for c in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "fc00::/7", "fe80::/10", "::1")]
-    r = es("/logs-sentora-*,logs-fortigate-*,logs-m365-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {
+    r = es("/logs-sentora-*,logs-fortigate-*,logs-m365-*,logs-windows-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {
         "filter": [{"range": {"@timestamp": {"gte": "now-1h"}}}, {"exists": {"field": "source.ip"}}, bad], "must_not": private}},
         "aggs": {"ip": {"terms": {"field": "source.ip", "size": 200, "min_doc_count": int(L["attacker_events"])},
                         "aggs": {"src": {"terms": {"field": "data_stream.dataset", "size": 5}}}}}})
-    names = {"sentora": "the panel", "fortigate": "the FortiGate", "m365": "Microsoft 365"}
+    names = {"sentora": "the panel", "fortigate": "the FortiGate", "m365": "Microsoft 365", "windows": "Active Directory"}
     for b in r.get("aggregations", {}).get("ip", {}).get("buckets", []):
         srcs = [(x["key"], x["doc_count"]) for x in b["src"]["buckets"]]
         if len(srcs) >= 2:

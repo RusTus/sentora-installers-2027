@@ -1,0 +1,833 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-adwall",
+      "label": "AD wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-ad",
+      "label": "Active Directory",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\"",
+     "language": "kql"
+    },
+    "title": "People who logged on",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "title": "Failed logons",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "title": "Lockouts",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"group-member-added\" or \"group-member-removed\") and windows.admin_group : true",
+     "language": "kql"
+    },
+    "title": "Admin group changes",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"account-created\" or \"account-deleted\" or \"account-enabled\" or \"account-disabled\" or \"account-renamed\" or \"password-reset\")",
+     "language": "kql"
+    },
+    "title": "Account changes",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"gpo-changed\"",
+     "language": "kql"
+    },
+    "title": "Group Policy changes",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 5,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.reason"
+      ],
+      "label": "Why",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Failed logons: account and why",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 20,
+    "x": 0,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.from"
+      ],
+      "label": "From",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Lockouts: account and from where",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 14,
+    "w": 14,
+    "x": 20,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "windows.reason"
+      ],
+      "label": "Why",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\" and windows.reason : *",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Why logons failed",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 14,
+    "w": 14,
+    "x": 34,
+    "y": 7
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "@timestamp",
+      "label": "When",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"group-member-added\" or \"group-member-removed\") and windows.admin_group : true",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "group.name"
+      ],
+      "label": "Group",
+      "limit": 20,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.member"
+      ],
+      "label": "Member",
+      "limit": 20,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 2,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "By",
+      "limit": 5,
+      "operation": "terms"
+     }
+    ],
+    "title": "Admin groups: who was added or removed, and by whom",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 8,
+    "w": 48,
+    "x": 0,
+    "y": 21
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "@timestamp",
+      "label": "When",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"account-created\" or \"account-deleted\" or \"account-enabled\" or \"account-disabled\" or \"account-renamed\" or \"password-reset\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 6,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.target"
+      ],
+      "label": "Account",
+      "limit": 30,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "By",
+      "limit": 5,
+      "operation": "terms"
+     }
+    ],
+    "title": "Accounts: created, deleted, switched on or off, passwords reset",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 24,
+    "x": 0,
+    "y": 29
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Logons",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and windows.off_hours : true",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.logon_kind"
+      ],
+      "label": "How",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "host.name"
+      ],
+      "label": "Machine",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Logons outside working hours (weekends, before 6, after 20)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 24,
+    "x": 24,
+    "y": 29
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "label": "Logons",
+     "operation": "count"
+    },
+    "query": {
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and windows.hour_n : *",
+     "language": "kql"
+    },
+    "title": "When people log on (by hour and day, the office's time)",
+    "type": "heatmap",
+    "x": {
+     "field": "windows.hour_n",
+     "granularity": "auto",
+     "label": "Hour",
+     "operation": "histogram"
+    },
+    "y": {
+     "fields": [
+      "windows.weekday"
+     ],
+     "label": "Day",
+     "limit": 7,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    }
+   },
+   "grid": {
+    "h": 12,
+    "w": 48,
+    "x": 0,
+    "y": 42
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Logons",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"logon\" and windows.logon_kind : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "windows.logon_kind"
+      ],
+      "label": "How",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "host.name"
+      ],
+      "label": "Machine",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Remote desktop and keyboard logons on the domain controllers",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 54
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"gpo-changed\" or \"audit-policy-changed\" or \"log-cleared\")",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "event.action"
+      ],
+      "label": "What",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 15,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "host.name"
+      ],
+      "label": "Machine",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Group Policy and audit changes",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 54
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "From the domain controllers' security logs (Winlogbeat on each; sentora-elk-node windows DC-ADDRESS). Network logons and computer accounts are left out. Alerts in the panel: a lockout, someone added to an admin group, a cleared security log, many failed logons for one account, a domain controller gone quiet."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 66
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "title": "Sentora: Active Directory"
+}

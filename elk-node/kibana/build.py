@@ -441,11 +441,11 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
 # ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
 # Their own links bar; "Overview" leads back to the panel's boards.
 SOURCES = [("sentora-today", "Today"), ("sentora-week", "Week"), ("sentora-flows", "Flows"), ("sentora-serverwall", "Server wall"), ("sentora-backupwall", "Backup wall"),
-           ("sentora-netwall", "Network wall"), ("sentora-secwall", "Security wall"), ("sentora-m365wall", "Microsoft 365 wall"), ("sentora-saleswall", "Sales wall"),
+           ("sentora-netwall", "Network wall"), ("sentora-secwall", "Security wall"), ("sentora-m365wall", "Microsoft 365 wall"), ("sentora-saleswall", "Sales wall"), ("sentora-adwall", "AD wall"),
            ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
            ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"), ("sentora-threats", "FortiGate: threats"),
            ("sentora-internet", "Internet use"), ("sentora-veeam", "Veeam backups"), ("sentora-coverage", "Backup coverage"),
-           ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
+           ("sentora-ad", "Active Directory"), ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
 FGT = {"type": "data_view_reference", "ref_id": "sentora-fortigate"}
 VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
 M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
@@ -1006,6 +1006,71 @@ BOARDS["sentora-week"] = build_src("sentora-week", "Week in review", [
 BOARDS["sentora-week"]["time_range"] = {"from": "now-7d", "to": "now"}
 
 
+# ---- Active Directory (the domain controllers' security events, sentora-elk-node windows)
+WIN = {"type": "data_view_reference", "ref_id": "sentora-windows"}
+NAMES.update({"windows.reason": "Why", "windows.from": "From", "windows.from_machine": "From computer", "windows.target": "Account",
+              "windows.member": "Member", "group.name": "Group", "windows.logon_kind": "How", "windows.object": "Object", "windows.weekday": "Day"})
+AD_FAIL = 'event.outcome : "failure" and not event.action : "locked-out"'
+AD_LOGON = 'event.action : ("logon" or "kerberos-logon") and event.outcome : "success"'
+AD_ADMIN = 'event.action : ("group-member-added" or "group-member-removed") and windows.admin_group : true'
+AD_ACCOUNTS = 'event.action : ("account-created" or "account-deleted" or "account-enabled" or "account-disabled" or "account-renamed" or "password-reset")'
+TODAY = ' and @timestamp >= "now/d"'
+BOARDS["sentora-adwall"] = build_src("sentora-adwall", "AD wall", [
+    [(48, 7, tile("Domain controllers (events in the last hour)", WIN, "host.name : *", {"operation": "formula", "formula": "count(kql='@timestamp >= \"now-1h\"')"},
+                  bands((None, 1, YELLOW), (1, None, GREEN)), "events", {"type": "number", "decimals": 0}, by="host.name", limit=3, columns=3))],
+    [(8, 6, tile("Locked out, last 24 hours", WIN, 'event.action : "locked-out"', {"operation": "unique_count", "field": "user.name"}, LOW(1, 5))),
+     (8, 6, tile("Failed logons, last hour", WIN, AD_FAIL + HOUR, {"operation": "count"}, LOW(20, 100), trend=False)),
+     (8, 6, tile("Admin group changes today", WIN, AD_ADMIN + TODAY, {"operation": "count"}, LOW(1, 1))),
+     (8, 6, tile("Accounts created today", WIN, 'event.action : "account-created"' + TODAY, {"operation": "count"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("Passwords reset today", WIN, 'event.action : "password-reset"' + TODAY, {"operation": "count"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("Security log cleared", WIN, 'event.action : "log-cleared"', {"operation": "count"}, LOW(1, 1)))],
+    [(24, 15, tile("Locked out (last 24 hours)", WIN, 'event.action : "locked-out"', {"operation": "count"}, {"type": "static", "color": RED}, "times",
+                   secondary=dict(last("windows.from"), label="from"), by="user.name", limit=8, columns=4)),
+     (24, 15, tile("Failed logons by account, last hour", WIN, AD_FAIL + HOUR, {"operation": "count"}, LOW(5, 15), "tries",
+                   secondary=dict(last("windows.reason"), label=""), by="user.name", limit=8, columns=4) | {"breakdown_by": {
+                       "operation": "terms", "fields": ["user.name"], "limit": 8, "columns": 4, "label": "Account",
+                       "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}})],
+    [(32, 11, area("Logons and failures over time", WIN, 'event.action : ("logon" or "kerberos-logon" or "logon-failed" or "kerberos-failed" or "ntlm-failed" or "locked-out")',
+                   [{"operation": "count", "label": "Events"}], "event.action", 6)),
+     (16, 11, ring("Why logons failed", WIN, AD_FAIL + " and windows.reason : *", "windows.reason", None, 6))],
+])
+BOARDS["sentora-adwall"]["refresh_interval"] = {"pause": False, "value": 30000}
+
+BOARDS["sentora-ad"] = build_src("sentora-ad", "Active Directory", [
+    [(8, 5, on(WIN, metric("People who logged on", AD_LOGON, "", {"operation": "unique_count", "field": "user.name"}))),
+     (8, 5, on(WIN, metric("Failed logons", AD_FAIL, ""))),
+     (8, 5, on(WIN, metric("Lockouts", 'event.action : "locked-out"', ""))),
+     (8, 5, on(WIN, metric("Admin group changes", AD_ADMIN, ""))),
+     (8, 5, on(WIN, metric("Account changes", AD_ACCOUNTS, ""))),
+     (8, 5, on(WIN, metric("Group Policy changes", 'event.action : "gpo-changed"', "")))],
+    [(20, 14, on(WIN, table("Failed logons: account and why", AD_FAIL, ["user.name", "windows.reason"], 15, "Times"))),
+     (14, 14, on(WIN, table("Lockouts: account and from where", 'event.action : "locked-out"', ["user.name", "windows.from"], 15, "Times"))),
+     (14, 14, ring("Why logons failed", WIN, AD_FAIL + " and windows.reason : *", "windows.reason", None, 6))],
+    [(48, 8, {"type": "data_table", "title": "Admin groups: who was added or removed, and by whom", "data_source": WIN, "query": q(AD_ADMIN),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "When"}],
+               "rows": [{"operation": "terms", "fields": [f], "limit": lim, "label": lab} for f, lim, lab in
+                        (("group.name", 20, "Group"), ("windows.member", 20, "Member"), ("event.action", 2, "What"), ("user.name", 5, "By"))]})],
+    [(24, 13, {"type": "data_table", "title": "Accounts: created, deleted, switched on or off, passwords reset", "data_source": WIN, "query": q(AD_ACCOUNTS),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "When"}],
+               "rows": [{"operation": "terms", "fields": [f], "limit": lim, "label": lab} for f, lim, lab in
+                        (("event.action", 6, "What"), ("windows.target", 30, "Account"), ("user.name", 5, "By"))]}),
+     (24, 13, on(WIN, table("Logons outside working hours (weekends, before 6, after 20)", AD_LOGON + " and windows.off_hours : true",
+                            ["user.name", "windows.logon_kind", "host.name"], 15, "Logons")))],
+    [(48, 12, {"type": "heatmap", "title": "When people log on (by hour and day, the office's time)", "data_source": WIN,
+               "query": q(AD_LOGON + " and windows.hour_n : *"),
+               "metric": {"operation": "count", "label": "Logons"},
+               "x": {"operation": "histogram", "field": "windows.hour_n", "granularity": "auto", "label": "Hour"},
+               "y": {"operation": "terms", "fields": ["windows.weekday"], "limit": 7, "label": "Day", "rank_by": {"type": "alphabetical", "direction": "asc"}}})],
+    [(24, 12, on(WIN, table("Remote desktop and keyboard logons on the domain controllers", 'event.action : "logon" and windows.logon_kind : *',
+                            ["user.name", "windows.logon_kind", "host.name"], 15, "Logons"))),
+     (24, 12, on(WIN, table("Group Policy and audit changes", 'event.action : ("gpo-changed" or "audit-policy-changed" or "log-cleared")',
+                            ["event.action", "user.name", "host.name"], 15, "Times")))],
+    [(48, 3, note("From the domain controllers' security logs (Winlogbeat on each; sentora-elk-node windows DC-ADDRESS). Network logons and computer "
+                  "accounts are left out. Alerts in the panel: a lockout, someone added to an admin group, a cleared security log, many failed logons "
+                  "for one account, a domain controller gone quiet."))],
+])
+BOARDS["sentora-ad"]["time_range"] = {"from": "now-7d", "to": "now"}
+
 # ---- Flows (Sankey): where things come from, where they go, how they end. Vega (Kibana's custom charts), saved as
 # visualizations and put on the Flows board by addvis.py (the dashboards API takes no Vega panel).
 def sankey(title, index, must, fields, sizes=(8, 6, 6), metric=None, unit=""):
@@ -1119,11 +1184,14 @@ FLOWS = {
                                     [{"exists": {"field": "network.bytes"}}, {"exists": {"field": "user.name"}}],
                                     ["user.name", "fortigate.appcat", "network.application"], (10, 6, 4), "network.bytes", "B"),
 }
-FLOW_PLACES = [("sentora-flow-attacks", 0, 2, 48, 22), ("sentora-flow-visits", 0, 24, 24, 22), ("sentora-flow-internet", 24, 24, 24, 22)]
+FLOWS["sentora-flow-ad"] = sankey("Failed logons: from where \u2192 account \u2192 why", "logs-windows-*",
+                                  [{"term": {"event.outcome": "failure"}}, {"exists": {"field": "windows.reason"}}],
+                                  ["windows.from", "user.name", "windows.reason"], (10, 10, 6))
+FLOW_PLACES = [("sentora-flow-attacks", 0, 2, 48, 22), ("sentora-flow-visits", 0, 24, 24, 22), ("sentora-flow-internet", 24, 24, 24, 22), ("sentora-flow-ad", 0, 46, 48, 22)]
 BOARDS["sentora-flows"] = build_src("sentora-flows", "Flows", [
     [(48, 1, note(" "))]])
 BOARDS["sentora-flows"]["panels"] = BOARDS["sentora-flows"]["panels"][:1] + [
-    {"type": "markdown", "grid": {"x": 0, "y": 46, "w": 48, "h": 3}, "config": {"content":
+    {"type": "markdown", "grid": {"x": 0, "y": 68, "w": 48, "h": 3}, "config": {"content":
         "Each band runs from where something comes from to where it went: the wider, the more. Point at a band for its number. "
         "Attacks: failed logins, the web firewall, FortiGate attacks and bans (inside addresses left out). Internet: data moved through the FortiGate."}}]
 

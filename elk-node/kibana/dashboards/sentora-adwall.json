@@ -1,0 +1,725 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-adwall",
+      "label": "AD wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-ad",
+      "label": "Active Directory",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 3,
+     "fields": [
+      "host.name"
+     ],
+     "label": "Machine",
+     "limit": 3,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#F2C94C",
+         "lt": 1
+        },
+        {
+         "color": "#24C28A",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "formula": "count(kql='@timestamp >= \"now-1h\"')",
+      "label": "events",
+      "operation": "formula",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "host.name : *",
+     "language": "kql"
+    },
+    "title": "Domain controllers (events in the last hour)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 48,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1,
+         "lt": 5
+        },
+        {
+         "color": "#EB5757",
+         "gte": 5
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "title": "Locked out, last 24 hours",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 20
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 20,
+         "lt": 100
+        },
+        {
+         "color": "#EB5757",
+         "gte": 100
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Failed logons, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1,
+         "lt": 1
+        },
+        {
+         "color": "#EB5757",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : (\"group-member-added\" or \"group-member-removed\") and windows.admin_group : true and @timestamp >= \"now/d\"",
+     "language": "kql"
+    },
+    "title": "Admin group changes today",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"account-created\" and @timestamp >= \"now/d\"",
+     "language": "kql"
+    },
+    "title": "Accounts created today",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 24,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"password-reset\" and @timestamp >= \"now/d\"",
+     "language": "kql"
+    },
+    "title": "Passwords reset today",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 32,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1,
+         "lt": 1
+        },
+        {
+         "color": "#EB5757",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"log-cleared\"",
+     "language": "kql"
+    },
+    "title": "Security log cleared",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 40,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "user.name"
+     ],
+     "label": "Name",
+     "limit": 8,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#EB5757",
+       "type": "static"
+      },
+      "label": "times",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "field": "windows.from",
+      "label": "from",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"locked-out\"",
+     "language": "kql"
+    },
+    "title": "Locked out (last 24 hours)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 15,
+    "w": 24,
+    "x": 0,
+    "y": 15
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "user.name"
+     ],
+     "label": "Account",
+     "limit": 8,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "desc",
+      "metric_index": 0,
+      "type": "metric"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 5
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 5,
+         "lt": 15
+        },
+        {
+         "color": "#EB5757",
+         "gte": 15
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "tries",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "field": "windows.reason",
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Failed logons by account, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 15,
+    "w": 24,
+    "x": 24,
+    "y": 15
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "event.action"
+       ],
+       "label": "What",
+       "limit": 6,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-windows",
+       "type": "data_view_reference"
+      },
+      "type": "area_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Events",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\" or \"logon-failed\" or \"kerberos-failed\" or \"ntlm-failed\" or \"locked-out\")",
+     "language": "kql"
+    },
+    "title": "Logons and failures over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 11,
+    "w": 32,
+    "x": 0,
+    "y": 30
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-windows",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "windows.reason"
+      ],
+      "label": "Why",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and not event.action : \"locked-out\" and windows.reason : *",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Why logons failed",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 11,
+    "w": 16,
+    "x": 32,
+    "y": 30
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 30000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: AD wall"
+}

@@ -7,6 +7,10 @@
 #   sentora-elk-node m365 TENANT-ID APP-ID   Microsoft 365 / Entra: sign-ins, Teams and mail activity, service health,
 #                                        read with an app registered in Entra (its secret asked for, never shown)
 #   sentora-elk-node veeam-api ADDRESS USER   Veeam's REST API (read only): each machine's newest backup, each job's state
+#   sentora-elk-node windows ADDRESS     an Active Directory domain controller (run once per DC): its security events
+#                                        through Winlogbeat over TLS on 6518, its own certificate, from ADDRESS only;
+#                                        makes /root/sentora-dc-ADDRESS.ps1, the setup to run on that DC
+#   sentora-elk-node windows off [ADDRESS]   stop taking that DC (or all of them)
 #   sentora-elk-node SOURCE off          stop taking it (what came in stays until the keeping time ends)
 #   sentora-elk-node sources             what is on, and when each last sent something
 #
@@ -42,6 +46,18 @@ pipelines() {
         echo "- pipeline.id: sentora"
         echo "  path.config: \"/etc/logstash/conf.d/sentora.conf\""
         local s
+        if [ -s "$SRC/windows" ] && [ -f "$C/files/windows.conf" ]; then
+            windows_certs
+            # (the domain controllers' addresses are written into the pipeline's check)
+            list=$(grep -E '^[0-9a-fA-F:.]+$' "$SRC/windows" | sed 's/.*/"&"/' | paste -sd, -)
+            sed "s/SENTORA_DC_LIST/$list/" "$C/files/windows.conf" > /etc/logstash/sources.d/windows.conf.new
+            chown root:logstash /etc/logstash/sources.d/windows.conf.new; chmod 640 /etc/logstash/sources.d/windows.conf.new
+            mv /etc/logstash/sources.d/windows.conf.new /etc/logstash/sources.d/windows.conf
+            echo "- pipeline.id: windows"
+            echo "  path.config: \"/etc/logstash/sources.d/windows.conf\""
+        else
+            rm -f /etc/logstash/sources.d/windows.conf
+        fi
         for s in fortigate veeam; do
             if [ -s "$SRC/$s" ] && [ -f "$C/files/$s.conf" ]; then
                 install -m 640 -o root -g logstash "$C/files/$s.conf" "/etc/logstash/sources.d/$s.conf"
@@ -54,6 +70,21 @@ pipelines() {
     } > /etc/logstash/pipelines.yml.new
     chown root:logstash /etc/logstash/pipelines.yml.new; chmod 640 /etc/logstash/pipelines.yml.new
     mv /etc/logstash/pipelines.yml.new /etc/logstash/pipelines.yml
+}
+
+# the domain controllers' own authority (it signs only their certificates) and what Logstash needs for port 6518
+windows_ca() {
+    [ -s "$SRC/windows-ca.crt" ] && return 0
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-384 -nodes -keyout "$SRC/windows-ca.key" -out "$SRC/windows-ca.crt" \
+        -subj "/CN=Sentora Elk node: domain controllers" -days 7300 -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign 2> /dev/null
+}
+windows_certs() {
+    local d=/etc/logstash/sentora/windows
+    mkdir -p "$d"; chown root:logstash "$d"; chmod 750 "$d"
+    # (the node shows the certificate with its addresses, as for Veeam: Winlogbeat checks the address it connects to)
+    cat $C/web.crt $C/ca.crt > "$d/node.crt.new"; install -m 640 -o root -g logstash "$d/node.crt.new" "$d/node.crt"; rm -f "$d/node.crt.new"
+    openssl pkcs8 -topk8 -nocrypt -in $C/web.key -out "$d/node.key.new" && install -m 640 -o root -g logstash "$d/node.key.new" "$d/node.key"; rm -f "$d/node.key.new"
+    install -m 640 -o root -g logstash "$SRC/windows-ca.crt" "$d/dc-ca.crt"
 }
 
 # rsyslog: TLS inputs for the syslog sources that are on (and nothing when none is)
@@ -131,7 +162,7 @@ reader() {
 # which sources are on, for the alerts service (the panel shows it): on or off only, no addresses
 publish() {
     local s out='{'
-    for s in fortigate veeam m365; do [ -s "$SRC/$s" ] && out="$out\"$s\": \"on\", " || out="$out\"$s\": \"off\", "; done
+    for s in fortigate veeam m365 windows; do [ -s "$SRC/$s" ] && out="$out\"$s\": \"on\", " || out="$out\"$s\": \"off\", "; done
     out="${out%, }}"
     [ -d /etc/sentora-elk-alerts ] && { printf '%s\n' "$out" > /etc/sentora-elk-alerts/sources.json; chown root:sentora-elk-alerts /etc/sentora-elk-alerts/sources.json; chmod 640 /etc/sentora-elk-alerts/sources.json; }
 }
@@ -240,6 +271,41 @@ case "${1:-sources}" in
         reader
         sleep 3
         runuser -u sentora-elk-reader -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-reader/sentora-elk-reader.py check | grep -E "^veeam" ;;
+    windows)
+        a=${2:-}
+        if [ "$a" = off ]; then
+            b=${3:-}
+            if [ -n "$b" ]; then grep -vxF "$b" "$SRC/windows" > "$SRC/windows.new" 2> /dev/null; mv "$SRC/windows.new" "$SRC/windows"; rm -f "$SRC/dc-$b.crt" "$SRC/dc-$b.key"
+            else rm -f "$SRC/windows" "$SRC"/dc-*.crt "$SRC"/dc-*.key; fi
+            [ -s "$SRC/windows" ] || rm -f "$SRC/windows"
+            apply; say "The domain controller${b:+ $b} is no longer taken."; exit 0
+        fi
+        ip_ok "$a" || { say "sentora-elk-node windows ADDRESS   (a domain controller's address as this node sees it; run once for each)"; exit 2; }
+        windows_ca || { say "Could not make the domain controllers' authority."; exit 1; }
+        # its own certificate, named after its address (Logstash checks both)
+        if [ ! -s "$SRC/dc-$a.crt" ]; then
+            openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$SRC/dc-$a.key.tmp" -out "$SRC/dc-$a.csr" -subj "/CN=sentora-dc-$a" 2> /dev/null
+            openssl pkcs8 -topk8 -nocrypt -in "$SRC/dc-$a.key.tmp" -out "$SRC/dc-$a.key"; rm -f "$SRC/dc-$a.key.tmp"
+            printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n' > "$SRC/dc.ext"
+            openssl x509 -req -in "$SRC/dc-$a.csr" -CA "$SRC/windows-ca.crt" -CAkey "$SRC/windows-ca.key" -CAcreateserial -out "$SRC/dc-$a.crt" -days 3650 -extfile "$SRC/dc.ext" 2> /dev/null \
+                || { say "Could not make the domain controller's certificate."; exit 1; }
+            rm -f "$SRC/dc-$a.csr" "$SRC/dc.ext"
+        fi
+        touch "$SRC/windows"; grep -qxF "$a" "$SRC/windows" || echo "$a" >> "$SRC/windows"
+        apply || exit 1
+        me=$(hostname -I 2> /dev/null | awk '{print $1}')
+        out=/root/sentora-dc-$a.ps1
+        python3 -I "$LIB/winsetup.py" "$me" "$a" $C/ca.crt "$SRC/dc-$a.crt" "$SRC/dc-$a.key" > "$out.new" && mv "$out.new" "$out" && chmod 600 "$out" \
+            || { rm -f "$out.new"; say "Could not write the setup script."; exit 1; }
+        say "The node takes the security events of the domain controller $a on port 6518 (TLS both ways, its certificate only)."
+        say ""
+        say "On your PC, copy this file from the node: $out"
+        say "  (it holds that DC's private key: keep it to yourself, delete it once it ran)"
+        say "On the domain controller $a, as an administrator, in PowerShell:"
+        say "  powershell -ExecutionPolicy Bypass -File .\\sentora-dc-$a.ps1"
+        say "  (it looks for winlogbeat.exe in C:\\winlogbeat; another folder: add -Folder 'D:\\path')"
+        say "It sets Winlogbeat up for this node, starts its service, checks the connection and shows which audit settings are off."
+        say "Then: sentora-elk-node sources" ;;
     sources)
         for s in fortigate veeam m365; do
             if [ -s "$SRC/$s" ]; then
@@ -250,9 +316,16 @@ case "${1:-sources}" in
                 printf '%-10s off\n' "$s"
             fi
         done
+        if [ -s "$SRC/windows" ]; then
+            while read -r d; do
+                [ -n "$d" ] || continue
+                last=$(es "https://127.0.0.1:9200/logs-windows-default/_search?size=1&sort=@timestamp:desc&filter_path=hits.hits._source.@timestamp" -d "{\"query\":{\"term\":{\"observer.ip\":\"$d\"}}}" 2> /dev/null | sed -n 's/.*"@timestamp":"\([^"]*\)".*/\1/p')
+                printf '%-10s on (%s)   last: %s\n' "windows" "$d" "${last:-nothing yet}"
+            done < "$SRC/windows"
+        else printf '%-10s off\n' "windows"; fi
         if [ -s "$SRC/veeam-api" ]; then printf '%-10s on (%s)   backup coverage, read every hour\n' "veeam-api" "$(cat "$SRC/veeam-api")"; else printf '%-10s off\n' "veeam-api"; fi ;;
     refresh)
         # (the installer's --update: the newest pipelines and settings for what is on)
         apply > /dev/null ;;
-    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

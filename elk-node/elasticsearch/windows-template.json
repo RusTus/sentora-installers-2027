@@ -1,0 +1,83 @@
+{
+  "index_patterns": [
+    "logs-windows-*"
+  ],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings"
+  ],
+  "_meta": {
+    "description": "Sentora Elk node: Active Directory, the domain controllers' security events (sentora-elk-node windows)"
+  },
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "sentora-logs",
+      "index.number_of_replicas": 0,
+      "index.default_pipeline": "logs@default-pipeline"
+    },
+    "mappings": {
+      "properties": {
+        "winlog": {
+          "type": "flattened",
+          "ignore_above": 1024
+        },
+        "windows": {
+          "properties": {
+            "reason": {
+              "type": "keyword"
+            },
+            "from_machine": {
+              "type": "keyword"
+            },
+            "target": {
+              "type": "keyword"
+            },
+            "member": {
+              "type": "keyword"
+            },
+            "admin_group": {
+              "type": "boolean"
+            },
+            "object": {
+              "type": "keyword"
+            },
+            "object_class": {
+              "type": "keyword"
+            },
+            "attribute": {
+              "type": "keyword"
+            },
+            "logon_type": {
+              "type": "integer"
+            },
+            "logon_kind": {
+              "type": "keyword"
+            },
+            "hour_n": {
+              "type": "integer"
+            },
+            "weekday": {
+              "type": "keyword"
+            },
+            "off_hours": {
+              "type": "boolean"
+            },
+            "from": {
+              "type": "keyword"
+            }
+          }
+        },
+        "observer": {
+          "properties": {
+            "ip": {
+              "type": "ip"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -112,9 +112,9 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
-[ "$(KB '/api/saved_objects/dashboard/sentora-flows' | grep -o '"id":"sentora-flow-[a-z]*"' | sort -u | wc -l)" = 3 ] && ok "the three flow charts are on the Flows dashboard" || bad "the flow charts are not on the Flows dashboard"
+[ "$(KB '/api/saved_objects/dashboard/sentora-flows' | grep -o '"id":"sentora-flow-[a-z]*"' | sort -u | wc -l)" = 4 ] && ok "the four flow charts are on the Flows dashboard" || bad "the flow charts are not on the Flows dashboard"
 KB '/api/saved_objects/visualization/sentora-flow-attacks' | grep -q 'vega.github.io/schema' && ok "the flow charts are Vega charts" || bad "the attacks flow chart is not a Vega chart"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -212,7 +212,45 @@ n=$(waitcnt 'logs-veeam-*' '{"query":{"match_all":{}}}' 7)
 [ "$n" = 7 ] && ok "Veeam's 7 events arrived" || bad "Veeam events: $n of 7 ($(cat "$OUT/veeam-send.txt"))"
 [ "$(cnt 'logs-veeam-*' '{"query":{"bool":{"filter":[{"term":{"veeam_job.name":"Offsite Copy"}},{"term":{"veeam_job.result":"Failed"}}]}}}')" = 1 ] && ok "a failed job with its name and result" || bad "the failed job was not read"
 in_box 'sentora-elk-node alerts' | grep -q "Veeam: Offsite Copy failed" && ok "the failed Veeam job is an alert" || bad "no alert for the failed Veeam job"
-in_box 'sentora-elk-node sources' > "$OUT/sources.txt" 2>&1; grep -q "^fortigate *on" "$OUT/sources.txt" && grep -q "^veeam *on" "$OUT/sources.txt" && ok "sentora-elk-node sources lists them" || bad "sources: $(cat "$OUT/sources.txt")"
+# Active Directory: a domain controller's Winlogbeat on 6518 (TLS both ways); Filebeat stands in for it (the same protocol)
+in_box "sentora-elk-node windows $GW" > "$OUT/windows-on.txt" 2>&1 && grep -q "sentora-dc-$GW.ps1" "$OUT/windows-on.txt" && ok "sentora-elk-node windows: switched on, with the setup script" || bad "windows on: $(tail -5 "$OUT/windows-on.txt")"
+in_box "stat -c %a /root/sentora-dc-$GW.ps1" | grep -qx 600 && in_box "grep -q 'BEGIN PRIVATE KEY' /root/sentora-dc-$GW.ps1 && grep -q ':6518' /root/sentora-dc-$GW.ps1" \
+    && ok "the setup script holds the DC's key and is root's alone" || bad "the setup script: $(in_box "ls -la /root/sentora-dc-$GW.ps1")"
+in_box "cat /root/sentora-dc-$GW.ps1" > "$W/dc.ps1"
+if command -v pwsh > /dev/null; then
+    pwsh -NoProfile -Command "\$e=\$null; \$t=\$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$W/dc.ps1',[ref]\$t,[ref]\$e); if(\$e){\$e | ForEach-Object { \$_.Message }; exit 1}" > "$OUT/ps1-parse.txt" 2>&1 \
+        && ok "the setup script is valid PowerShell" || bad "PowerShell: $(head -3 "$OUT/ps1-parse.txt")"
+fi
+in_box 'ufw status | grep -qE "6518/tcp +ALLOW( IN)? +'"$GW"'"' && ok "the firewall lets only that DC reach 6518" || bad "no 6518 rule for $GW"
+in_box "cat /etc/sentora-elk/sources/dc-$GW.crt" > "$W/dc.crt"; in_box "cat /etc/sentora-elk/sources/dc-$GW.key" > "$W/dc.key"
+# (a certificate of the DCs' own authority, but made for another address)
+in_box 'cd /root && openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout dcx.key -out dcx.csr -subj /CN=sentora-dc-192.0.2.77 2> /dev/null && printf "extendedKeyUsage=clientAuth\n" > dcx.ext && openssl x509 -req -in dcx.csr -CA /etc/sentora-elk/sources/windows-ca.crt -CAkey /etc/sentora-elk/sources/windows-ca.key -CAcreateserial -out dcx.crt -days 2 -extfile dcx.ext 2> /dev/null'
+in_box 'cat /root/dcx.crt' > "$W/dcx.crt"; in_box 'cat /root/dcx.key' > "$W/dcx.key"
+python3 -I "$REPO/tests/elk/winevents.py" > "$W/winevents.ndjson"
+fbsend() { # name cert key: Filebeat on the runner (the node sees the gateway's address), sending the test events to 6518
+    mkdir -p "$W/fb-$1"; cp "$W/node-ca.crt" "$W/winevents.ndjson" "$W/fb-$1/"; cp "$2" "$W/fb-$1/c.crt"; cp "$3" "$W/fb-$1/c.key"
+    printf 'filebeat.inputs:\n  - type: filestream\n    id: dc\n    paths: ["/data/winevents.ndjson"]\n    parsers:\n      - ndjson: {target: "", overwrite_keys: true}\noutput.logstash:\n  hosts: ["%s:6518"]\n  ssl.enabled: true\n  ssl.verification_mode: full\n  ssl.certificate_authorities: ["/data/node-ca.crt"]\n  ssl.certificate: "/data/c.crt"\n  ssl.key: "/data/c.key"\nlogging.level: warning\n' "$IP" > "$W/fb-$1/fb.yml"
+    chmod 644 "$W/fb-$1"/*
+    docker rm -f "elk-fb-$1" > /dev/null 2>&1
+    docker run -d --name "elk-fb-$1" --network host --user root -v "$W/fb-$1:/data" docker.elastic.co/beats/filebeat:9.5.6 filebeat -c /data/fb.yml --strict.perms=false --path.data /tmp/fbd > /dev/null
+}
+for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6518 "' && break; sleep 3; done
+fbsend dc "$W/dc.crt" "$W/dc.key"
+n=$(waitcnt 'logs-windows-*' '{"query":{"match_all":{}}}' 13)
+[ "$n" = 13 ] && ok "the domain controller's 13 events arrived" || bad "windows events: $n of 13 ($(docker logs elk-fb-dc 2>&1 | grep -i -m3 -e error -e fail))"
+docker rm -f elk-fb-dc > /dev/null 2>&1
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"locked-out"}},{"term":{"user.name":"mlee"}},{"term":{"windows.from":"PC-31"}}]}}}')" = 1 ] && ok "a lockout with its account and computer" || bad "the lockout was not read"
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"group.name":"Domain Admins"}},{"term":{"windows.member":"Eve Example"}},{"term":{"windows.admin_group":true}},{"term":{"user.name":"admin.rb"}}]}}}')" = 1 ] && ok "a change to Domain Admins: who, whom, an admin group" || bad "the admin group change was not read"
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"logon-failed"}},{"term":{"windows.reason":"wrong password"}},{"term":{"source.ip":"203.0.113.9"}}]}}}')" = 3 ] && ok "failed logons with why and from where" || bad "failed logons not read"
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"windows.logon_kind":"remote desktop"}},{"term":{"windows.off_hours":true}},{"term":{"windows.weekday":"7 Sun"}},{"term":{"windows.hour_n":3}}]}}}')" = 1 ] && ok "a remote desktop logon on Sunday at 3, outside working hours" || bad "the office time was not worked out"
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"gpo-changed"}}]}}}')" = 1 ] && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"log-cleared"}},{"term":{"user.name":"admin.rb"}}]}}}')" = 1 ] && ok "a Group Policy change and a cleared log" || bad "GPO change or cleared log not read"
+in_box 'sentora-elk-node alerts' > "$OUT/ad-alerts.txt" 2>&1
+grep -q "mlee is locked out" "$OUT/ad-alerts.txt" && grep -q "Eve Example was added to Domain Admins" "$OUT/ad-alerts.txt" && grep -q "security log of dc01 was cleared" "$OUT/ad-alerts.txt" \
+    && ok "a lockout, a new Domain Admin and a cleared log are alerts" || bad "AD alerts: $(grep -i -e ad- -e locked "$OUT/ad-alerts.txt" | head -5)"
+fbsend wrongip "$W/dcx.crt" "$W/dcx.key"; fbsend other "$W/other.crt" "$W/other.key"
+sleep 30; docker rm -f elk-fb-wrongip elk-fb-other > /dev/null 2>&1; es -X POST 'https://127.0.0.1:9200/logs-windows-*/_refresh' > /dev/null 2>&1
+[ "$(cnt 'logs-windows-*' '{"query":{"match_all":{}}}')" = 13 ] && ok "6518 takes nothing with another address's or another authority's certificate" || bad "6518 took events it should not have"
+in_box 'sentora-elk-node sources' > "$OUT/sources.txt" 2>&1; grep -q "^fortigate *on" "$OUT/sources.txt" && grep -q "^veeam *on" "$OUT/sources.txt" && grep -q "^windows *on ($GW)" "$OUT/sources.txt" && ok "sentora-elk-node sources lists them" || bad "sources: $(cat "$OUT/sources.txt")"
 # Microsoft 365: the reader against the test's stand-in for Microsoft (login, Graph, reports)
 docker cp "$REPO/tests/elk/fakegraph.py" "$NAME:/root/fakegraph.py"
 in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout fg.key -out fg.crt -subj /CN=localhost -addext subjectAltName=DNS:localhost -days 2 2> /dev/null; install -m 644 fg.crt /usr/local/share/fg-test.crt; (python3 -I fakegraph.py 18443 fg.crt fg.key > /dev/null 2>&1 &)'
