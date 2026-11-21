@@ -637,7 +637,7 @@ note "On: ${on:-none}. sentora-elk-node fortigate ADDRESS | veeam ADDRESS | m365
 ui_step "Sentora's dashboards"
 printf '%s' '{"data_view":{"id":"sentora-logs","name":"Sentora logs","title":"logs-sentora-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv.json" | grep -q '"sentora-logs"' || die "Kibana refused the data view (see $LOG)."
-printf '%s' '{"data_view":{"id":"sentora-uptime","name":"Sentora uptime checks","title":"heartbeat-*","timeFieldName":"@timestamp"},"override":true}' > "$CONF/files/dv2.json"
+printf '%s' '{"data_view":{"id":"sentora-uptime","name":"Sentora uptime checks","title":"heartbeat-*","timeFieldName":"@timestamp","runtimeFieldMap":{"sentora.cert_days":{"type":"double","script":{"source":"def f = \"tls.server.x509.not_after\"; if (doc.containsKey(f) && doc[f].size() > 0) { emit((doc[f].value.toInstant().toEpochMilli() - doc[\"@timestamp\"].value.toInstant().toEpochMilli()) / 86400000.0); }"}}}},"override":true}' > "$CONF/files/dv2.json"
 kbapi POST /api/data_views/data_view "$CONF/files/dv2.json" | grep -q '"sentora-uptime"' || die "Kibana refused the uptime data view (see $LOG)."
 # (the other sources' data views, for their dashboards)
 for v in "sentora-fortigate|FortiGate|logs-fortigate-*" "sentora-veeam|Veeam|logs-veeam-*" "sentora-m365|Microsoft 365|logs-m365-*" "sentora-shop|Online store|sentora-shop" "sentora-all|Everything (panel, FortiGate, Microsoft 365)|logs-sentora-*,logs-fortigate-*,logs-m365-*"; do
@@ -651,7 +651,7 @@ out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "el
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall; do
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
@@ -663,7 +663,19 @@ kbapi GET /api/saved_objects/dashboard/sentora-worldmap > "$CONF/files/wm.json" 
     && python3 -I "$CONF/files/addmap.py" "$CONF/files/wm.json" sentora-world-map 0 2 34 30 > "$CONF/files/wm-new.json" \
     && kbapi PUT /api/saved_objects/dashboard/sentora-worldmap "$CONF/files/wm-new.json" | grep -q '"id":"sentora-worldmap"' || echo "WARNING: the world map is not on its dashboard"
 rm -f "$CONF/files/wm.json" "$CONF/files/wm-new.json"
-note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage)."
+# the Flows charts (Vega Sankeys), saved as visualizations, then put on the Flows dashboard by reference
+fl=0
+for v in sentora-flow-attacks sentora-flow-visits sentora-flow-internet; do
+    get "kibana/dashboards/$v.vis.json" "$CONF/files/$v.json" || die "Could not get the flow chart $v."
+    kbapi POST "/api/saved_objects/visualization/$v?overwrite=true" "$CONF/files/$v.json" | grep -q "\"id\":\"$v\"" && fl=$((fl + 1)) || echo "WARNING: Kibana refused the flow chart $v"
+done
+get kibana/addvis.py "$CONF/files/addvis.py" || die "Could not get addvis.py."
+kbapi GET /api/saved_objects/dashboard/sentora-flows > "$CONF/files/fl.json" \
+    && python3 -I "$CONF/files/addvis.py" "$CONF/files/fl.json" visualization:sentora-flow-attacks:0:2:48:22 visualization:sentora-flow-visits:0:24:24:22 \
+        visualization:sentora-flow-internet:24:24:24:22 > "$CONF/files/fl-new.json" \
+    && kbapi PUT /api/saved_objects/dashboard/sentora-flows "$CONF/files/fl-new.json" | grep -q '"id":"sentora-flows"' || echo "WARNING: the flow charts are not on the Flows dashboard"
+rm -f "$CONF/files/fl.json" "$CONF/files/fl-new.json"
+note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage; the walls: Server, Backup, Network, Security, Microsoft 365, Sales; Week in review and Flows with $fl flow charts)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash

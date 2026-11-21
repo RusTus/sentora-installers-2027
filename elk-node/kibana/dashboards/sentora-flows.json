@@ -1,0 +1,200 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "content": "Each band runs from where something comes from to where it went: the wider, the more. Point at a band for its number. Attacks: failed logins, the web firewall, FortiGate attacks and bans (inside addresses left out). Internet: data moved through the FortiGate."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 46
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Sentora: Flows"
+}

@@ -242,8 +242,28 @@ def health(g, st):
             "id": i.get("id"), "title": (i.get("title") or "")[:300], "service": i.get("service"), "classification": i.get("classification"),
             "status": i.get("status"), "since": i.get("startDateTime"), "impact": (i.get("impactDescription") or "")[:500]}}})
         docs.append(("issue-" + str(i.get("id")) + "-" + hour, doc))
+    issues = len(docs)
+    # each service's state now (1 working, 0.5 a problem being looked at or fixed, 0 down), for the wall's tiles
+    o = g.get("/v1.0/admin/serviceAnnouncement/healthOverviews")
+    stamp = now().strftime("%Y%m%d%H%M")[:-1]  # (one reading per service every 10 minutes)
+    for s in o.get("value", []):
+        name, status = str(s.get("service") or "")[:128], str(s.get("status") or "")
+        if not name:
+            continue
+        h = 0.0 if status in SERVICE_DOWN else 1.0 if status in SERVICE_OK else 0.5
+        doc = base("service-health")
+        doc.update({"@timestamp": iso(now()), "m365": {"kind": "service-health", "service": name, "status": status[:64], "health": h,
+                                                        "state": SERVICE_WORDS.get(status, "working" if h == 1.0 else "a problem")}})
+        docs.append(("svc-" + hashlib.sha1(name.encode()).hexdigest()[:16] + "-" + stamp, doc))
     added = bulk(docs)
-    return "service health: %d open, %d new this hour" % (len(docs), added)
+    return "service health: %d open, %d service(s), %d new" % (issues, len(docs) - issues, added)
+
+
+SERVICE_OK = {"serviceOperational", "serviceRestored", "falsePositive", "postIncidentReviewPublished", "investigationSuspended", "resolved"}
+SERVICE_DOWN = {"serviceInterruption"}
+SERVICE_WORDS = {"serviceOperational": "working", "serviceRestored": "restored", "serviceDegradation": "slow or partly down", "serviceInterruption": "down",
+                 "investigating": "Microsoft is looking", "restoringService": "being fixed", "verifyingService": "fix being checked",
+                 "extendedRecovery": "recovering", "falsePositive": "working", "postIncidentReviewPublished": "working", "investigationSuspended": "working"}
 
 
 # ---- Veeam Backup & Replication's REST API (port 9419, its own certificate, pinned by its SHA-256 when switched on)

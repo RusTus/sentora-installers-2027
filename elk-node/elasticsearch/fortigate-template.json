@@ -61,6 +61,9 @@
                 },
                 "kind": {
                   "type": "keyword"
+                },
+                "up": {
+                  "type": "integer"
                 }
               }
             },

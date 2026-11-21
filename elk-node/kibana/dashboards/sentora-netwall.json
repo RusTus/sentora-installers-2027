@@ -1,0 +1,741 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "format": {
+       "suffix": "/s",
+       "type": "bytes"
+      },
+      "formula": "sum(network.bytes) / 300",
+      "label": "in and out",
+      "operation": "formula",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "network.bytes : * and @timestamp >= \"now-5m\"",
+     "language": "kql"
+    },
+    "title": "Internet now",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "People on the VPN now",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "user.name",
+      "label": "",
+      "operation": "unique_count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "user.name : * and network.bytes : * and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "Online now (inside)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 5
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 5,
+         "lt": 20
+        },
+        {
+         "color": "#EB5757",
+         "gte": 20
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.outcome : \"failure\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Failed VPN logins, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 20
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 20,
+         "lt": 100
+        },
+        {
+         "color": "#EB5757",
+         "gte": 100
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"ips\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Attacks stopped, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 20
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 20,
+         "lt": 100
+        },
+        {
+         "color": "#EB5757",
+         "gte": 100
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.subtype : \"webfilter\" and event.outcome : \"failure\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Sites blocked, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 2,
+     "fields": [
+      "fortigate.vpn.name"
+     ],
+     "label": "Tunnel",
+     "limit": 8,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#EB5757",
+         "lt": 1
+        },
+        {
+         "color": "#24C28A",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "fortigate.vpn.up",
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "label": "up",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     },
+     {
+      "field": "source.ip",
+      "label": "other end",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and fortigate.vpn.kind : \"site-to-site\" and fortigate.vpn.up : *",
+     "language": "kql"
+    },
+    "title": "Tunnels to the other sites (up or down)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 16,
+    "w": 24,
+    "x": 0,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "user.name"
+     ],
+     "label": "Name",
+     "limit": 8,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "field": "source.geo.country_iso_code",
+      "label": "from",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "event.category : \"vpn\" and not fortigate.vpn.kind : \"site-to-site\" and event.action : (\"tunnel-up\" or \"tunnel-stats\") and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "On the VPN now (data in the last 15 minutes)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 16,
+    "w": 24,
+    "x": 24,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "user.name"
+      ],
+      "label": "Name",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "user.name : * and network.bytes : * and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Who uses the most now (15 minutes)",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 0,
+    "y": 24
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "fortigate.appcat"
+      ],
+      "label": "Kind of app",
+      "limit": 6,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "network.application"
+      ],
+      "label": "App",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "network.application : * and network.bytes : * and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "Apps now (15 minutes)",
+    "type": "treemap"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 16,
+    "y": 24
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "fortigate.category"
+      ],
+      "label": "Category",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.category : * and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Kinds of sites now (15 minutes)",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 14,
+    "w": 16,
+    "x": 32,
+    "y": 24
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "fortigate.appcat"
+       ],
+       "label": "Kind of app",
+       "limit": 6,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-fortigate",
+       "type": "data_view_reference"
+      },
+      "type": "area_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "network.bytes",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Data",
+        "operation": "sum"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "fortigate.appcat : * and network.bytes : *",
+     "language": "kql"
+    },
+    "title": "Internet use, by kind of app",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 11,
+    "w": 48,
+    "x": 0,
+    "y": 38
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 30000
+ },
+ "time_range": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "title": "Sentora: Network wall"
+}

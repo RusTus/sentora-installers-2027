@@ -8,71 +8,161 @@
      {
       "destination": "sentora-today",
       "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-serverwall",
       "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-backupwall",
       "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-overview",
       "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-attackers",
       "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-fortigate",
       "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-vpn",
       "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-threats",
       "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-internet",
       "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-veeam",
       "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-coverage",
       "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-m365",
       "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-shop",
       "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-funnel",
       "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      }
     ]
@@ -564,12 +654,12 @@
   {
    "config": {
     "breakdown_by": {
-     "columns": 6,
+     "columns": 3,
      "fields": [
       "monitor.name"
      ],
      "label": "Website",
-     "limit": 18,
+     "limit": 12,
      "operation": "terms",
      "rank_by": {
       "direction": "asc",
@@ -620,8 +710,73 @@
    },
    "grid": {
     "h": 22,
-    "w": 48,
+    "w": 24,
     "x": 0,
+    "y": 18
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 3,
+     "fields": [
+      "monitor.name"
+     ],
+     "label": "Website",
+     "limit": 12,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#EB5757",
+         "lt": 7
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 7,
+         "lt": 21
+        },
+        {
+         "color": "#24C28A",
+         "gte": 21
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "sentora.cert_days",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "days left",
+      "operation": "min",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and tls.server.x509.not_after : * and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "Certificates (days left)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 22,
+    "w": 24,
+    "x": 24,
     "y": 18
    },
    "type": "vis"

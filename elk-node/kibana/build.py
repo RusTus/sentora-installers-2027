@@ -65,7 +65,7 @@ def bars(title, kql, by=None, limit=6, label="Lines"):
 def pie(title, kql, field, limit=6, label="Lines"):
     return {"type": "pie", "title": title, "data_source": DV, "query": q(kql),
             "metrics": [{"operation": "count", "label": label}],
-            "group_by": [{"operation": "terms", "fields": [field], "limit": limit, "label": NAMES.get(field, field)}]}
+            "group_by": [{"operation": "terms", "fields": [field], "limit": limit, "label": NAMES.get(field, field)}], "styling": {"donut_hole": "m"}}
 
 
 def table(title, kql, fields, limit=10, label="Count"):
@@ -84,10 +84,13 @@ def note(text):
     return ("markdown", {"content": text})
 
 
+OWN_TIME = {"use_time_range": False}  # (each board opens with its own time range: a wall's last hour, the week's 7 days)
+
+
 def build(did, title, rows):
     """rows: lists of (width, height, panel); each row starts below the tallest panel of the row before."""
     links = {"layout": "horizontal", "links": [
-        {"type": "dashboardLink", "destination": d, "label": t} for d, t in DASHBOARDS]}
+        {"type": "dashboardLink", "destination": d, "label": t, "options": OWN_TIME} for d, t in DASHBOARDS]}
     panels = [{"type": "links", "grid": {"x": 0, "y": 0, "w": 48, "h": 2}, "config": links}]
     y = 2
     for row in rows:
@@ -437,7 +440,9 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
 
 # ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
 # Their own links bar; "Overview" leads back to the panel's boards.
-SOURCES = [("sentora-today", "Today"), ("sentora-serverwall", "Server wall"), ("sentora-backupwall", "Backup wall"), ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
+SOURCES = [("sentora-today", "Today"), ("sentora-week", "Week"), ("sentora-flows", "Flows"), ("sentora-serverwall", "Server wall"), ("sentora-backupwall", "Backup wall"),
+           ("sentora-netwall", "Network wall"), ("sentora-secwall", "Security wall"), ("sentora-m365wall", "Microsoft 365 wall"), ("sentora-saleswall", "Sales wall"),
+           ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
            ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"), ("sentora-threats", "FortiGate: threats"),
            ("sentora-internet", "Internet use"), ("sentora-veeam", "Veeam backups"), ("sentora-coverage", "Backup coverage"),
            ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
@@ -464,7 +469,7 @@ def on(dv, cfg):
 
 def build_src(did, title, rows):
     b = build(did, title, rows)
-    b["panels"][0]["config"] = {"layout": "horizontal", "links": [{"type": "dashboardLink", "destination": d, "label": t} for d, t in SOURCES]}
+    b["panels"][0]["config"] = {"layout": "horizontal", "links": [{"type": "dashboardLink", "destination": d, "label": t, "options": OWN_TIME} for d, t in SOURCES]}
     return b
 
 
@@ -824,8 +829,11 @@ BOARDS["sentora-serverwall"] = build_src("sentora-serverwall", "Server wall", [
      (8, 6, tile("Mail waiting", DV, SERVER, last("sentora.health.mail_queue"), bands((None, 50, GREEN), (50, 200, YELLOW), (200, None, RED)), fmt={"type": "number", "decimals": 0}, trend=True)),
      (8, 6, tile("Network in", DV, SERVER, {"operation": "average", "field": "sentora.health.net_rx_bps"}, {"type": "static", "color": BLUE}, fmt={"type": "bytes", "suffix": "/s"}, trend=True)),
      (8, 6, tile("Network out", DV, SERVER, {"operation": "average", "field": "sentora.health.net_tx_bps"}, {"type": "static", "color": BLUE}, fmt={"type": "bytes", "suffix": "/s"}, trend=True))],
-    [(48, 22, up(tile("Websites (checks answered, last 15 minutes)", UPDV, SITE + ' and @timestamp >= "now-15m"', {"operation": "formula", "formula": SITEUP},
-                      bands((None, 0.9, RED), (0.9, 1, YELLOW), (1, None, GREEN)), "up", PCT, by="monitor.name", limit=18, columns=6)))],
+    [(24, 22, up(tile("Websites (checks answered, last 15 minutes)", UPDV, SITE + ' and @timestamp >= "now-15m"', {"operation": "formula", "formula": SITEUP},
+                      bands((None, 0.9, RED), (0.9, 1, YELLOW), (1, None, GREEN)), "up", PCT, by="monitor.name", limit=12, columns=3))),
+     (24, 22, up(tile("Certificates (days left)", UPDV, SITE + " and tls.server.x509.not_after : *" + ' and @timestamp >= "now-15m"',
+                      {"operation": "min", "field": "sentora.cert_days"}, bands((None, 7, RED), (7, 21, YELLOW), (21, None, GREEN)), "days left",
+                      {"type": "number", "decimals": 0}, by="monitor.name", limit=12, columns=3)))],
     [(12, 6, tile("Visits, last hour (people)", DV, WEB + ' and sentora.visitor : "person" and @timestamp >= "now-1h"', {"operation": "count"}, {"type": "static", "color": BLUE}, trend=True)),
      (12, 6, tile("Orders today", SHOP, ORD + ' and @timestamp >= "now/d"', {"operation": "count"}, {"type": "static", "color": GREEN})),
      (12, 6, tile("Failed logins, last hour", DV, FAILED_LOGINS + ' and @timestamp >= "now-1h"', {"operation": "count"}, bands((None, 20, GREEN), (20, 100, YELLOW), (100, None, RED)))),
@@ -834,6 +842,291 @@ BOARDS["sentora-serverwall"] = build_src("sentora-serverwall", "Server wall", [
 BOARDS["sentora-serverwall"]["time_range"] = {"from": "now-6h", "to": "now"}
 BOARDS["sentora-serverwall"]["refresh_interval"] = {"pause": False, "value": 30000}
 BOARDS["sentora-backupwall"]["refresh_interval"] = {"pause": False, "value": 60000}
+
+# ---- more walls: the network (FortiGate), Microsoft 365, security, the store's sales, the week against the one before
+def ring(title, dv, kql, field, m=None, limit=6):
+    """A ring (donut) chart: the share of each value."""
+    return {"type": "pie", "title": title, "data_source": dv, "query": q(kql), "metrics": [m or {"operation": "count", "label": "Lines"}],
+            "group_by": [{"operation": "terms", "fields": [field], "limit": limit, "label": NAMES.get(field, field)}], "styling": {"donut_hole": "m"}}
+
+
+def blocks(title, dv, kql, fields, m=None, limit=8):
+    """A treemap: blocks as big as their share."""
+    return {"type": "treemap", "title": title, "data_source": dv, "query": q(kql), "metrics": [m or {"operation": "count", "label": "Lines"}],
+            "group_by": [{"operation": "terms", "fields": [f], "limit": limit, "label": NAMES.get(f, f)} for f in fields]}
+
+
+def area(title, dv, kql, y, by=None, limit=6):
+    layer = {"type": "area_stacked", "data_source": dv, "x": {"operation": "date_histogram", "field": "@timestamp"}, "y": y}
+    if by:
+        layer["breakdown_by"] = {"operation": "terms", "fields": [by], "limit": limit, "label": NAMES.get(by, by)}
+    return {"type": "xy", "title": title, "query": q(kql), "layers": [layer], "legend": {"visibility": "visible", "position": "right"}}
+
+
+def vs_last_week(title, dv, kql, m, color=BLUE, fmt=None, fewer_is_better=False):
+    """A tile: this period, and how it compares with the same time a week before (arrow up or down; red when it went the wrong way)."""
+    p = dict(m, type="primary", label="", color={"type": "static", "color": color})
+    s = dict(m, type="secondary", label="a week before", time_shift="1w",
+             compare={"to": "primary", "palette": "compare_to_reversed" if fewer_is_better else "compare_to"})
+    if fmt:
+        p["format"] = s["format"] = fmt
+    return {"type": "metric", "title": title, "data_source": dv, "query": q(kql), "metrics": [p, s]}
+
+
+BYTES_S = {"type": "bytes", "suffix": "/s"}
+NOW15 = ' and @timestamp >= "now-15m"'
+HOUR = ' and @timestamp >= "now-1h"'
+
+
+def LOW(a, b):
+    """Green below a, yellow up to b, red from b on (for counts where fewer is better)."""
+    return bands((None, a, GREEN), (a, b, YELLOW), (b, None, RED))
+
+
+BOARDS["sentora-netwall"] = build_src("sentora-netwall", "Network wall", [
+    [(8, 6, tile("Internet now", FGT, "network.bytes : *" + ' and @timestamp >= "now-5m"', {"operation": "formula", "formula": "sum(network.bytes) / 300"},
+                 {"type": "static", "color": BLUE}, "in and out", BYTES_S)),
+     (8, 6, tile("People on the VPN now", FGT, VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats")' + NOW15, {"operation": "unique_count", "field": "user.name"},
+                 {"type": "static", "color": GREEN})),
+     (8, 6, tile("Online now (inside)", FGT, "user.name : * and network.bytes : *" + NOW15, {"operation": "unique_count", "field": "user.name"}, {"type": "static", "color": BLUE})),
+     (8, 6, tile("Failed VPN logins, last hour", FGT, VPNQ + ' and event.outcome : "failure"' + HOUR, {"operation": "count"}, LOW(5, 20))),
+     (8, 6, tile("Attacks stopped, last hour", FGT, 'fortigate.subtype : "ips"' + HOUR, {"operation": "count"}, LOW(20, 100))),
+     (8, 6, tile("Sites blocked, last hour", FGT, 'fortigate.subtype : "webfilter" and event.outcome : "failure"' + HOUR, {"operation": "count"}, LOW(20, 100)))],
+    [(24, 16, tile("Tunnels to the other sites (up or down)", FGT, SITEQ + " and fortigate.vpn.up : *", last("fortigate.vpn.up"),
+                   bands((None, 1, RED), (1, None, GREEN)), "up", PCT, secondary=dict(last("source.ip"), label="other end"),
+                   by="fortigate.vpn.name", limit=8, columns=2)),
+     (24, 16, tile("On the VPN now (data in the last 15 minutes)", FGT, VPNQ + ' and event.action : ("tunnel-up" or "tunnel-stats")' + NOW15,
+                   {"operation": "sum", "field": "network.bytes"}, {"type": "static", "color": GREEN}, "", {"type": "bytes"},
+                   secondary=dict(last("source.geo.country_iso_code"), label="from"), by="user.name", limit=8, columns=4))],
+    [(16, 14, ring("Who uses the most now (15 minutes)", FGT, "user.name : * and network.bytes : *" + NOW15, "user.name",
+                   {"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}, 8)),
+     (16, 14, blocks("Apps now (15 minutes)", FGT, "network.application : * and network.bytes : *" + NOW15, ["fortigate.appcat", "network.application"],
+                     {"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}, 6)),
+     (16, 14, ring("Kinds of sites now (15 minutes)", FGT, "fortigate.category : *" + NOW15, "fortigate.category", None, 8))],
+    [(48, 11, area("Internet use, by kind of app", FGT, "fortigate.appcat : * and network.bytes : *",
+                   [{"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}], "fortigate.appcat", 6))],
+])
+BOARDS["sentora-netwall"]["time_range"] = {"from": "now-6h", "to": "now"}
+BOARDS["sentora-netwall"]["refresh_interval"] = {"pause": False, "value": 30000}
+
+SVC = 'm365.kind : "service-health" and @timestamp >= "now-30m"'
+NAMES.update({"m365.service": "Service", "m365.risk": "Risk", "m365.status": "State"})
+BOARDS["sentora-m365wall"] = build_src("sentora-m365wall", "Microsoft 365 wall", [
+    [(48, 15, tile("Microsoft's services (from Microsoft, every 5 minutes)", M365, SVC, last("m365.health"), HEALTHY, "health", PCT,
+                   secondary=dict(last("m365.state"), label=""), by="m365.service", limit=12, columns=6))],
+    [(10, 6, tile("Sign-ins", M365, SIGN, {"operation": "count"}, {"type": "static", "color": BLUE}, trend=True)),
+     (10, 6, tile("People signing in", M365, SIGN, {"operation": "unique_count", "field": "user.name"}, {"type": "static", "color": BLUE})),
+     (10, 6, tile("Failed sign-ins", M365, SIGN + ' and event.outcome : "failure"', {"operation": "count"}, LOW(50, 200), trend=True)),
+     (9, 6, tile("Risky sign-ins", M365, SIGN + ' and m365.risk : ("medium" or "high")', {"operation": "count"}, LOW(5, 20))),
+     (9, 6, tile("Signed in with MFA", M365, SIGN + " and m365.interactive : true", {"operation": "formula", "formula": "count(kql='m365.mfa : true') / count()"},
+                 bands((None, 0.8, RED), (0.8, 0.95, YELLOW), (0.95, None, GREEN)), "of sign-ins", PCT))],
+    [(16, 14, ring("Apps signed in to", M365, SIGN, "m365.app", None, 6)),
+     (16, 14, ring("Where from", M365, SIGN + " and source.geo.country_iso_code : *", "source.geo.country_iso_code", None, 6)),
+     (16, 14, on(M365, table("Failed and risky sign-ins", SIGN + ' and (event.outcome : "failure" or m365.risk : ("medium" or "high"))',
+                             ["user.name", "m365.reason"], 12, "Times")))],
+    [(24, 11, {"type": "xy", "title": "Teams per day", "query": q('m365.kind : "teams-day"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": M365, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1d"},
+                           "y": [{"operation": "sum", "field": "m365.teams.private_chat", "label": "Chats"},
+                                 {"operation": "sum", "field": "m365.teams.team_chat", "label": "Channels"},
+                                 {"operation": "sum", "field": "m365.teams.calls", "label": "Calls"},
+                                 {"operation": "sum", "field": "m365.teams.meetings", "label": "Meetings"}]}]}),
+     (24, 11, {"type": "xy", "title": "Mail per day", "query": q('m365.kind : "mail-day"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": M365, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1d"},
+                           "y": [{"operation": "sum", "field": "m365.mail.sent", "label": "Sent"},
+                                 {"operation": "sum", "field": "m365.mail.received", "label": "Received"}]}]})],
+])
+BOARDS["sentora-m365wall"]["time_range"] = {"from": "now-7d", "to": "now"}
+
+BOARDS["sentora-secwall"] = build_src("sentora-secwall", "Security wall", [
+    [(8, 6, tile("Attacking addresses, last hour", ALL, BAD + HOUR, {"operation": "unique_count", "field": "source.ip"}, LOW(10, 40), trend=False)),
+     (8, 6, tile("Tries, last hour", ALL, BAD + HOUR, {"operation": "count"}, LOW(100, 500))),
+     (8, 6, tile("Failed logins, last hour", ALL, 'event.outcome : "failure" and not event.action : waf-* and not fortigate.subtype : "ips"' + HOUR, {"operation": "count"}, LOW(30, 150))),
+     (8, 6, tile("Web firewall stopped, last hour", DV, 'event.action : "waf-blocked"' + HOUR, {"operation": "count"}, LOW(50, 200))),
+     (8, 6, tile("FortiGate attacks stopped, last hour", FGT, 'fortigate.subtype : "ips"' + HOUR, {"operation": "count"}, LOW(20, 100))),
+     (8, 6, tile("Banned today", DV, 'event.action : "ban" and @timestamp >= "now/d"', {"operation": "count"}, {"type": "static", "color": BLUE}))],
+    [(24, 15, tile("The busiest attackers (tries)", ALL, BAD, {"operation": "count"}, LOW(20, 100), "tries",
+                   secondary=dict(last("source.geo.country_iso_code"), label=""), by="source.ip", limit=12, columns=4) | {"breakdown_by": {
+                       "operation": "terms", "fields": ["source.ip"], "limit": 12, "columns": 4, "label": "Address",
+                       "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}}),
+     (24, 15, on(ALL, world("Where they come from", BAD, "Tries")))],
+    [(16, 14, blocks("What they tried, and where", ALL, BAD, ["data_stream.dataset", "event.action"], None, 6)),
+     (16, 14, ring("Countries", ALL, BAD + " and source.geo.country_iso_code : *", "source.geo.country_iso_code", None, 8)),
+     (16, 14, ring("Where they were stopped", ALL, BAD, "data_stream.dataset", None, 4))],
+    [(48, 10, area("Tries over time, by where they were seen", ALL, BAD, [{"operation": "count", "label": "Tries"}], "data_stream.dataset", 4))],
+])
+BOARDS["sentora-secwall"]["refresh_interval"] = {"pause": False, "value": 30000}
+
+ITEMS = 'sentora.shop.kind : "item" and not sentora.shop.status : ("canceled" or "closed")'
+TOTAL = {"operation": "sum", "field": "sentora.shop.base_total"}
+BOARDS["sentora-saleswall"] = build_src("sentora-saleswall", "Sales wall", [
+    [(12, 7, vs_last_week("Sales", SHOP, ORD, TOTAL, GREEN, MONEY)),
+     (12, 7, vs_last_week("Orders", SHOP, ORD, {"operation": "count"}, GREEN)),
+     (12, 7, vs_last_week("Average order", SHOP, ORD, {"operation": "average", "field": "sentora.shop.base_total"}, BLUE, MONEY)),
+     (12, 7, vs_last_week("Items sold", SHOP, ITEMS, {"operation": "sum", "field": "sentora.shop.qty"}, BLUE, {"type": "number", "decimals": 0}))],
+    [(32, 13, {"type": "xy", "title": "Sales by hour: today and the same day last week", "query": q(ORD), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1h"},
+                           "y": [dict(TOTAL, label="Today", format=MONEY)]},
+                          {"type": "line", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1h"},
+                           "y": [dict(TOTAL, label="A week before", format=MONEY, time_shift="1w")]}]}),
+     (16, 13, ring("Best sellers (items)", SHOP, ITEMS, "sentora.shop.product", {"operation": "sum", "field": "sentora.shop.qty", "label": "Sold"}, 6))],
+    [(24, 13, {"type": "data_table", "title": "Latest orders", "data_source": SHOP, "query": q('sentora.shop.kind : "order"'),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "When"}, dict(TOTAL, label="Total", format=MONEY),
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "sentora.shop.status", "label": "Status"},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "sentora.shop.country", "label": "Country"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.number"], "limit": 10, "label": "Order",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
+     (12, 13, ring("Where orders go", SHOP, ORD + " and sentora.shop.country : *", "sentora.shop.country", dict(TOTAL, label="Sales", format=MONEY), 6)),
+     (12, 13, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q('sentora.shop.kind : "search" and sentora.shop.results : 0'),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 10, "label": "Searched for",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
+])
+BOARDS["sentora-saleswall"]["time_range"] = {"from": "now/d", "to": "now"}
+
+BOARDS["sentora-week"] = build_src("sentora-week", "Week in review", [
+    [(12, 7, vs_last_week("Sales", SHOP, ORD, TOTAL, GREEN, MONEY)),
+     (12, 7, vs_last_week("Orders", SHOP, ORD, {"operation": "count"}, GREEN)),
+     (12, 7, vs_last_week("Visits (people)", DV, WEB + ' and sentora.visitor : "person"', {"operation": "count"})),
+     (12, 7, vs_last_week("Internet used", FGT, "network.bytes : *", {"operation": "sum", "field": "network.bytes"}, BLUE, {"type": "bytes"}))],
+    [(12, 7, vs_last_week("Attack tries", ALL, BAD, {"operation": "count"}, RED, fewer_is_better=True)),
+     (12, 7, vs_last_week("Failed Microsoft sign-ins", M365, SIGN + ' and event.outcome : "failure"', {"operation": "count"}, RED, fewer_is_better=True)),
+     (12, 7, vs_last_week("Backup jobs failed", VEEAM, FIN + ' and veeam_job.result : "Failed"', {"operation": "count"}, RED, fewer_is_better=True)),
+     (12, 7, vs_last_week("Teams calls", M365, 'm365.kind : "teams-day"', {"operation": "sum", "field": "m365.teams.calls"}, BLUE, {"type": "number", "decimals": 0}))],
+    [(24, 12, {"type": "xy", "title": "Visits: this week and the week before", "query": q(WEB + ' and sentora.visitor : "person"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "area", "data_source": DV, "x": {"operation": "date_histogram", "field": "@timestamp"}, "y": [{"operation": "count", "label": "This week"}]},
+                          {"type": "line", "data_source": DV, "x": {"operation": "date_histogram", "field": "@timestamp"}, "y": [{"operation": "count", "label": "The week before", "time_shift": "1w"}]}]}),
+     (24, 12, {"type": "xy", "title": "Sales: this week and the week before", "query": q(ORD), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1d"}, "y": [dict(TOTAL, label="This week", format=MONEY)]},
+                          {"type": "line", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1d"}, "y": [dict(TOTAL, label="The week before", format=MONEY, time_shift="1w")]}]})],
+    [(16, 13, ring("What the internet was used for", FGT, "fortigate.appcat : * and network.bytes : *", "fortigate.appcat",
+                   {"operation": "sum", "field": "network.bytes", "label": "Data", "format": {"type": "bytes"}}, 6)),
+     (16, 13, ring("Best sellers", SHOP, ITEMS, "sentora.shop.product", {"operation": "sum", "field": "sentora.shop.qty", "label": "Sold"}, 6)),
+     (16, 13, ring("Where attacks came from", ALL, BAD + " and source.geo.country_iso_code : *", "source.geo.country_iso_code", None, 6))],
+])
+BOARDS["sentora-week"]["time_range"] = {"from": "now-7d", "to": "now"}
+
+
+# ---- Flows (Sankey): where things come from, where they go, how they end. Vega (Kibana's custom charts), saved as
+# visualizations and put on the Flows board by addvis.py (the dashboards API takes no Vega panel).
+def sankey(title, index, must, fields, sizes=(8, 6, 6), metric=None, unit=""):
+    """Three columns (fields[0] -> fields[1] -> fields[2]); bands as wide as their count (or the sum of metric)."""
+    leaf = {"terms": {"field": fields[2], "size": sizes[2]}}
+    if metric:
+        leaf["aggs"] = {"v": {"sum": {"field": metric}}}
+    body = {"size": 0, "query": {"bool": {
+        "must": ["%dashboard_context-must_clause%", {"range": {"@timestamp": {"%timefilter%": True}}}] + must,
+        "must_not": ["%dashboard_context-must_not_clause%"], "filter": ["%dashboard_context-filter_clause%"]}},
+        "aggs": {"a": {"terms": {"field": fields[0], "size": sizes[0]},
+                       "aggs": {"b": {"terms": {"field": fields[1], "size": sizes[1]}, "aggs": {"c": leaf}}}}}}
+    val = "datum.cc.v.value" if metric else "datum.cc.doc_count"
+    stage = lambda name, a, b, ca, cb: {"name": name, "source": "rows", "transform": [
+        {"type": "aggregate", "groupby": [a, b], "fields": ["n"], "ops": ["sum"], "as": ["v"]},
+        {"type": "formula", "as": "skey", "expr": "'%d|' + datum.%s" % (ca, a)},
+        {"type": "formula", "as": "tkey", "expr": "'%d|' + datum.%s" % (cb, b)},
+        {"type": "formula", "as": "sname", "expr": "datum.%s" % a},
+        {"type": "formula", "as": "tname", "expr": "datum.%s" % b}]}
+    column = lambda name, k, c: {"name": name, "source": "rows", "transform": [
+        {"type": "aggregate", "groupby": [k], "fields": ["n"], "ops": ["sum"], "as": ["v"]},
+        {"type": "formula", "as": "col", "expr": str(c)}, {"type": "formula", "as": "name", "expr": "datum.%s" % k},
+        {"type": "formula", "as": "key", "expr": "'%d|' + datum.%s" % (c, k)}]}
+    fmt = "format(%s, ',.3~s') + '%s'" if unit else "format(%s, ',')"
+    show = lambda v: (fmt % (v, unit)) if unit else (fmt % v)
+    spec = {
+        "$schema": "https://vega.github.io/schema/vega/v5.json",
+        "title": {"text": "", "orient": "none"},
+        "autosize": {"type": "fit", "contains": "padding"}, "padding": 8,
+        "signals": [{"name": "nodeW", "value": 14}, {"name": "gap", "value": 8},
+                    {"name": "tot", "update": "data('total').length ? data('total')[0].v : 1"},
+                    {"name": "most", "update": "data('counts').length ? data('counts')[0].m : 1"},
+                    {"name": "unit", "update": "max(1, height - gap * (most - 1)) / max(tot, 1)"},
+                    {"name": "labelW", "value": 150},
+                    {"name": "hover", "value": "", "on": [{"events": "@band:mouseover", "update": "datum.skey + '>' + datum.tkey"},
+                                                         {"events": "@band:mouseout", "update": "''"}]}],
+        "data": [
+            {"name": "raw", "url": {"index": index, "body": body}, "format": {"property": "aggregations.a.buckets"}},
+            {"name": "rows", "source": "raw", "transform": [
+                {"type": "flatten", "fields": ["b.buckets"], "as": ["bb"]},
+                {"type": "flatten", "fields": ["bb.c.buckets"], "as": ["cc"]},
+                {"type": "formula", "as": "k0", "expr": "'' + datum.key"},
+                {"type": "formula", "as": "k1", "expr": "'' + datum.bb.key"},
+                {"type": "formula", "as": "k2", "expr": "'' + datum.cc.key"},
+                {"type": "formula", "as": "n", "expr": val},
+                {"type": "filter", "expr": "datum.n > 0"}]},
+            {"name": "total", "source": "rows", "transform": [{"type": "aggregate", "fields": ["n"], "ops": ["sum"], "as": ["v"]}]},
+            column("c0", "k0", 0), column("c1", "k1", 1), column("c2", "k2", 2),
+            {"name": "stacked", "source": ["c0", "c1", "c2"], "transform": [
+                {"type": "stack", "groupby": ["col"], "field": "v", "sort": {"field": "v", "order": "descending"}, "as": ["y0", "y1"]},
+                {"type": "window", "groupby": ["col"], "sort": {"field": "v", "order": "descending"}, "ops": ["row_number"], "as": ["rank"]}]},
+            {"name": "counts", "source": "stacked", "transform": [
+                {"type": "aggregate", "groupby": ["col"], "ops": ["count"], "as": ["c"]},
+                {"type": "aggregate", "fields": ["c"], "ops": ["max"], "as": ["m"]}]},
+            {"name": "nodes", "source": "stacked", "transform": [
+                {"type": "formula", "as": "py0", "expr": "datum.y0 * unit + (datum.rank - 1) * gap"},
+                {"type": "formula", "as": "py1", "expr": "datum.y1 * unit + (datum.rank - 1) * gap"},
+                {"type": "formula", "as": "px", "expr": "labelW + datum.col * (width - nodeW - 2 * labelW) / 2"}]},
+            stage("sA", "k0", "k1", 0, 1), stage("sB", "k1", "k2", 1, 2),
+            {"name": "bands", "source": ["sA", "sB"], "transform": [
+                {"type": "lookup", "from": "nodes", "key": "key", "fields": ["skey", "tkey"], "as": ["sn", "tn"]},
+                {"type": "formula", "as": "trank", "expr": "datum.tn.rank"}, {"type": "formula", "as": "srank", "expr": "datum.sn.rank"},
+                {"type": "stack", "groupby": ["skey"], "field": "v", "sort": {"field": "trank"}, "as": ["so0", "so1"]},
+                {"type": "stack", "groupby": ["tkey"], "field": "v", "sort": {"field": "srank"}, "as": ["to0", "to1"]},
+                {"type": "formula", "as": "x1", "expr": "datum.sn.px + nodeW"},
+                {"type": "formula", "as": "x2", "expr": "datum.tn.px"},
+                {"type": "formula", "as": "xm", "expr": "(datum.x1 + datum.x2) / 2"},
+                {"type": "formula", "as": "a0", "expr": "datum.sn.py0 + datum.so0 * unit"},
+                {"type": "formula", "as": "a1", "expr": "datum.sn.py0 + datum.so1 * unit"},
+                {"type": "formula", "as": "b0", "expr": "datum.tn.py0 + datum.to0 * unit"},
+                {"type": "formula", "as": "b1", "expr": "datum.tn.py0 + datum.to1 * unit"},
+                {"type": "formula", "as": "colorkey", "expr": "datum.sn.col == 0 ? datum.sname : datum.tname"},
+                {"type": "formula", "as": "path", "expr":
+                    "'M' + datum.x1 + ',' + datum.a0 + 'C' + datum.xm + ',' + datum.a0 + ' ' + datum.xm + ',' + datum.b0 + ' ' + datum.x2 + ',' + datum.b0"
+                    " + 'L' + datum.x2 + ',' + datum.b1 + 'C' + datum.xm + ',' + datum.b1 + ' ' + datum.xm + ',' + datum.a1 + ' ' + datum.x1 + ',' + datum.a1 + 'Z'"}]}],
+        "scales": [{"name": "color", "type": "ordinal", "range": {"scheme": "tableau10"},
+                    "domain": {"fields": [{"data": "c0", "field": "name"}, {"data": "c2", "field": "name"}], "sort": True}}],
+        "marks": [
+            {"type": "path", "name": "band", "from": {"data": "bands"}, "encode": {
+                "enter": {"path": {"field": "path"}, "fill": {"scale": "color", "field": "colorkey"},
+                          "tooltip": {"signal": "datum.sname + ' \u2192 ' + datum.tname + ': ' + " + show("datum.v")}},
+                "update": {"path": {"field": "path"}, "fillOpacity": {"signal": "hover == datum.skey + '>' + datum.tkey ? 0.85 : 0.4"}}}},
+            {"type": "rect", "from": {"data": "nodes"}, "encode": {"update": {
+                "x": {"field": "px"}, "width": {"signal": "nodeW"}, "y": {"field": "py0"}, "y2": {"field": "py1"},
+                "fill": {"signal": "datum.col == 1 ? '#4FA3F7' : scale('color', datum.name)"}, "cornerRadius": {"value": 3},
+                "tooltip": {"signal": "datum.name + ': ' + " + show("datum.v")}}}},
+            {"type": "text", "from": {"data": "nodes"}, "encode": {"update": {
+                "x": {"signal": "datum.col == 0 ? datum.px - 6 : datum.col == 2 ? datum.px + nodeW + 6 : datum.px + nodeW + 6"},
+                "y": {"signal": "(datum.py0 + datum.py1) / 2"}, "baseline": {"value": "middle"},
+                "align": {"signal": "datum.col == 0 ? 'right' : 'left'"}, "fontSize": {"value": 12}, "fontWeight": {"value": "bold"},
+                "fill": {"signal": "datum.col == 1 ? '#4FA3F7' : scale('color', datum.name)"},
+                "limit": {"signal": "labelW - 10"},
+                "text": {"signal": "datum.py1 - datum.py0 > 9 ? datum.name + '  ' + " + show("datum.v") + " : ''"}}}}]}
+    vis = {"title": title, "type": "vega", "aggs": [], "params": {"spec": json.dumps(spec, indent=1)}}
+    return {"attributes": {"title": title, "description": "Made by the Sentora Elk node installer (an update replaces it).",
+                           "visState": json.dumps(vis), "uiStateJSON": "{}",
+                           "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({"query": {"query": "", "language": "kuery"}, "filter": []})}}}
+
+
+PRIVATE = [{"term": {"source.ip": c}} for c in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8")]
+ATTACK_Q = [{"exists": {"field": "source.ip"}}, {"bool": {"must_not": PRIVATE, "should": [
+    {"term": {"event.outcome": "failure"}}, {"prefix": {"event.action": "waf-"}}, {"term": {"fortigate.subtype": "ips"}}, {"term": {"event.action": "ban"}}],
+    "minimum_should_match": 1}}]
+FLOWS = {
+    "sentora-flow-attacks": sankey("Attacks: country \u2192 where seen \u2192 what they tried", "logs-sentora-*,logs-fortigate-*,logs-m365-*", ATTACK_Q,
+                                   ["source.geo.country_iso_code", "data_stream.dataset", "event.action"], (10, 4, 8)),
+    "sentora-flow-visits": sankey("Visits: country \u2192 website \u2192 answer", "logs-sentora-*",
+                                  [{"term": {"sentora.log": "web-access"}}, {"exists": {"field": "http.response.status_code"}}],
+                                  ["source.geo.country_iso_code", "sentora.domain", "http.response.status_code"], (10, 8, 6)),
+    "sentora-flow-internet": sankey("Internet: person \u2192 kind of app \u2192 app (data)", "logs-fortigate-*",
+                                    [{"exists": {"field": "network.bytes"}}, {"exists": {"field": "user.name"}}],
+                                    ["user.name", "fortigate.appcat", "network.application"], (10, 6, 4), "network.bytes", "B"),
+}
+FLOW_PLACES = [("sentora-flow-attacks", 0, 2, 48, 22), ("sentora-flow-visits", 0, 24, 24, 22), ("sentora-flow-internet", 24, 24, 24, 22)]
+BOARDS["sentora-flows"] = build_src("sentora-flows", "Flows", [
+    [(48, 1, note(" "))]])
+BOARDS["sentora-flows"]["panels"] = BOARDS["sentora-flows"]["panels"][:1] + [
+    {"type": "markdown", "grid": {"x": 0, "y": 46, "w": 48, "h": 3}, "config": {"content":
+        "Each band runs from where something comes from to where it went: the wider, the more. Point at a band for its number. "
+        "Attacks: failed logins, the web firewall, FortiGate attacks and bans (inside addresses left out). Internet: data moved through the FortiGate."}}]
+
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
@@ -846,4 +1139,8 @@ if __name__ == "__main__":
     with open(os.path.join(out, "sentora-world-map.map.json"), "w") as f:
         json.dump(WORLD_MAP, f, indent=1, sort_keys=True)
         f.write("\n")
-    print("wrote", len(BOARDS), "dashboards and the world map")
+    for vid, body in FLOWS.items():
+        with open(os.path.join(out, vid + ".vis.json"), "w") as f:
+            json.dump(body, f, indent=1, sort_keys=True)
+            f.write("\n")
+    print("wrote", len(BOARDS), "dashboards, the world map and", len(FLOWS), "flow charts")

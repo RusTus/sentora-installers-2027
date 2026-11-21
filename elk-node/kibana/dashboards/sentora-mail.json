@@ -8,71 +8,113 @@
      {
       "destination": "sentora-today",
       "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-serverwall",
       "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-overview",
       "label": "Overview",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-worldmap",
       "label": "World map",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-uptime",
       "label": "Uptime",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-websites",
       "label": "Websites",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-mail",
       "label": "Mail",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-delivery",
       "label": "Mail delivery",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-security",
       "label": "Security",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-attackers",
       "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-firewall",
       "label": "Web firewall",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-panel",
       "label": "Panel and server",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-health",
       "label": "Server health",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      },
      {
       "destination": "sentora-speed",
       "label": "Website speed",
+      "options": {
+       "use_time_range": false
+      },
       "type": "dashboardLink"
      }
     ]
@@ -270,6 +312,9 @@
     "query": {
      "expression": "event.action : \"mail-login\"",
      "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
     },
     "title": "Mailbox logins",
     "type": "pie"

@@ -1,0 +1,649 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "a week before",
+      "operation": "sum",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Orders",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "a week before",
+      "operation": "average",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Average order",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.shop.qty",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "sentora.shop.qty",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "a week before",
+      "operation": "sum",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"item\" and not sentora.shop.status : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Items sold",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "bar",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram",
+       "suggested_interval": "1h"
+      },
+      "y": [
+       {
+        "field": "sentora.shop.base_total",
+        "format": {
+         "decimals": 2,
+         "type": "number"
+        },
+        "label": "Today",
+        "operation": "sum"
+       }
+      ]
+     },
+     {
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram",
+       "suggested_interval": "1h"
+      },
+      "y": [
+       {
+        "field": "sentora.shop.base_total",
+        "format": {
+         "decimals": 2,
+         "type": "number"
+        },
+        "label": "A week before",
+        "operation": "sum",
+        "time_shift": "1w"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales by hour: today and the same day last week",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 13,
+    "w": 32,
+    "x": 0,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.shop.product"
+      ],
+      "label": "Product",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "sentora.shop.qty",
+      "label": "Sold",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"item\" and not sentora.shop.status : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Best sellers (items)",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 13,
+    "w": 16,
+    "x": 32,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "@timestamp",
+      "label": "When",
+      "operation": "max"
+     },
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "Total",
+      "operation": "sum"
+     },
+     {
+      "field": "sentora.shop.status",
+      "label": "Status",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "sentora.shop.country",
+      "label": "Country",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.number"
+      ],
+      "label": "Order",
+      "limit": 10,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Latest orders",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 24,
+    "x": 0,
+    "y": 22
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.shop.country"
+      ],
+      "label": "Country",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "Sales",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\") and sentora.shop.country : *",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Where orders go",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 13,
+    "w": 12,
+    "x": 24,
+    "y": 22
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.popularity",
+      "label": "Times",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"search\" and sentora.shop.results : 0",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.term"
+      ],
+      "label": "Searched for",
+      "limit": 10,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Searches that found nothing",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 12,
+    "x": 36,
+    "y": 22
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now/d",
+  "to": "now"
+ },
+ "title": "Sentora: Sales wall"
+}

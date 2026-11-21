@@ -112,6 +112,18 @@
             },
             "reason": {
               "type": "keyword"
+            },
+            "service": {
+              "type": "keyword"
+            },
+            "status": {
+              "type": "keyword"
+            },
+            "health": {
+              "type": "double"
+            },
+            "state": {
+              "type": "keyword"
             }
           }
         },

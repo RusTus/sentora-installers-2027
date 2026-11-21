@@ -23,6 +23,10 @@ REPORTS = {
   "getEmailActivityUserDetail(period='D7')": "Report Refresh Date,User Principal Name,Display Name,Is Deleted,Deleted Date,Last Activity Date,Send Count,Receive Count,Read Count,Report Period\n%s,jsmith@office.example,J Smith,False,,%s,200,900,800,7\n%s,mlee@office.example,M Lee,False,,%s,210,980,700,7\n" % (day, day, day, day)}
 ISSUES = {"value": [{"id": "EX123456", "title": "Some users can't send mail with attachments", "service": "Exchange Online", "classification": "incident",
                       "status": "serviceDegradation", "startDateTime": t(90), "impactDescription": "Users may see delays.", "isResolved": False}]}
+OVERVIEWS = {"value": [{"service": "Exchange Online", "status": "serviceDegradation", "id": "Exchange"},
+                       {"service": "Microsoft Teams", "status": "serviceOperational", "id": "microsoftteams"},
+                       {"service": "SharePoint Online", "status": "serviceOperational", "id": "SharePoint"},
+                       {"service": "Microsoft Entra", "status": "serviceInterruption", "id": "AzureActiveDirectory"}]}
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, body, ctype="application/json", extra=None):
@@ -46,6 +50,7 @@ class H(http.server.BaseHTTPRequestHandler):
             name = p[len("/v1.0/reports/"):]
             if name in REPORTS: return self.send(302, "", extra={"Location": "https://%s/download/%s" % (self.headers.get("Host"), urllib.parse.quote(name))})
         if p.startswith("/v1.0/admin/serviceAnnouncement/issues"): return self.send(200, json.dumps(ISSUES))
+        if p.startswith("/v1.0/admin/serviceAnnouncement/healthOverviews"): return self.send(200, json.dumps(OVERVIEWS))
         self.send(404, "{}")
 srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), H)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(cert, key)

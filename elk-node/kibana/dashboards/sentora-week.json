@@ -1,0 +1,805 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-week",
+      "label": "Week",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-flows",
+      "label": "Flows",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-netwall",
+      "label": "Network wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-secwall",
+      "label": "Security wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365wall",
+      "label": "Microsoft 365 wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-saleswall",
+      "label": "Sales wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "sentora.shop.base_total",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "a week before",
+      "operation": "sum",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Orders",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\"",
+     "language": "kql"
+    },
+    "title": "Visits (people)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "a week before",
+      "operation": "sum",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "network.bytes : *",
+     "language": "kql"
+    },
+    "title": "Internet used",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#EB5757",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to_reversed",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\")",
+     "language": "kql"
+    },
+    "title": "Attack tries",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#EB5757",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to_reversed",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"signin\" and event.outcome : \"failure\"",
+     "language": "kql"
+    },
+    "title": "Failed Microsoft sign-ins",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-veeam",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#EB5757",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to_reversed",
+       "to": "primary"
+      },
+      "label": "a week before",
+      "operation": "count",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"job-finished\" and veeam_job.result : \"Failed\"",
+     "language": "kql"
+    },
+    "title": "Backup jobs failed",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 24,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-m365",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "m365.teams.calls",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "sum",
+      "type": "primary"
+     },
+     {
+      "compare": {
+       "palette": "compare_to",
+       "to": "primary"
+      },
+      "field": "m365.teams.calls",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "a week before",
+      "operation": "sum",
+      "time_shift": "1w",
+      "type": "secondary"
+     }
+    ],
+    "query": {
+     "expression": "m365.kind : \"teams-day\"",
+     "language": "kql"
+    },
+    "title": "Teams calls",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 7,
+    "w": 12,
+    "x": 36,
+    "y": 9
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "area",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "This week",
+        "operation": "count"
+       }
+      ]
+     },
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "The week before",
+        "operation": "count",
+        "time_shift": "1w"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\"",
+     "language": "kql"
+    },
+    "title": "Visits: this week and the week before",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 16
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "bar",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram",
+       "suggested_interval": "1d"
+      },
+      "y": [
+       {
+        "field": "sentora.shop.base_total",
+        "format": {
+         "decimals": 2,
+         "type": "number"
+        },
+        "label": "This week",
+        "operation": "sum"
+       }
+      ]
+     },
+     {
+      "data_source": {
+       "ref_id": "sentora-shop",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram",
+       "suggested_interval": "1d"
+      },
+      "y": [
+       {
+        "field": "sentora.shop.base_total",
+        "format": {
+         "decimals": 2,
+         "type": "number"
+        },
+        "label": "The week before",
+        "operation": "sum",
+        "time_shift": "1w"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "title": "Sales: this week and the week before",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 16
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-fortigate",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "fortigate.appcat"
+      ],
+      "label": "Kind of app",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "network.bytes",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Data",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "fortigate.appcat : * and network.bytes : *",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "What the internet was used for",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 13,
+    "w": 16,
+    "x": 0,
+    "y": 28
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.shop.product"
+      ],
+      "label": "Product",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "sentora.shop.qty",
+      "label": "Sold",
+      "operation": "sum"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"item\" and not sentora.shop.status : (\"canceled\" or \"closed\")",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Best sellers",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 13,
+    "w": 16,
+    "x": 16,
+    "y": 28
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-all",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "source.geo.country_iso_code"
+      ],
+      "label": "Country",
+      "limit": 6,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "label": "Lines",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "(event.outcome : \"failure\" or event.action : waf-* or fortigate.subtype : \"ips\" or event.action : \"ban\") and source.ip : * and not source.ip : (\"10.0.0.0/8\" or \"172.16.0.0/12\" or \"192.168.0.0/16\" or \"127.0.0.0/8\") and source.geo.country_iso_code : *",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Where attacks came from",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 13,
+    "w": 16,
+    "x": 32,
+    "y": 28
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "title": "Sentora: Week in review"
+}
