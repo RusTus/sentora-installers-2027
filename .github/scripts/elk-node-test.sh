@@ -174,14 +174,14 @@ waitcnt() { # index query want
 in_box "sentora-elk-node fortigate $GW" > "$OUT/fortigate-on.txt" 2>&1 && ok "sentora-elk-node fortigate: switched on" || bad "fortigate on: $(tail -5 "$OUT/fortigate-on.txt")"
 P12PW=$(sed -n "s/.*import password (shown only now): \([A-Za-z0-9]*\).*/\1/p" "$OUT/fortigate-on.txt")
 grep -q "set certificate \"sentora-fortigate\"" "$OUT/fortigate-on.txt" && [ -n "$P12PW" ] && ok "it shows the FortiGate's steps and the certificate's password" || bad "fortigate steps: $(head -20 "$OUT/fortigate-on.txt")"
-if in_box "openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nokeys -clcerts -out /tmp/fgt.crt && openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nocerts -nodes -out /tmp/fgt.key" > "$OUT/p12.txt" 2>&1; then
+if in_box "openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nokeys -clcerts -out /root/fgt-test.crt && openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nocerts -nodes -out /root/fgt-test.key" > "$OUT/p12.txt" 2>&1; then
     ok "the .p12 opens with that password"
 else
     bad "the FortiGate's .p12 does not open with [$P12PW]: $(head -3 "$OUT/p12.txt")"
     # (the rest of the FortiGate's checks go on with the node's own copy of its certificate)
-    in_box 'cp /etc/sentora-elk/sources/fortigate.crt /tmp/fgt.crt; cp /etc/sentora-elk/sources/fortigate.key /tmp/fgt.key'
+    in_box 'cp /etc/sentora-elk/sources/fortigate.crt /root/fgt-test.crt; cp /etc/sentora-elk/sources/fortigate.key /root/fgt-test.key'
 fi
-docker cp "$NAME:/tmp/fgt.crt" "$W/fgt.crt"; docker cp "$NAME:/tmp/fgt.key" "$W/fgt.key"
+docker cp "$NAME:/root/fgt-test.crt" "$W/fgt.crt"; docker cp "$NAME:/root/fgt-test.key" "$W/fgt.key"
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6516 " && ss -ltn | grep -q "127.0.0.1:5516 "' && break; sleep 3; done
 in_box 'ufw status | grep -qE "6516/tcp +ALLOW( IN)? +'"$GW"'"' && ok "the firewall lets only the FortiGate reach 6516" || bad "no 6516 rule for $GW: $(in_box 'ufw status | grep 651')"
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/fgt.crt" "$W/fgt.key" "$REPO/tests/elk/fortigate.txt" > "$OUT/fgt-send.txt" 2>&1
