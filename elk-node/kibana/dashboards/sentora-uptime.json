@@ -11,6 +11,11 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-overview",
       "label": "Overview",
       "type": "dashboardLink"

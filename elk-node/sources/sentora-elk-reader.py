@@ -247,6 +247,9 @@ def health(g, st):
 
 
 # ---- Veeam Backup & Replication's REST API (port 9419, its own certificate, pinned by its SHA-256 when switched on)
+HEALTH = {"Success": 1.0, "Warning": 0.5, "Failed": 0.0}
+
+
 class PinnedHTTPS(http.client.HTTPSConnection):
     """HTTPS to a server whose certificate is known by its fingerprint (Veeam's is its own, not from an authority)."""
     def __init__(self, host, port, pin):
@@ -314,12 +317,31 @@ def veeam(st):
         name = str(j.get("name") or "")[:255]
         if not name:
             continue
+        res = str(j.get("lastResult") or "")[:32].capitalize() or None
         docs.append(("job-%s-%s" % (hour, hashlib.sha1(name.encode()).hexdigest()[:16]), {
             "@timestamp": stamp, "event": {"module": "veeam", "dataset": "veeam.jobs", "action": "job-state"},
-            "veeam_job": {"name": name, "result": str(j.get("lastResult") or "")[:32].capitalize() or None, "status": str(j.get("status") or "")[:32],
+            "veeam_job": {"name": name, "result": res, "health": HEALTH.get(res), "status": str(j.get("status") or "")[:32],
                           "last_run": j.get("lastRun"), "next_run": j.get("nextRun"), "type": str(j.get("type") or "")[:32]}, "message": "job-state"}))
+    njobs = len(docs) - len(newest)
+    # each repository: how full it is
+    nrepo = 0
+    try:
+        d = veeam_call(cfg, "GET", "/api/v1/backupInfrastructure/repositories/states?limit=500", token=tok)
+    except urllib.error.HTTPError:
+        d = {}
+    for x in d.get("data") or []:
+        name = str(x.get("name") or "")[:255]
+        cap, free = x.get("capacityGB"), x.get("freeGB")
+        if not name or not isinstance(cap, (int, float)) or not isinstance(free, (int, float)) or cap <= 0:
+            continue
+        nrepo += 1
+        docs.append(("repo-%s-%s" % (hour, hashlib.sha1(name.encode()).hexdigest()[:16]), {
+            "@timestamp": stamp, "event": {"module": "veeam", "dataset": "veeam.repositories", "action": "repo-state"},
+            "veeam_repo": {"name": name, "capacity_gb": float(cap), "free_gb": float(free), "used_gb": float(cap - free),
+                           "used_pct": round(100.0 * (cap - free) / cap, 1), "type": str(x.get("type") or "")[:32], "host": str(x.get("hostName") or "")[:255]},
+            "message": "repo-state"}))
     added = bulk(docs, "logs-veeam-default")
-    return "%d machine(s) with backups, %d job(s), %d new" % (len(newest), len(docs) - len(newest), added)
+    return "%d machine(s) with backups, %d job(s), %d repositor%s, %d new" % (len(newest), njobs, nrepo, "y" if nrepo == 1 else "ies", added)
 
 
 def run(say=None):

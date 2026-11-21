@@ -14,6 +14,7 @@ DV = {"type": "data_view_reference", "ref_id": "sentora-logs"}
 WEB = 'sentora.log : "web-access"'
 DASHBOARDS = [
     ("sentora-today", "Today"),
+    ("sentora-serverwall", "Server wall"),
     ("sentora-overview", "Overview"),
     ("sentora-worldmap", "World map"),
     ("sentora-uptime", "Uptime"),
@@ -436,7 +437,7 @@ BOARDS["sentora-speed"] = build("sentora-speed", "Website speed", [
 
 # ---- Other sources (each off until switched on with sentora-elk-node): FortiGate, Veeam, Microsoft 365, the shop.
 # Their own links bar; "Overview" leads back to the panel's boards.
-SOURCES = [("sentora-today", "Today"), ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
+SOURCES = [("sentora-today", "Today"), ("sentora-serverwall", "Server wall"), ("sentora-backupwall", "Backup wall"), ("sentora-overview", "Panel: Overview"), ("sentora-attackers", "Attackers"),
            ("sentora-fortigate", "FortiGate: web"), ("sentora-vpn", "FortiGate: VPN"), ("sentora-threats", "FortiGate: threats"),
            ("sentora-internet", "Internet use"), ("sentora-veeam", "Veeam backups"), ("sentora-coverage", "Backup coverage"),
            ("sentora-m365", "Microsoft 365"), ("sentora-shop", "Online store"), ("sentora-funnel", "Store funnel")]
@@ -445,7 +446,7 @@ VEEAM = {"type": "data_view_reference", "ref_id": "sentora-veeam"}
 M365 = {"type": "data_view_reference", "ref_id": "sentora-m365"}
 NAMES.update({"url.domain": "Site", "fortigate.category": "Category", "network.application": "App", "fortigate.appcat": "Kind of app",
               "fortigate.threat": "Threat", "fortigate.vpn.tunnel": "Kind of tunnel", "fortigate.vpn.name": "Tunnel", "source.geo.country_name": "Country", "source.geo.country_iso_code": "Country", "observer.name": "Device",
-              "veeam_job.name": "Job", "veeam_job.why": "Why", "m365.reason": "Why", "veeam_job.result": "Result", "host.name": "Machine", "m365.app": "App", "error.message": "Why",
+              "veeam_job.name": "Job", "veeam_job.why": "Why", "m365.reason": "Why", "veeam_repo.name": "Repository", "veeam_job.result": "Result", "host.name": "Machine", "m365.app": "App", "error.message": "Why",
               "m365.issue.service": "Service", "m365.issue.title": "Problem", "m365.client_app": "Client", "fortigate.subtype": "Kind",
               "sentora.shop.status": "Status", "sentora.shop.country": "Country", "sentora.shop.sku": "Product", "sentora.search.term": "Searched for",
               "sentora.shop.term": "Searched for", "sentora.store.step": "Step", "data_stream.dataset": "Seen by", "sentora.shop.product": "Product", "sentora.shop.status": "Status"})
@@ -741,6 +742,98 @@ BOARDS["sentora-coverage"] = build_src("sentora-coverage", "Backup coverage", [
                         (("veeam_job.name", 100, "Job"), ("veeam_job.result", 1, "Last result"), ("veeam_job.last_run", 1, "Last run"), ("veeam_job.next_run", 1, "Next run"))]})],
     [(48, 3, note("Read from Veeam's API every hour (sentora-elk-node veeam-api). A machine without a backup for over a day is also an alert in the panel."))],
 ])
+
+# ---- The walls: big coloured tiles to read from across the room (green good, yellow look, red act)
+GREEN, YELLOW, RED, BLUE = "#24C28A", "#F2C94C", "#EB5757", "#4FA3F7"
+
+
+def bands(*steps):
+    """Colour bands: bands((None, 50, RED), (50, 80, YELLOW), (80, None, GREEN))."""
+    out = []
+    for lo, hi, c in steps:
+        st = {"color": c}
+        if lo is not None:
+            st["gte"] = lo
+        if hi is not None:
+            st["lt"] = hi
+        out.append(st)
+    return {"type": "dynamic", "range": "absolute", "steps": out}
+
+
+def tile(title, dv, kql, m, color=None, label="", fmt=None, secondary=None, by=None, limit=24, columns=4, trend=False):
+    p = dict(m, type="primary", label=label)
+    if fmt:
+        p["format"] = fmt
+    if color:
+        p["color"] = color
+    if trend:
+        p["background_chart"] = {"type": "trend"}
+    cfg = {"type": "metric", "title": title, "data_source": dv, "query": q(kql), "metrics": [p]}
+    if secondary:
+        cfg["metrics"].append(dict(secondary, type="secondary"))
+    if by:
+        cfg["breakdown_by"] = {"operation": "terms", "fields": [by], "limit": limit, "columns": columns, "label": NAMES.get(by, by),
+                               "rank_by": {"type": "alphabetical", "direction": "asc"}}
+    return cfg
+
+
+def dial(title, dv, kql, m, color, label="%", top=100):
+    mm = dict(m, color=color, label=label, max={"operation": "static_value", "value": top})
+    return {"type": "gauge", "title": title, "data_source": dv, "query": q(kql), "metric": mm, "styling": {"shape": {"type": "semi_circle"}}}
+
+
+def last(field):
+    return {"operation": "last_value", "time_field": "@timestamp", "field": field}
+
+
+PCT = {"type": "percent", "decimals": 0}
+HEALTHY = bands((None, 0.5, RED), (0.5, 1, YELLOW), (1, None, GREEN))
+BUSY = bands((None, 70, GREEN), (70, 90, YELLOW), (90, None, RED))
+JOBQ = 'event.action : ("job-state" or "job-finished") and veeam_job.health : *'
+REPOQ = 'event.action : "repo-state"'
+BOARDS["sentora-backupwall"] = build_src("sentora-backupwall", "Backup wall", [
+    [(12, 6, tile("Jobs OK", VEEAM, JOBQ + ' and veeam_job.health >= 1', {"operation": "unique_count", "field": "veeam_job.name"}, {"type": "static", "color": GREEN})),
+     (12, 6, tile("Jobs with warnings", VEEAM, JOBQ + ' and veeam_job.health >= 0.5 and veeam_job.health < 1', {"operation": "unique_count", "field": "veeam_job.name"}, {"type": "static", "color": YELLOW})),
+     (12, 6, tile("Jobs failed", VEEAM, JOBQ + ' and veeam_job.health < 0.5', {"operation": "unique_count", "field": "veeam_job.name"}, {"type": "static", "color": RED})),
+     (12, 6, tile("Machines protected", VEEAM, COVER, {"operation": "unique_count", "field": "host.name"}, {"type": "static", "color": BLUE}))],
+    [(48, 24, tile("Backup jobs (each one's last result)", VEEAM, JOBQ, last("veeam_job.health"), HEALTHY, "health", PCT,
+                   secondary=dict(last("veeam_job.result"), label="last result"), by="veeam_job.name", limit=15, columns=5))],
+    [(48, 26, tile("Machines (hours since their newest backup)", VEEAM, COVER, {"operation": "min", "field": "veeam_job.hours_since"},
+                   bands((None, 26, GREEN), (26, 48, YELLOW), (48, None, RED)), "hours ago", {"type": "number", "decimals": 0},
+                   secondary=dict(last("veeam_job.platform"), label=""), by="host.name", limit=24, columns=6))],
+    [(24, 12, tile("Repositories (how full)", VEEAM, REPOQ, last("veeam_repo.used_pct"), BUSY, "used", {"type": "number", "decimals": 0, "suffix": "%"},
+                   secondary=dict(last("veeam_repo.free_gb"), label="GB free", format={"type": "number", "decimals": 0}), by="veeam_repo.name", limit=6, columns=3)),
+     (24, 12, {"type": "xy", "title": "Job results over the last days", "query": q('event.action : "job-finished"'), "legend": {"visibility": "visible", "position": "right"},
+               "layers": [{"type": "bar_stacked", "data_source": VEEAM, "x": {"operation": "date_histogram", "field": "@timestamp"},
+                           "y": [{"operation": "count", "label": "Jobs"}],
+                           "breakdown_by": {"operation": "terms", "fields": ["veeam_job.result"], "limit": 3, "label": "Result",
+                                            "rank_by": {"type": "alphabetical", "direction": "asc"}}}]})],
+])
+BOARDS["sentora-backupwall"]["time_range"] = {"from": "now-2d", "to": "now"}
+
+SERVER = 'sentora.log : "health"'
+SITEUP = "count(kql='monitor.status : \"up\"') / count()"
+BOARDS["sentora-serverwall"] = build_src("sentora-serverwall", "Server wall", [
+    [(12, 10, dial("CPU busy", DV, SERVER, last("sentora.health.cpu_pct"), BUSY)),
+     (12, 10, dial("Memory used", DV, SERVER, last("sentora.health.mem_used_pct"), BUSY)),
+     (12, 10, dial("System disk", DV, SERVER, last("sentora.health.disk_root_used_pct"), BUSY)),
+     (12, 10, dial("Websites' disk", DV, SERVER, last("sentora.health.disk_sites_used_pct"), BUSY))],
+    [(8, 6, tile("Load (1 min)", DV, SERVER, {"operation": "average", "field": "sentora.health.load1"}, {"type": "static", "color": BLUE}, fmt={"type": "number", "decimals": 2}, trend=True)),
+     (8, 6, tile("Requests a second", DV, SERVER, {"operation": "average", "field": "sentora.health.apache_rps"}, {"type": "static", "color": BLUE}, fmt={"type": "number", "decimals": 1}, trend=True)),
+     (8, 6, tile("MySQL queries a second", DV, SERVER, {"operation": "average", "field": "sentora.health.mysql_qps"}, {"type": "static", "color": BLUE}, fmt={"type": "number", "decimals": 1}, trend=True)),
+     (8, 6, tile("Mail waiting", DV, SERVER, last("sentora.health.mail_queue"), bands((None, 50, GREEN), (50, 200, YELLOW), (200, None, RED)), fmt={"type": "number", "decimals": 0}, trend=True)),
+     (8, 6, tile("Network in", DV, SERVER, {"operation": "average", "field": "sentora.health.net_rx_bps"}, {"type": "static", "color": BLUE}, fmt={"type": "bytes", "suffix": "/s"}, trend=True)),
+     (8, 6, tile("Network out", DV, SERVER, {"operation": "average", "field": "sentora.health.net_tx_bps"}, {"type": "static", "color": BLUE}, fmt={"type": "bytes", "suffix": "/s"}, trend=True))],
+    [(48, 22, up(tile("Websites (checks answered, last 15 minutes)", UPDV, SITE + ' and @timestamp >= "now-15m"', {"operation": "formula", "formula": SITEUP},
+                      bands((None, 0.9, RED), (0.9, 1, YELLOW), (1, None, GREEN)), "up", PCT, by="monitor.name", limit=18, columns=6)))],
+    [(12, 6, tile("Visits, last hour (people)", DV, WEB + ' and sentora.visitor : "person" and @timestamp >= "now-1h"', {"operation": "count"}, {"type": "static", "color": BLUE}, trend=True)),
+     (12, 6, tile("Orders today", SHOP, ORD + ' and @timestamp >= "now/d"', {"operation": "count"}, {"type": "static", "color": GREEN})),
+     (12, 6, tile("Failed logins, last hour", DV, FAILED_LOGINS + ' and @timestamp >= "now-1h"', {"operation": "count"}, bands((None, 20, GREEN), (20, 100, YELLOW), (100, None, RED)))),
+     (12, 6, tile("Web firewall stopped, last hour", DV, 'event.action : "waf-blocked" and @timestamp >= "now-1h"', {"operation": "count"}, bands((None, 50, GREEN), (50, 200, YELLOW), (200, None, RED))))],
+])
+BOARDS["sentora-serverwall"]["time_range"] = {"from": "now-6h", "to": "now"}
+BOARDS["sentora-serverwall"]["refresh_interval"] = {"pause": False, "value": 30000}
+BOARDS["sentora-backupwall"]["refresh_interval"] = {"pause": False, "value": 60000}
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))

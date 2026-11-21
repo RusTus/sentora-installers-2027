@@ -44,7 +44,8 @@ LIMITS = {
     "fgt_vpn_fail": 20,      # failed VPN logins on a FortiGate in 15 minutes
     "attacker_events": 10,   # an address that tried this many times in an hour, in two places or more
     "travel_hours": 3,
-    "backup_hours": 26,      # Veeam: a machine whose newest backup is older than this       # Microsoft 365: two countries within this many hours is "impossible travel"
+    "backup_hours": 26,
+    "repo_pct": 90,          # Veeam: a repository this full      # Veeam: a machine whose newest backup is older than this       # Microsoft 365: two countries within this many hours is "impossible travel"
 }
 
 
@@ -198,6 +199,18 @@ def check():
             found.append(("backup-stale:" + slug(b["key"]), "warning", "%s has no backup for %d hours" % (b["key"][:80], a),
                           "Veeam's newest backup of %s is %.0f hours old (the alert starts after %d hours): it may have dropped out of its job." % (b["key"][:120], a, L["backup_hours"]),
                           "sentora-coverage"))
+    # Veeam's API: a backup repository filling up
+    r = es("/logs-veeam-*/_search?ignore_unavailable=true&allow_no_indices=true", {"size": 0, "query": {"bool": {"filter": [
+        {"term": {"event.action": "repo-state"}}, {"range": {"@timestamp": {"gte": "now-3h"}}}]}},
+        "aggs": {"r": {"terms": {"field": "veeam_repo.name", "size": 200},
+                       "aggs": {"t": {"top_hits": {"size": 1, "sort": [{"@timestamp": "desc"}], "_source": ["veeam_repo.used_pct", "veeam_repo.free_gb"]}}}}}})
+    for b in r.get("aggregations", {}).get("r", {}).get("buckets", []):
+        h = (b["t"]["hits"]["hits"][0]["_source"].get("veeam_repo") or {}) if b["t"]["hits"]["hits"] else {}
+        u = h.get("used_pct")
+        if isinstance(u, (int, float)) and u >= L["repo_pct"]:
+            found.append(("repo-full:" + slug(b["key"]), "outage" if u >= 97 else "warning", "Backup repository %s is %d%% full" % (b["key"][:80], u),
+                          "The Veeam repository %s is %.0f%% full (%.0f GB free; the alert starts at %d%%): backups will fail when it is full." % (b["key"][:120], u, h.get("free_gb") or 0, L["repo_pct"]),
+                          "sentora-backupwall"))
     for what, q, n_, board in (("admin logins on the FortiGate", {"term": {"event.category": "admin-login"}}, L["fgt_admin_fail"], "sentora-threats"),
                                ("VPN logins", {"term": {"event.category": "vpn"}}, L["fgt_vpn_fail"], "sentora-vpn")):
         c = count("logs-fortigate-*", "now-15m", [q, {"term": {"event.outcome": "failure"}}])

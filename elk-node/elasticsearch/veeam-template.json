@@ -64,6 +64,34 @@
             },
             "next_run": {
               "type": "keyword"
+            },
+            "health": {
+              "type": "double"
+            }
+          }
+        },
+        "veeam_repo": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            },
+            "capacity_gb": {
+              "type": "double"
+            },
+            "free_gb": {
+              "type": "double"
+            },
+            "used_gb": {
+              "type": "double"
+            },
+            "used_pct": {
+              "type": "double"
+            },
+            "type": {
+              "type": "keyword"
+            },
+            "host": {
+              "type": "keyword"
             }
           }
         }

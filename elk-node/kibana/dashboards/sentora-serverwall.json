@@ -1,0 +1,800 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-backupwall",
+      "label": "Backup wall",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Panel: Overview",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-fortigate",
+      "label": "FortiGate: web",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-vpn",
+      "label": "FortiGate: VPN",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-threats",
+      "label": "FortiGate: threats",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-internet",
+      "label": "Internet use",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-veeam",
+      "label": "Veeam backups",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-coverage",
+      "label": "Backup coverage",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-m365",
+      "label": "Microsoft 365",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-shop",
+      "label": "Online store",
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-funnel",
+      "label": "Store funnel",
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "field": "sentora.health.cpu_pct",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "last_value",
+     "time_field": "@timestamp"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "CPU busy",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "field": "sentora.health.mem_used_pct",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "last_value",
+     "time_field": "@timestamp"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "Memory used",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 12,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "field": "sentora.health.disk_root_used_pct",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "last_value",
+     "time_field": "@timestamp"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "System disk",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metric": {
+     "color": {
+      "range": "absolute",
+      "steps": [
+       {
+        "color": "#24C28A",
+        "lt": 70
+       },
+       {
+        "color": "#F2C94C",
+        "gte": 70,
+        "lt": 90
+       },
+       {
+        "color": "#EB5757",
+        "gte": 90
+       }
+      ],
+      "type": "dynamic"
+     },
+     "field": "sentora.health.disk_sites_used_pct",
+     "label": "%",
+     "max": {
+      "operation": "static_value",
+      "value": 100
+     },
+     "operation": "last_value",
+     "time_field": "@timestamp"
+    },
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "styling": {
+     "shape": {
+      "type": "semi_circle"
+     }
+    },
+    "title": "Websites' disk",
+    "type": "gauge"
+   },
+   "grid": {
+    "h": 10,
+    "w": 12,
+    "x": 36,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.health.load1",
+      "format": {
+       "decimals": 2,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Load (1 min)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.health.apache_rps",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Requests a second",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.health.mysql_qps",
+      "format": {
+       "decimals": 1,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "MySQL queries a second",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 50
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 50,
+         "lt": 200
+        },
+        {
+         "color": "#EB5757",
+         "gte": 200
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "sentora.health.mail_queue",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Mail waiting",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 24,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.health.net_rx_bps",
+      "format": {
+       "suffix": "/s",
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Network in",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 32,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.health.net_tx_bps",
+      "format": {
+       "suffix": "/s",
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "average",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"health\"",
+     "language": "kql"
+    },
+    "title": "Network out",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 40,
+    "y": 12
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 6,
+     "fields": [
+      "monitor.name"
+     ],
+     "label": "Website",
+     "limit": 18,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "asc",
+      "type": "alphabetical"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-uptime",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#EB5757",
+         "lt": 0.9
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 0.9,
+         "lt": 1
+        },
+        {
+         "color": "#24C28A",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "format": {
+       "decimals": 0,
+       "type": "percent"
+      },
+      "formula": "count(kql='monitor.status : \"up\"') / count()",
+      "label": "up",
+      "operation": "formula",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "tags : \"sentora-site\" and @timestamp >= \"now-15m\"",
+     "language": "kql"
+    },
+    "title": "Websites (checks answered, last 15 minutes)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 22,
+    "w": 48,
+    "x": 0,
+    "y": 18
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"web-access\" and sentora.visitor : \"person\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Visits, last hour (people)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 12,
+    "x": 0,
+    "y": 40
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#24C28A",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"order\" and not sentora.shop.state : (\"canceled\" or \"closed\") and @timestamp >= \"now/d\"",
+     "language": "kql"
+    },
+    "title": "Orders today",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 12,
+    "x": 12,
+    "y": 40
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 20
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 20,
+         "lt": 100
+        },
+        {
+         "color": "#EB5757",
+         "gte": 100
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.outcome : \"failure\" and event.action : * and not event.action : waf-* and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Failed logins, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 12,
+    "x": 24,
+    "y": 40
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 50
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 50,
+         "lt": 200
+        },
+        {
+         "color": "#EB5757",
+         "gte": 200
+        }
+       ],
+       "type": "dynamic"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "event.action : \"waf-blocked\" and @timestamp >= \"now-1h\"",
+     "language": "kql"
+    },
+    "title": "Web firewall stopped, last hour",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 12,
+    "x": 36,
+    "y": 40
+   },
+   "type": "vis"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 30000
+ },
+ "time_range": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "title": "Sentora: Server wall"
+}

@@ -25,6 +25,9 @@ class H(http.server.BaseHTTPRequestHandler):
         p = urllib.parse.urlparse(self.path); qs = urllib.parse.parse_qs(p.query); skip = int(qs.get("skip", ["0"])[0])
         if p.path == "/api/v1/objectRestorePoints": return self.send(200, {"data": POINTS[skip:skip + 1000], "pagination": {"total": len(POINTS)}})
         if p.path == "/api/v1/jobs/states": return self.send(200, {"data": JOBS, "pagination": {"total": len(JOBS)}})
+        if p.path == "/api/v1/backupInfrastructure/repositories/states":
+            return self.send(200, {"data": [{"id": "r1", "name": "Main Repository", "type": "WinLocal", "hostName": "VBR01", "path": "E:\\Backups", "capacityGB": 8000.0, "freeGB": 1200.0, "usedSpaceGB": 6800.0},
+                                            {"id": "r2", "name": "Cloud-Repo", "type": "AmazonS3", "hostName": "", "path": "", "capacityGB": 20000.0, "freeGB": 15000.0, "usedSpaceGB": 5000.0}]})
         self.send(404, {})
 srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), H)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(cert, key)

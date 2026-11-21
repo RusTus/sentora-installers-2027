@@ -112,7 +112,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 curl -sk -u "sentora-admin:$ADMINPW" -H 'x-elastic-internal-origin: kibana' "https://$IP/api/kibana/settings" | grep -q 'sentora-overview' && ok "Kibana opens on the overview" || bad "Kibana's start page was not set"
 [ "$(curl -sk -u "sentora-admin:wrong-password" -o /dev/null -w '%{http_code}' "https://$IP/api/spaces/space")" = 401 ] && ok "a wrong password is refused" || bad "a wrong Kibana password was not refused"
@@ -227,7 +227,7 @@ docker cp "$REPO/tests/elk/fakeveeam.py" "$NAME:/root/fakeveeam.py"
 in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout fv.key -out fv.crt -subj /CN=VBR01 -days 2 2> /dev/null; (python3 -I fakeveeam.py 9419 fv.crt fv.key > /dev/null 2>&1 &)'
 for _ in $(seq 1 20); do in_box 'ss -ltn | grep -q ":9419 "' && break; sleep 1; done
 printf 'yes\nveeam-test\n' | docker exec -i "$NAME" sentora-elk-node veeam-api 127.0.0.1 'OFFICE\viewer' > "$OUT/veeam-api.txt" 2>&1
-grep -q "SHA-256" "$OUT/veeam-api.txt" && grep -q "4 machine(s) with backups, 2 job(s)" "$OUT/veeam-api.txt" && ok "Veeam's API: fingerprint shown and pinned, machines and jobs read" || bad "veeam-api: $(tail -6 "$OUT/veeam-api.txt")"
+grep -q "SHA-256" "$OUT/veeam-api.txt" && grep -q "4 machine(s) with backups, 2 job(s), 2 repositories" "$OUT/veeam-api.txt" && ok "Veeam's API: fingerprint shown and pinned, machines and jobs read" || bad "veeam-api: $(tail -6 "$OUT/veeam-api.txt")"
 in_box 'stat -c "%U:%G %a" /etc/sentora-elk-reader/veeam.json' | grep -q "^root:sentora-elk-reader 640$" && ok "Veeam's password is root's and the reader's only" || bad "veeam.json is open"
 printf 'no\n' | docker exec -i "$NAME" sentora-elk-node veeam-api 127.0.0.1 'OFFICE\viewer' > "$OUT/veeam-api-no.txt" 2>&1
 grep -q "Not accepted" "$OUT/veeam-api-no.txt" && ok "a fingerprint not accepted changes nothing" || bad "veeam-api without yes: $(tail -3 "$OUT/veeam-api-no.txt")"
