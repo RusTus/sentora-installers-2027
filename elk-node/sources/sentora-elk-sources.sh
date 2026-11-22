@@ -30,6 +30,10 @@ LIB=/usr/local/lib/sentora-elk
 mkdir -p "$SRC"; chmod 700 "$SRC"
 
 say() { printf '%s\n' "$*"; }
+# the system's own packages (the installer notes which kind: deb or rpm)
+FAMILY=$(cat $C/family 2> /dev/null); FAMILY=${FAMILY:-deb}
+pkg_has() { if [ "$FAMILY" = deb ]; then dpkg -s "$1" > /dev/null 2>&1; else rpm -q "$1" > /dev/null 2>&1; fi; }
+pkg_add() { if [ "$FAMILY" = deb ]; then DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold "$@"; else dnf -y -q install "$@"; fi; }
 ip_ok() { [[ "$1" =~ ^[0-9a-fA-F:.]+$ ]] && python3 -I -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$1" 2> /dev/null; }
 es() { curl -sS --cacert $C/http_ca.crt -u "elastic:$(cat $C/elastic.pw)" -H 'Content-Type: application/json' "$@"; }
 
@@ -97,8 +101,8 @@ rsyslog_conf() {
         [ -f "$f" ] && { rm -f "$f"; systemctl restart rsyslog > /dev/null 2>&1; }
         return 0
     fi
-    command -v rsyslogd > /dev/null && dpkg -s rsyslog-gnutls > /dev/null 2>&1 || \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -q rsyslog rsyslog-gnutls > /dev/null 2>&1 || { say "Could not install rsyslog's TLS part."; return 1; }
+    command -v rsyslogd > /dev/null && pkg_has rsyslog-gnutls || \
+        pkg_add rsyslog rsyslog-gnutls > /dev/null 2>&1 || { say "Could not install rsyslog's TLS part."; return 1; }
     local g; g=$(rs_group)
     mkdir -p "$RS"; chown root:"$g" "$RS"; chmod 750 "$RS"
     install -m 640 -o root -g "$g" $C/ca.crt "$RS/ca.crt"
@@ -366,7 +370,7 @@ case "${1:-sources}" in
         [ -n "$vpw" ] && [ ${#vpw} -le 200 ] && [[ "$vpw" != *$'\n'* ]] && [[ "$vpw" != *'${'* ]] || { say "That password can not be used here (no \${ in it)."; exit 2; }
         if ! command -v /usr/share/metricbeat/bin/metricbeat > /dev/null; then
             say "Installing Metricbeat (Elastic's, from the same place as the rest of the node)..."
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -q -o Dpkg::Options::=--force-confold metricbeat > $C/metricbeat-install.log 2>&1 || { say "Could not install Metricbeat (see $C/metricbeat-install.log)."; exit 1; }
+            pkg_add metricbeat > $C/metricbeat-install.log 2>&1 || { say "Could not install Metricbeat (see $C/metricbeat-install.log)."; exit 1; }
         fi
         systemctl disable --now metricbeat > /dev/null 2>&1
         getent passwd sentora-vsphere > /dev/null || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin sentora-vsphere

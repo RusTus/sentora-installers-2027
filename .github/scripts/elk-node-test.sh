@@ -7,10 +7,17 @@
 # every kind from the runner with the panel's certificate, and what the node must refuse.
 #   .github/scripts/elk-node-test.sh <results folder>
 set -uo pipefail
-OUT=${1:?results folder}
+OUT=${1:?results folder}; SYS=${2:-ubuntu26.04}
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGE=docker.io/library/ubuntu:26.04
+case "$SYS" in
+    ubuntu26.04) IMAGE=docker.io/library/ubuntu:26.04; PKGS=apt ;;
+    debian13) IMAGE=docker.io/library/debian:13; PKGS=apt ;;
+    alma10) IMAGE=quay.io/almalinuxorg/almalinux:10; PKGS=dnf ;;
+    rocky10) IMAGE=quay.io/rockylinux/rockylinux:10; PKGS=dnf ;;
+    fedora45) IMAGE=quay.io/fedora/fedora:45; PKGS=dnf ;;
+    *) echo "unknown system $SYS"; exit 2 ;;
+esac
 NAME=sentora-elk-test
 PNAME=sentora-elk-panel
 PANEL_IMAGE=${PANEL_IMAGE:-ghcr.io/rustus/sentora2027:latest}
@@ -42,7 +49,11 @@ docker run -d --name "$PNAME" --cgroupns=private --security-opt writable-cgroups
 say "A fresh $IMAGE with systemd"
 # (Elasticsearch needs more memory maps than a default kernel allows; a container takes the host's)
 sudo sysctl -w vm.max_map_count=262144 > /dev/null 2>&1 || sysctl -w vm.max_map_count=262144 > /dev/null 2>&1
-RUNLINE='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install systemd systemd-sysv dbus procps hostname iproute2 tzdata curl ca-certificates openssh-server && rm -rf /var/lib/apt/lists/*'
+if [ "$PKGS" = apt ]; then
+    RUNLINE='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install systemd systemd-sysv dbus procps hostname iproute2 tzdata curl ca-certificates openssh-server && rm -rf /var/lib/apt/lists/*'
+else
+    RUNLINE='dnf -y install systemd procps-ng hostname iproute tzdata curl ca-certificates openssh-server && dnf clean all'
+fi
 printf 'FROM %s\nRUN %s\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" "$RUNLINE" > "$W/Dockerfile"
 docker build -q -t sentora-elk-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -h elk1.example.test sentora-elk-test > /dev/null
@@ -170,6 +181,10 @@ grep -q "notices:0" "$OUT/alerts-clear.txt" && ok "the notice went when the aler
 grep -q '"alerts"' "$OUT/alerts-stranger.txt" && bad "6515 answered another certificate" || ok "6515 turns away another certificate"
 
 say "Other sources: a FortiGate, Veeam, Microsoft 365, an online store"
+fw_has() { # port address: a rule lets that address (only) reach that port
+    if [ "$PKGS" = apt ]; then in_box "ufw status | grep -qE \"^$1/tcp +ALLOW( IN)? +$2( |\$)\""
+    else in_box "firewall-cmd --list-rich-rules | grep -q 'source address=\"$2\" port port=\"$1\" protocol=\"tcp\" accept'"; fi
+}
 cnt() { es "'https://127.0.0.1:9200/$1/_count' -d '$2'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'; }
 waitcnt() { # index query want
     local n=0; for _ in $(seq 1 30); do es -X POST "https://127.0.0.1:9200/$1/_refresh" > /dev/null 2>&1; n=$(cnt "$1" "$2"); [ "${n:-0}" -ge "$3" ] && break; sleep 3; done; echo "${n:-0}"
@@ -187,7 +202,7 @@ else
 fi
 docker cp "$NAME:/root/fgt-test.crt" "$W/fgt.crt"; docker cp "$NAME:/root/fgt-test.key" "$W/fgt.key"
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6516 " && ss -ltn | grep -q "127.0.0.1:5516 "' && break; sleep 3; done
-in_box 'ufw status | grep -qE "6516/tcp +ALLOW( IN)? +'"$GW"'"' && ok "the firewall lets only the FortiGate reach 6516" || bad "no 6516 rule for $GW: $(in_box 'ufw status | grep 651')"
+fw_has 6516 "$GW" && ok "the firewall lets only the FortiGate reach 6516" || bad "no 6516 rule for $GW: $(in_box 'ufw status 2> /dev/null | grep 651; firewall-cmd --list-all 2> /dev/null')"
 python3 -I "$REPO/tests/elk/srcsend.py" "$IP" 6516 "$W/node-ca.crt" "$W/fgt.crt" "$W/fgt.key" "$REPO/tests/elk/fortigate.txt" > "$OUT/fgt-send.txt" 2>&1
 n=$(waitcnt 'logs-fortigate-*' '{"query":{"match_all":{}}}' 15)
 [ "$n" = 15 ] && ok "the FortiGate's 15 lines arrived" || bad "FortiGate lines: $n of 15 ($(cat "$OUT/fgt-send.txt"); $(in_box 'journalctl -u rsyslog -n 5 --no-pager' | tail -3))"
@@ -223,7 +238,7 @@ if command -v pwsh > /dev/null; then
     pwsh -NoProfile -Command "\$e=\$null; \$t=\$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$W/dc.ps1',[ref]\$t,[ref]\$e); if(\$e){\$e | ForEach-Object { \$_.Message }; exit 1}" > "$OUT/ps1-parse.txt" 2>&1 \
         && ok "the setup script is valid PowerShell" || bad "PowerShell: $(head -3 "$OUT/ps1-parse.txt")"
 fi
-in_box 'ufw status | grep -qE "6518/tcp +ALLOW( IN)? +'"$GW"'"' && ok "the firewall lets only that DC reach 6518" || bad "no 6518 rule for $GW"
+fw_has 6518 "$GW" && ok "the firewall lets only that DC reach 6518" || bad "no 6518 rule for $GW"
 in_box "cat /etc/sentora-elk/sources/dc-$GW.crt" > "$W/dc.crt"; in_box "cat /etc/sentora-elk/sources/dc-$GW.key" > "$W/dc.key"
 # (a certificate of the DCs' own authority, but made for another address)
 in_box 'cd /root && openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout dcx.key -out dcx.csr -subj /CN=sentora-dc-192.0.2.77 2> /dev/null && printf "extendedKeyUsage=clientAuth\n" > dcx.ext && openssl x509 -req -in dcx.csr -CA /etc/sentora-elk/sources/windows-ca.crt -CAkey /etc/sentora-elk/sources/windows-ca.key -CAcreateserial -out dcx.crt -days 2 -extfile dcx.ext 2> /dev/null'

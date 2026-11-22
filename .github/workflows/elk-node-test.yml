@@ -1,4 +1,5 @@
-# Sentora Elk test, the whole way: a real panel (the Docker image) with the Elk add-on, and Ubuntu 26.04 in a
+# Sentora Elk test, the whole way: a real panel (the Docker image) with the Elk add-on, and each system (Ubuntu 26.04,
+# Debian 13, AlmaLinux 10, Rocky Linux 10, Fedora 45) in a
 # container with systemd made its Elk node (elk-node/sentora2027-elk-node: Elasticsearch, Logstash, Kibana 9
 # and Sentora's dashboards); the panel pairs and its own logs arrive; real log lines of every kind, and what
 # the node must refuse.
@@ -23,18 +24,22 @@ permissions:
 jobs:
   elk-node:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [ubuntu26.04, debian13, alma10, rocky10, fedora45]
     steps:
       - uses: actions/checkout@v5
       - name: The dashboards are the builder's
         run: |
           cd elk-node/kibana && python3 build.py > /dev/null && git diff --exit-code -- dashboards || { echo "::error::elk-node/kibana/dashboards differ from build.py: run python3 build.py"; exit 1; }
       - name: Elk node
-        run: bash .github/scripts/elk-node-test.sh results
+        run: bash .github/scripts/elk-node-test.sh results ${{ matrix.system }}
       - name: Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elk-node-test
+          name: elk-node-test-${{ matrix.system }}
           path: results
           retention-days: 14

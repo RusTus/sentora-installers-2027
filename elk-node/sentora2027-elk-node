@@ -3,7 +3,8 @@
 # stack (Elasticsearch, Logstash, Kibana 9) and Sentora's dashboards. The panel's Log Forwarder sends its logs
 # here (websites, the panel, mail, logins, FTP, DNS, fail2ban); its administrators read them in Kibana.
 # On the panel this is part of the Log Forwarder add-on (203 or newer): Advanced > Log Forwarder, Elk node.
-# Runs on Ubuntu 26.04 (more systems later). Run it as root on a server of its own (not the panel's),
+# Runs on Ubuntu 26.04, Debian 13, AlmaLinux 10, Rocky Linux 10, RHEL 10 and Fedora 45 (SELinux and AppArmor stay on).
+# Run it as root on a server of its own (not the panel's),
 # with at least 4 GB of memory (8 GB or more is better) and room for the logs:
 #
 #   curl -fsSL https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/elk-node/sentora2027-elk-node -o sentora2027-elk-node
@@ -216,18 +217,29 @@ fetch_panel() { # url: the panel's answer (a self-signed panel is fine: the pers
 [ -r /etc/os-release ] || die "This system does not say what it is (/etc/os-release)."
 . /etc/os-release
 case "${ID:-}:${VERSION_ID:-}" in
-    ubuntu:26.04) FAMILY=deb ;;
-    *) die "An Elk node runs on Ubuntu 26.04 for now (this is ${PRETTY_NAME:-unknown}); more systems will follow." ;;
+    ubuntu:26.04|debian:13*) FAMILY=deb ;;
+    almalinux:10*|rocky:10*|rhel:10*|fedora:45) FAMILY=rpm ;;
+    *) die "An Elk node runs on Ubuntu 26.04, Debian 13, AlmaLinux, Rocky Linux or RHEL 10, or Fedora 45 (this is ${PRETTY_NAME:-unknown})." ;;
 esac
+if [ "${ID}" = rhel ] && ! subscription-manager identity > /dev/null 2>&1; then die "Register this RHEL server first (subscription-manager register)."; fi
 # ---- What differs between systems: set here once (as the panel keeps its in x_settings). A new system: a new case.
 case "$FAMILY" in
     deb)
         PKG_INSTALL="apt-get -y -o Dpkg::Options::=--force-confold install"
+        PKG_REFRESH="apt-get update"
         PACKAGES="ca-certificates curl gnupg openssl ufw chrony python3"
+        FIREWALL=ufw
         CHRONY_SERVICE=chrony ;;
+    rpm)
+        PKG_INSTALL="dnf -y install"
+        PKG_REFRESH="dnf -y makecache"
+        PACKAGES="ca-certificates curl gnupg2 openssl firewalld chrony python3 policycoreutils-python-utils"
+        FIREWALL=firewalld
+        CHRONY_SERVICE=chronyd ;;
 esac
+pkg_has() { if [ "$FAMILY" = deb ]; then dpkg -s "$1" > /dev/null 2>&1; else rpm -q "$1" > /dev/null 2>&1; fi; }
 # Elastic's own package source (9.x) and the key it signs with
-ELASTIC_REPO=https://artifacts.elastic.co/packages/9.x/apt
+ELASTIC_REPO=https://artifacts.elastic.co/packages/9.x/$([ "$FAMILY" = deb ] && echo apt || echo yum)
 ELASTIC_KEY_URL=https://artifacts.elastic.co/GPG-KEY-elasticsearch
 ELASTIC_KEY_FPR=46095ACC8548582C1A2699A9D27D666CD88E42B4
 CONF=/etc/sentora-elk
@@ -288,6 +300,10 @@ exec >> "$LOG" 2>&1
 export DEBIAN_FRONTEND=noninteractive
 umask 077
 mkdir -p "$CONF"; chmod 700 "$CONF"
+# (the system's own firewall: ufw on Debian/Ubuntu, firewalld elsewhere; one that is already on is kept)
+if systemctl is-active --quiet firewalld 2> /dev/null; then FIREWALL=firewalld
+elif command -v ufw > /dev/null 2>&1 && ufw status 2> /dev/null | grep -q '^Status: active'; then FIREWALL=ufw; fi
+echo "$FAMILY" > "$CONF/family"; echo "$FIREWALL" > "$CONF/firewall"
 pw() { openssl rand -base64 33 | tr -dc 'A-Za-z0-9' | cut -c1-24; }
 # a file of Sentora's (Logstash rules, templates, dashboards): from --files, or downloaded
 get() { # path-under-elk-node destination
@@ -312,7 +328,7 @@ wait_for() { # seconds command...
 }
 
 ui_step "Packages: clock, firewall, tools"
-run apt-get update || die "Could not read the package lists (see $LOG)."
+run $PKG_REFRESH || die "Could not read the package lists (see $LOG)."
 # shellcheck disable=SC2086
 run $PKG_INSTALL $PACKAGES || die "Could not install the packages (see $LOG)."
 run systemctl enable --now "$CHRONY_SERVICE"
@@ -322,18 +338,28 @@ KEYTMP=$(mktemp -d)
 curl -fsSL --proto =https "$ELASTIC_KEY_URL" -o "$KEYTMP/key.asc" || die "Could not download Elastic's signing key."
 FPR=$(gpg --batch --with-colons --show-keys "$KEYTMP/key.asc" 2> /dev/null | awk -F: '$1 == "fpr" {print $10; exit}')
 [ "$FPR" = "$ELASTIC_KEY_FPR" ] || die "Elastic's signing key is not the expected one ($FPR): nothing was installed."
-gpg --batch --yes --dearmor -o /usr/share/keyrings/elastic-9.gpg "$KEYTMP/key.asc" || die "Could not keep Elastic's signing key."
-chmod 644 /usr/share/keyrings/elastic-9.gpg; rm -rf "$KEYTMP"
-echo "deb [signed-by=/usr/share/keyrings/elastic-9.gpg] $ELASTIC_REPO stable main" > /etc/apt/sources.list.d/elastic-9.x.list
-chmod 644 /etc/apt/sources.list.d/elastic-9.x.list
-run apt-get update || die "Could not read Elastic's package list (see $LOG)."
+if [ "$FAMILY" = deb ]; then
+    gpg --batch --yes --dearmor -o /usr/share/keyrings/elastic-9.gpg "$KEYTMP/key.asc" || die "Could not keep Elastic's signing key."
+    chmod 644 /usr/share/keyrings/elastic-9.gpg
+    echo "deb [signed-by=/usr/share/keyrings/elastic-9.gpg] $ELASTIC_REPO stable main" > /etc/apt/sources.list.d/elastic-9.x.list
+    chmod 644 /etc/apt/sources.list.d/elastic-9.x.list
+else
+    # (dnf checks every package against this key only: the repository file names it, gpgcheck on)
+    install -m 644 "$KEYTMP/key.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-elastic-sentora
+    run rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-elastic-sentora || die "rpm refused Elastic's signing key (see $LOG)."
+    printf '[elastic-9.x]\nname=Elastic 9.x (Sentora Elk node)\nbaseurl=%s\ngpgcheck=1\nrepo_gpgcheck=0\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-elastic-sentora\nenabled=1\ntype=rpm-md\n' "$ELASTIC_REPO" > /etc/yum.repos.d/elastic-9.x.repo
+    chmod 644 /etc/yum.repos.d/elastic-9.x.repo
+fi
+rm -rf "$KEYTMP"
+run $PKG_REFRESH || die "Could not read Elastic's package list (see $LOG)."
 
 ui_step "Elasticsearch, Logstash and Kibana"
 # (the packages print a first password for the built-in user: it is replaced below, and this log is root's)
 run $PKG_INSTALL elasticsearch logstash kibana heartbeat-elastic || die "Could not install the Elastic stack (see $LOG)."
 # (Metricbeat, there once vCenter is read: kept as new as the rest)
-dpkg -s metricbeat > /dev/null 2>&1 && { run $PKG_INSTALL metricbeat || echo "WARNING: Metricbeat (vCenter's reader) was not updated"; }
-note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana heartbeat-elastic 2> /dev/null)"
+pkg_has metricbeat && { run $PKG_INSTALL metricbeat || echo "WARNING: Metricbeat (vCenter's reader) was not updated"; }
+if [ "$FAMILY" = deb ]; then note "$(dpkg-query -W -f '${Package} ${Version}  ' elasticsearch logstash kibana heartbeat-elastic 2> /dev/null)"
+else note "$(rpm -q --qf '%{NAME} %{VERSION}  ' elasticsearch logstash kibana heartbeat-elastic 2> /dev/null)"; fi
 # Elasticsearch maps its files into memory: the kernel must allow enough maps
 echo 'vm.max_map_count = 262144' > /etc/sysctl.d/90-sentora-elk.conf; chmod 644 /etc/sysctl.d/90-sentora-elk.conf
 run sysctl -p /etc/sysctl.d/90-sentora-elk.conf
@@ -730,22 +756,52 @@ except Exception: print("Stored:        nothing yet")'
         w=$1; shift; [ $# -ge 1 ] || { echo "sentora-elk-node $w any | ADDRESS-OR-NETWORK..."; exit 2; }; ip_list "$@"
         echo "$*" > $C/$w; exec "$0" firewall ;;
     firewall)
-        # SSH stays open; Kibana (443) and the panel's logs (6514) from the two lists; Sentora's rules made anew
+        # SSH stays open; Kibana (443) and the panel's logs (6514, 6515) from the two lists; each other source from its own
+        # address; Sentora's rules made anew each time (ufw by their comments, firewalld by the list of rules it added)
         ports=$(sshd -T 2> /dev/null | awk '$1 == "port" {print $2}' | sort -u); ports=${ports:-22}
         [ -n "${SSH_CONNECTION:-}" ] && ports="$ports ${SSH_CONNECTION##* }"
-        for p in $ports; do ufw allow "$p/tcp" > /dev/null; done
-        for r in $(ufw status numbered 2> /dev/null | grep sentora-elk | sed -n 's/^\[ *\([0-9]*\)\].*/\1/p' | sort -rn); do ufw --force delete "$r" > /dev/null; done
-        for a in $(cat $C/kibana-from); do if [ "$a" = any ]; then ufw allow 443/tcp comment sentora-elk-kibana; else ufw allow from "$a" to any port 443 proto tcp comment sentora-elk-kibana; fi; done > /dev/null
-        for a in $(cat $C/panel-from); do for p in 6514 6515; do if [ "$a" = any ]; then ufw allow $p/tcp comment sentora-elk-panel; else ufw allow from "$a" to any port $p proto tcp comment sentora-elk-panel; fi; done; done > /dev/null
-        # other sources: each from its own address only
-        [ -s $C/sources/fortigate ] && ufw allow from "$(cat $C/sources/fortigate)" to any port 6516 proto tcp comment sentora-elk-source > /dev/null
-        [ -s $C/sources/veeam ] && ufw allow from "$(cat $C/sources/veeam)" to any port 6517 proto tcp comment sentora-elk-source > /dev/null
-        if [ -s $C/sources/windows ]; then
-            while read -r d; do [[ "$d" =~ ^[0-9a-fA-F:.]+$ ]] && ufw allow from "$d" to any port 6518 proto tcp comment sentora-elk-source > /dev/null; done < $C/sources/windows
+        want=() # "address port" ("any port" for everyone)
+        for a in $(cat $C/kibana-from); do want+=("$a 443"); done
+        for a in $(cat $C/panel-from); do want+=("$a 6514" "$a 6515"); done
+        [ -s $C/sources/fortigate ] && want+=("$(cat $C/sources/fortigate) 6516")
+        [ -s $C/sources/veeam ] && want+=("$(cat $C/sources/veeam) 6517")
+        if [ -s $C/sources/windows ]; then while read -r d; do [[ "$d" =~ ^[0-9a-fA-F:.]+$ ]] && want+=("$d 6518"); done < $C/sources/windows; fi
+        fw=$(cat $C/firewall 2> /dev/null); fw=${fw:-ufw}
+        if [ "$fw" = firewalld ]; then
+            command -v firewall-cmd > /dev/null || { echo "firewalld is not installed: no firewall on this server"; exit 1; }
+            systemctl enable --now firewalld > /dev/null 2>&1
+            for p in $ports; do firewall-cmd -q --permanent --add-port="$p/tcp"; done
+            firewall-cmd -q --permanent --add-service=ssh
+            if [ -s $C/firewalld.rules ]; then
+                while IFS= read -r r; do
+                    case "$r" in port:*) firewall-cmd -q --permanent --remove-port="${r#port:}/tcp" ;; *) firewall-cmd -q --permanent --remove-rich-rule="$r" ;; esac
+                done < $C/firewalld.rules
+            fi
+            : > $C/firewalld.rules
+            for w in "${want[@]}"; do
+                a=${w% *}; p=${w#* }
+                if [ "$a" = any ]; then firewall-cmd -q --permanent --add-port="$p/tcp" && echo "port:$p" >> $C/firewalld.rules
+                else
+                    fam=ipv4; [[ "$a" == *:* ]] && fam=ipv6
+                    r="rule family=\"$fam\" source address=\"$a\" port port=\"$p\" protocol=\"tcp\" accept"
+                    firewall-cmd -q --permanent --add-rich-rule="$r" && echo "$r" >> $C/firewalld.rules
+                fi
+            done
+            chmod 600 $C/firewalld.rules
+            firewall-cmd -q --reload
+            systemctl is-active --quiet firewalld || { echo "firewalld did not start: no firewall on this server"; exit 1; }
+        else
+            for p in $ports; do ufw allow "$p/tcp" > /dev/null; done
+            for r in $(ufw status numbered 2> /dev/null | grep sentora-elk | sed -n 's/^\[ *\([0-9]*\)\].*/\1/p' | sort -rn); do ufw --force delete "$r" > /dev/null; done
+            for w in "${want[@]}"; do
+                a=${w% *}; p=${w#* }
+                case "$p" in 443) c=sentora-elk-kibana ;; 6514|6515) c=sentora-elk-panel ;; *) c=sentora-elk-source ;; esac
+                if [ "$a" = any ]; then ufw allow "$p/tcp" comment "$c"; else ufw allow from "$a" to any port "$p" proto tcp comment "$c"; fi > /dev/null
+            done
+            if ! ufw status 2> /dev/null | grep -q '^Status: active'; then ufw default deny incoming > /dev/null; ufw default allow outgoing > /dev/null; ufw --force enable > /dev/null; fi
+            ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
         fi
-        if ! ufw status 2> /dev/null | grep -q '^Status: active'; then ufw default deny incoming > /dev/null; ufw default allow outgoing > /dev/null; ufw --force enable > /dev/null; fi
-        ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
-        echo "Firewall: SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 and alerts 6515 from $(cat $C/panel-from)." ;;
+        echo "Firewall ($fw): SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 and alerts 6515 from $(cat $C/panel-from)." ;;
     monitors)
         # the panel's list of websites (kept by Logstash) -> Heartbeat's checks; written only when it changed
         python3 -I -c '
@@ -801,6 +857,15 @@ fi
 [ -s "$CONF/kibana-from" ] || echo any > "$CONF/kibana-from"
 out=$(/usr/local/sbin/sentora-elk-node firewall 2>&1) && note "$out" || echo "WARNING: $out"
 if command -v aa-status > /dev/null 2>&1 && aa-status --enabled 2> /dev/null; then note "AppArmor is on: nothing was widened."; fi
+# SELinux (enforcing stays enforcing): rsyslog takes the FortiGate and Veeam on 6516/6517 over TLS and hands each line
+# to Logstash on 127.0.0.1:5516/5517; those four ports are labelled as syslog ports, nothing else is widened
+if command -v getenforce > /dev/null 2>&1 && [ "$(getenforce 2> /dev/null)" != Disabled ]; then
+    for p in 6516 6517 5516 5517; do
+        semanage port -l 2> /dev/null | grep -qE "^syslogd_port_t +tcp +.*\b$p\b" && continue
+        run semanage port -a -t syslogd_port_t -p tcp "$p" || run semanage port -m -t syslogd_port_t -p tcp "$p" || echo "WARNING: SELinux: port $p could not be labelled for rsyslog"
+    done
+    note "SELinux is $(getenforce): rsyslog's TLS ports for other sources labelled, nothing else widened."
+fi
 
 ui_step "Checking: the panel's door, the logins"
 for s in elasticsearch logstash kibana sentora-elk-alerts; do systemctl is-active --quiet "$s" || echo "WARNING: $s is not running (journalctl -u $s)"; done
