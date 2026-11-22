@@ -113,16 +113,21 @@ function Get-Verified($pkg) {
     $urls = @($pkg.Url)
     if ($pkg.ContainsKey('More')) { $urls += $pkg.More }
     $done = $false; $why = ''
+    # (sites differ: MySQL's takes a browser-like client name for a bot, Apache Lounge redirects PowerShell's own with a
+    #  308 that Windows PowerShell 5.1 does not follow; so each address is tried with both, then again)
+    $agents = @('', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) zpanel-stack-installer')
     foreach ($u in $urls) {
-        for ($try = 1; $try -le 3 -and -not $done; $try++) {
-            try {
-                # (the plain PowerShell client name: a browser-like one is taken for a bot by some download sites)
-                Invoke-WebRequest -Uri $u -OutFile $file -UseBasicParsing -TimeoutSec 600
-                $done = $true
-            } catch {
-                $why = "$u : $($_.Exception.Message)"
-                Start-Sleep -Seconds (5 * $try)
+        for ($try = 1; $try -le 2 -and -not $done; $try++) {
+            foreach ($ua in $agents) {
+                try {
+                    if ($ua) { Invoke-WebRequest -Uri $u -OutFile $file -UseBasicParsing -TimeoutSec 600 -UserAgent $ua }
+                    else { Invoke-WebRequest -Uri $u -OutFile $file -UseBasicParsing -TimeoutSec 600 }
+                    $done = $true; break
+                } catch {
+                    $why = "$u : $($_.Exception.Message)"
+                }
             }
+            if (-not $done) { Start-Sleep -Seconds (5 * $try) }
         }
         if ($done) { break }
     }
