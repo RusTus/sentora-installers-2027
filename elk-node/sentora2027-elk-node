@@ -233,11 +233,18 @@ case "$FAMILY" in
     rpm)
         PKG_INSTALL="dnf -y install"
         PKG_REFRESH="dnf -y makecache"
-        PACKAGES="ca-certificates curl gnupg2 openssl firewalld chrony python3 policycoreutils-python-utils"
+        PACKAGES="ca-certificates gnupg2 openssl firewalld chrony python3 policycoreutils-python-utils"
         FIREWALL=firewalld
         CHRONY_SERVICE=chronyd ;;
 esac
 pkg_has() { if [ "$FAMILY" = deb ]; then dpkg -s "$1" > /dev/null 2>&1; else rpm -q "$1" > /dev/null 2>&1; fi; }
+# (the panel's certificate is read before the packages step: a minimal system may have no openssl or curl yet)
+# (only what is missing: Fedora and Rocky have curl-minimal, which a request for curl would clash with)
+FIRST=''; command -v openssl > /dev/null 2>&1 || FIRST="$FIRST openssl"; command -v curl > /dev/null 2>&1 || FIRST="$FIRST curl"
+if [ -n "$FIRST" ]; then
+    # shellcheck disable=SC2086
+    { $PKG_REFRESH && $PKG_INSTALL $FIRST ca-certificates; } > /dev/null 2>&1 || die "Could not install$FIRST (the first tools this installer needs)."
+fi
 # Elastic's own package source (9.x) and the key it signs with
 ELASTIC_REPO=https://artifacts.elastic.co/packages/9.x/$([ "$FAMILY" = deb ] && echo apt || echo yum)
 ELASTIC_KEY_URL=https://artifacts.elastic.co/GPG-KEY-elasticsearch

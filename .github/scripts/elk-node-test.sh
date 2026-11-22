@@ -62,7 +62,8 @@ IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 
 say "The panel: installed, with Log Forwarder (its Elk node part)"
-for _ in $(seq 1 120); do docker logs "$PNAME" 2>&1 | grep -q '^sentora: Sentora is installed\|did not finish' && break; sleep 10; done
+# (up to 40 minutes: it installs while the node's own box is built, on a runner shared with nothing else but slower some days)
+for _ in $(seq 1 240); do docker logs "$PNAME" 2>&1 | grep -q '^sentora: Sentora is installed\|did not finish' && break; sleep 10; done
 docker logs "$PNAME" 2>&1 | grep -q '^sentora: Sentora is installed' && ok "the panel installed itself" || { bad "the panel did not install"; docker logs "$PNAME" 2>&1 | tail -20; exit 1; }
 PIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$PNAME")
 docker cp "$REPO/sentora-repo/log_forwarder.zpp" "$PNAME:/root/log_forwarder.zpp"; docker cp "$REPO/tests/elk/localinstall.php" "$PNAME:/root/localinstall.php"
