@@ -529,7 +529,12 @@
       "operation": "max"
      },
      {
-      "field": "sentora.shop.base_total",
+      "field": "sentora.shop.qty",
+      "label": "Qty",
+      "operation": "sum"
+     },
+     {
+      "field": "sentora.shop.total",
       "format": {
        "decimals": 2,
        "type": "number"
@@ -542,16 +547,10 @@
       "label": "Status",
       "operation": "last_value",
       "time_field": "@timestamp"
-     },
-     {
-      "field": "sentora.shop.country",
-      "label": "Country",
-      "operation": "last_value",
-      "time_field": "@timestamp"
      }
     ],
     "query": {
-     "expression": "sentora.shop.kind : \"order\"",
+     "expression": "sentora.shop.kind : \"item\" and sentora.shop.number : *",
      "language": "kql"
     },
     "rows": [
@@ -560,16 +559,29 @@
        "sentora.shop.number"
       ],
       "label": "Order",
-      "limit": 10,
+      "limit": 8,
       "operation": "terms",
       "rank_by": {
        "direction": "desc",
        "metric_index": 0,
        "type": "metric"
       }
+     },
+     {
+      "fields": [
+       "sentora.shop.product"
+      ],
+      "label": "What",
+      "limit": 10,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 2,
+       "type": "metric"
+      }
      }
     ],
-    "title": "Latest orders",
+    "title": "Latest orders and what was in them",
     "type": "data_table"
    },
    "grid": {
@@ -634,12 +646,12 @@
     "metrics": [
      {
       "field": "sentora.shop.popularity",
-      "label": "Times",
+      "label": "Times (since the store began)",
       "operation": "max"
      }
     ],
     "query": {
-     "expression": "sentora.shop.kind : \"search\" and sentora.shop.results : 0",
+     "expression": "sentora.shop.kind : \"search\" and not sentora.shop.term_class : (\"noise\" or \"old\") and sentora.shop.results : 0",
      "language": "kql"
     },
     "rows": [

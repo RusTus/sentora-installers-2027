@@ -109,8 +109,13 @@ class elk_shop
             return '';
         }
         $stores = self::Stores();
+        // (once, after Log Forwarder 213: everything sent again, so the node sorts the old searches and the order lines carry
+        //  their order number; the node replaces what it has, nothing is counted twice)
+        if ((int) ($st['resent'] ?? 0) < 213) {
+            $st['orders_since'] = ''; $st['search_since'] = ''; $st['orders_edge'] = array(); $st['search_edge'] = array(); $st['orders'] = 0; $st['searches'] = 0;
+        }
         $out = array('site' => $site, 'time' => time(), 'orders_since' => $st['orders_since'] ?? '', 'search_since' => $st['search_since'] ?? '',
-            'orders' => (int) ($st['orders'] ?? 0), 'searches' => (int) ($st['searches'] ?? 0));
+            'orders' => (int) ($st['orders'] ?? 0), 'searches' => (int) ($st['searches'] ?? 0), 'resent' => 213);
         $db = isset($stores[$site]) ? self::Database($stores[$site]) : null;
         if ($db === null) {
             $out['error'] = isset($stores[$site]) ? 'its database was not found among the owner\'s databases' : 'no Magento store found in its folder';
@@ -151,11 +156,11 @@ class elk_shop
                 $out['orders_since'] = (string) $o['updated_at'];
             }
             if ($ids) {
-                $q = $zdbh->query("SELECT i.item_id, i.order_id, i.sku, i.name, i.qty_ordered, i.base_row_total, o.created_at, o.status
+                $q = $zdbh->query("SELECT i.item_id, i.order_id, i.sku, i.name, i.qty_ordered, i.base_row_total, o.created_at, o.status, o.increment_id
                     FROM " . $t('sales_order_item') . " i JOIN " . $t('sales_order') . " o ON o.entity_id = i.order_id
                     WHERE i.parent_item_id IS NULL AND i.order_id IN (" . implode(',', $ids) . ")");
                 foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $i) {
-                    $lines[] = array('shop-item', $i['created_at'], array('id' => (int) $i['item_id'], 'order' => (int) $i['order_id'],
+                    $lines[] = array('shop-item', $i['created_at'], array('id' => (int) $i['item_id'], 'order' => (int) $i['order_id'], 'number' => (string) $i['increment_id'],
                         'sku' => mb_substr((string) $i['sku'], 0, 64, 'UTF-8'), 'name' => mb_substr((string) $i['name'], 0, 200, 'UTF-8'),
                         'qty' => (float) $i['qty_ordered'], 'total' => (float) $i['base_row_total'], 'status' => (string) $i['status']));
                 }

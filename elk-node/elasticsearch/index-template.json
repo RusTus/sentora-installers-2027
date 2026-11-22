@@ -124,6 +124,9 @@
               "properties": {
                 "term": {
                   "type": "keyword"
+                },
+                "class": {
+                  "type": "keyword"
                 }
               }
             },

@@ -315,7 +315,7 @@
      }
     ],
     "query": {
-     "expression": "sentora.search.term : *",
+     "expression": "sentora.search.term : * and sentora.visitor : \"person\" and not sentora.search.class : (\"noise\" or \"old\") and not sentora.search.term : (wp* or xmlrpc* or api* or admin or well* or \"by model*\" or \"view id*\")",
      "language": "kql"
     },
     "title": "Searches on the site",
@@ -533,7 +533,7 @@
      }
     ],
     "query": {
-     "expression": "sentora.search.term : *",
+     "expression": "sentora.search.term : * and sentora.visitor : \"person\" and not sentora.search.class : (\"noise\" or \"old\") and not sentora.search.term : (wp* or xmlrpc* or api* or admin or well* or \"by model*\" or \"view id*\")",
      "language": "kql"
     },
     "rows": [
@@ -566,7 +566,7 @@
     "metrics": [
      {
       "field": "sentora.shop.popularity",
-      "label": "Times",
+      "label": "Times (since the store began)",
       "operation": "max"
      },
      {
@@ -576,7 +576,7 @@
      }
     ],
     "query": {
-     "expression": "sentora.shop.kind : \"search\"",
+     "expression": "sentora.shop.kind : \"search\" and not sentora.shop.term_class : (\"noise\" or \"old\")",
      "language": "kql"
     },
     "rows": [
@@ -614,12 +614,12 @@
     "metrics": [
      {
       "field": "sentora.shop.popularity",
-      "label": "Times",
+      "label": "Times (since the store began)",
       "operation": "max"
      }
     ],
     "query": {
-     "expression": "sentora.shop.kind : \"search\" and sentora.shop.results : 0",
+     "expression": "sentora.shop.kind : \"search\" and not sentora.shop.term_class : (\"noise\" or \"old\") and sentora.shop.results : 0",
      "language": "kql"
     },
     "rows": [
@@ -707,7 +707,7 @@
      "operation": "count"
     },
     "query": {
-     "expression": "sentora.search.term : *",
+     "expression": "sentora.search.term : * and sentora.visitor : \"person\" and not sentora.search.class : (\"noise\" or \"old\") and not sentora.search.term : (wp* or xmlrpc* or api* or admin or well* or \"by model*\" or \"view id*\")",
      "language": "kql"
     },
     "region": {
@@ -730,13 +730,56 @@
   },
   {
    "config": {
+    "data_source": {
+     "ref_id": "sentora-shop",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.shop.popularity",
+      "label": "Times (since the store began)",
+      "operation": "max"
+     }
+    ],
+    "query": {
+     "expression": "sentora.shop.kind : \"search\" and sentora.shop.term_class : \"old\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.shop.term"
+      ],
+      "label": "Old address (as Magento saw it)",
+      "limit": 20,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Old addresses still being asked for (redirect them to the right pages)",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 48,
+    "x": 0,
+    "y": 59
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
     "content": "Orders, products and Magento's search list come from the store's database on the panel (Log Forwarder > Elk node > Online store); no customer names, e-mail or street addresses. Searches \"from the visits\" are read from the web logs. Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."
    },
    "grid": {
     "h": 3,
     "w": 48,
     "x": 0,
-    "y": 59
+    "y": 69
    },
    "type": "markdown"
   }

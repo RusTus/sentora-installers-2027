@@ -342,11 +342,18 @@ grep -q '"fortigate":"on"' "$OUT/panel-sources.txt" && ok "the panel's page know
 # an online store on the panel: orders, products and Magento's searches, without customers' names, e-mail or addresses
 docker cp "$REPO/tests/elk/fakeshop.php" "$PNAME:/root/fakeshop.php"; docker exec "$PNAME" php /root/fakeshop.php > "$OUT/fakeshop.txt" 2>&1
 pphp 'require_once "modules/log_forwarder/code/shop.php"; print_r(array_keys(elk_shop::Stores())); elk::Save(elk_shop::S_SITE, "shop.test"); echo elk_shop::Run(), "\n"; echo "[", elk_shop::Run(), "]\n";' > "$OUT/shop.txt" 2>&1
-grep -q "store shop.test: 40 order(s), 5 search(es) sent" "$OUT/shop.txt" && grep -q "^\[\]$" "$OUT/shop.txt" && ok "the store's 40 orders and 5 searches were sent once" || bad "store: $(cat "$OUT/fakeshop.txt" "$OUT/shop.txt" | tail -8)"
-n=$(waitcnt 'sentora-shop' '{"query":{"match_all":{}}}' 85)
-[ "$n" = 85 ] && ok "the node keeps 40 orders, 40 product lines, 5 searches" || bad "store documents: $n of 85"
+grep -q "store shop.test: 40 order(s), 7 search(es) sent" "$OUT/shop.txt" && grep -q "^\[\]$" "$OUT/shop.txt" && ok "the store's 40 orders and 7 searches were sent once" || bad "store: $(cat "$OUT/fakeshop.txt" "$OUT/shop.txt" | tail -8)"
+n=$(waitcnt 'sentora-shop' '{"query":{"match_all":{}}}' 87)
+[ "$n" = 87 ] && ok "the node keeps 40 orders, 40 product lines, 7 searches" || bad "store documents: $n of 87"
 [ "$(cnt 'sentora-shop' '{"query":{"query_string":{"query":"*example.com* OR *Main*"}}}')" = 0 ] && ok "no customer e-mail or street address on the node" || bad "customer details reached the node"
-[ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.kind":"search"}},{"term":{"sentora.shop.results":0}}]}}}')" = 2 ] && ok "the searches that found nothing" || bad "no searches that found nothing"
+[ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.kind":"search"}},{"term":{"sentora.shop.results":0}}]}}}')" = 3 ] && ok "the searches that found nothing" || bad "no searches that found nothing"
+
+[ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.term":"wp admin"}},{"term":{"sentora.shop.term_class":"noise"}}]}}}')" = 1 ] \
+  && [ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.term":"by model blade"}},{"term":{"sentora.shop.term_class":"old"}}]}}}')" = 1 ] \
+  && [ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.term_class":"customer"}}]}}}')" = 5 ] \
+  && ok "searches sorted: customers, a bot probe (noise), an old address (old)" || bad "search sorting: $(es "'https://127.0.0.1:9200/sentora-shop/_search?q=sentora.shop.kind:search&size=10&filter_path=hits.hits._source.sentora.shop.term,hits.hits._source.sentora.shop.term_class'")"
+[ "$(cnt 'sentora-shop' '{"query":{"bool":{"filter":[{"term":{"sentora.shop.kind":"item"}},{"exists":{"field":"sentora.shop.number"}}]}}}')" = 40 ] \
+  && ok "every product line carries its order number" || bad "product lines without their order number"
 
 say "The panel's lines (every kind, over TLS with the panel's certificate)"
 SENT=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)

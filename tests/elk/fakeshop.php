@@ -32,7 +32,9 @@ for ($i = 1; $i <= 40; $i++) {
     $k = $sku[$i % 4];
     $zdbh->exec("INSERT INTO `$db`.`{$p}sales_order_item` VALUES ($i, $i, NULL, '{$k[0]}', '{$k[1]}', " . rand(1, 3) . ", $tot)");
 }
-$terms = array(array('band saw blade', 14, 52), array('cold saw', 6, 40), array('hemsaw parts', 0, 17), array('coolant pump', 0, 9), array('vise', 3, 22));
+$terms = array(array('band saw blade', 14, 52), array('cold saw', 6, 40), array('hemsaw parts', 0, 17), array('coolant pump', 0, 9), array('vise', 3, 22),
+    // (a bot probe and an old address of the store, as the owner's Magento has them: sorted as noise and old by the node)
+    array('wp admin', 0, 18), array('by model blade', 4, 11205));
 foreach ($terms as $n => $x) { $zdbh->exec("INSERT INTO `$db`.`{$p}search_query` VALUES (" . ($n + 1) . ", '{$x[0]}', {$x[1]}, {$x[2]}, 1, '" . gmdate('Y-m-d H:i:s', time() - 3600) . "')"); }
 $dir = rtrim(ctrl_options::GetSystemOption('hosted_dir'), '/') . "/$user/public_html/" . trim($sub, '/');
 @mkdir("$dir/app/etc", 0755, true); @mkdir("$dir/bin", 0755, true); touch("$dir/bin/magento");

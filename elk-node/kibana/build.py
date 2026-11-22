@@ -598,11 +598,19 @@ BOARDS["sentora-m365"] = build_src("sentora-m365", "Microsoft 365", [
 SHOP = {"type": "data_view_reference", "ref_id": "sentora-shop"}
 ORD = 'sentora.shop.kind : "order" and not sentora.shop.state : ("canceled" or "closed")'
 MONEY = {"type": "number", "decimals": 2}
+# (searches: customers only. The node sorts each term into customer, old (an old address of the store, such as
+#  /by-model/..., still being asked for) and noise (bots, WordPress probes, one or two characters); the names as
+#  well, for visits stored before the sorting)
+SEARCHED = ('sentora.search.term : * and sentora.visitor : "person" and not sentora.search.class : ("noise" or "old")'
+            ' and not sentora.search.term : (wp* or xmlrpc* or api* or admin or well* or "by model*" or "view id*")')
+STORE_SEARCH = 'sentora.shop.kind : "search" and not sentora.shop.term_class : ("noise" or "old")'
+STORE_OLD = 'sentora.shop.kind : "search" and sentora.shop.term_class : "old"'
+SINCE_START = "Times (since the store began)"
 BOARDS["sentora-shop"] = build_src("sentora-shop", "Online store", [
     [(12, 5, on(SHOP, metric("Orders", ORD, ""))),
      (12, 5, on(SHOP, metric("Sales", ORD, "", {"operation": "sum", "field": "sentora.shop.base_total", "format": MONEY}))),
      (12, 5, on(SHOP, metric("Average order", ORD, "", {"operation": "average", "field": "sentora.shop.base_total", "format": MONEY}))),
-     (12, 5, on(DV, metric("Searches on the site", "sentora.search.term : *", "")))],
+     (12, 5, on(DV, metric("Searches on the site", SEARCHED, "")))],
     [(32, 12, {"type": "xy", "title": "Sales over time", "query": q(ORD), "legend": {"visibility": "visible", "position": "right"},
                "layers": [{"type": "bar_stacked", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp"},
                            "y": [{"operation": "sum", "field": "sentora.shop.base_total", "label": "Sales", "format": MONEY}],
@@ -611,18 +619,22 @@ BOARDS["sentora-shop"] = build_src("sentora-shop", "Online store", [
     [(24, 14, sum_table("Best-selling products", SHOP, 'sentora.shop.kind : "item" and not sentora.shop.status : ("canceled" or "closed")',
                         ["sentora.shop.product"], "sentora.shop.qty", "Sold", 20)),
      (24, 14, sum_table("Sales by country", SHOP, ORD + " and sentora.shop.country : *", ["sentora.shop.country"], "sentora.shop.base_total", "Sales", 20, MONEY))],
-    [(16, 14, on(DV, table("What visitors search for (from the visits)", "sentora.search.term : *", ["sentora.search.term"], 20, "Searches"))),
-     (16, 14, {"type": "data_table", "title": "Magento's searches: most searched", "data_source": SHOP, "query": q('sentora.shop.kind : "search"'),
-               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"},
+    [(16, 14, on(DV, table("What visitors search for (from the visits)", SEARCHED, ["sentora.search.term"], 20, "Searches"))),
+     (16, 14, {"type": "data_table", "title": "Magento's searches: most searched", "data_source": SHOP, "query": q(STORE_SEARCH),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": SINCE_START},
                            {"operation": "max", "field": "sentora.shop.results", "label": "Results"}],
                "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 20, "label": "Searched for",
                          "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
-     (16, 14, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q('sentora.shop.kind : "search" and sentora.shop.results : 0'),
-               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"}],
+     (16, 14, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q(STORE_SEARCH + ' and sentora.shop.results : 0'),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": SINCE_START}],
                "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 20, "label": "Searched for",
                          "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
     [(24, 12, on(DV, bars("Store visits over time (people and bots)", WEB + " and sentora.domain : *", "sentora.visitor", 2, "Visits"))),
-     (24, 12, on(DV, world("Where searchers come from", "sentora.search.term : *", "Searches")))],
+     (24, 12, on(DV, world("Where searchers come from", SEARCHED, "Searches")))],
+    [(48, 10, {"type": "data_table", "title": "Old addresses still being asked for (redirect them to the right pages)", "data_source": SHOP,
+               "query": q(STORE_OLD), "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": SINCE_START}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 20, "label": "Old address (as Magento saw it)",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
     [(48, 3, note("Orders, products and Magento's search list come from the store's database on the panel (Log Forwarder > Elk node > "
                   "Online store); no customer names, e-mail or street addresses. Searches \"from the visits\" are read from the web logs. "
                   "Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."))],
@@ -969,15 +981,20 @@ BOARDS["sentora-saleswall"] = build_src("sentora-saleswall", "Sales wall", [
                           {"type": "line", "data_source": SHOP, "x": {"operation": "date_histogram", "field": "@timestamp", "suggested_interval": "1h"},
                            "y": [dict(TOTAL, label="A week before", format=MONEY, time_shift="1w")]}]}),
      (16, 13, ring("Best sellers (items)", SHOP, ITEMS, "sentora.shop.product", {"operation": "sum", "field": "sentora.shop.qty", "label": "Sold"}, 6))],
-    [(24, 13, {"type": "data_table", "title": "Latest orders", "data_source": SHOP, "query": q('sentora.shop.kind : "order"'),
-               "metrics": [{"operation": "max", "field": "@timestamp", "label": "When"}, dict(TOTAL, label="Total", format=MONEY),
-                           {"operation": "last_value", "time_field": "@timestamp", "field": "sentora.shop.status", "label": "Status"},
-                           {"operation": "last_value", "time_field": "@timestamp", "field": "sentora.shop.country", "label": "Country"}],
-               "rows": [{"operation": "terms", "fields": ["sentora.shop.number"], "limit": 10, "label": "Order",
-                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}),
+    # (the order lines carry their order number: each order with what was in it, newest first)
+    [(24, 13, {"type": "data_table", "title": "Latest orders and what was in them", "data_source": SHOP,
+               "query": q('sentora.shop.kind : "item" and sentora.shop.number : *'),
+               "metrics": [{"operation": "max", "field": "@timestamp", "label": "When"},
+                           {"operation": "sum", "field": "sentora.shop.qty", "label": "Qty"},
+                           {"operation": "sum", "field": "sentora.shop.total", "label": "Total", "format": MONEY},
+                           {"operation": "last_value", "time_field": "@timestamp", "field": "sentora.shop.status", "label": "Status"}],
+               "rows": [{"operation": "terms", "fields": ["sentora.shop.number"], "limit": 8, "label": "Order",
+                         "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}},
+                        {"operation": "terms", "fields": ["sentora.shop.product"], "limit": 10, "label": "What",
+                         "rank_by": {"type": "metric", "metric_index": 2, "direction": "desc"}}]}),
      (12, 13, ring("Where orders go", SHOP, ORD + " and sentora.shop.country : *", "sentora.shop.country", dict(TOTAL, label="Sales", format=MONEY), 6)),
-     (12, 13, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q('sentora.shop.kind : "search" and sentora.shop.results : 0'),
-               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": "Times"}],
+     (12, 13, {"type": "data_table", "title": "Searches that found nothing", "data_source": SHOP, "query": q(STORE_SEARCH + ' and sentora.shop.results : 0'),
+               "metrics": [{"operation": "max", "field": "sentora.shop.popularity", "label": SINCE_START}],
                "rows": [{"operation": "terms", "fields": ["sentora.shop.term"], "limit": 10, "label": "Searched for",
                          "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
 ])

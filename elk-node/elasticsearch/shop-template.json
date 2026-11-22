@@ -93,6 +93,9 @@
                 },
                 "popularity": {
                   "type": "double"
+                },
+                "term_class": {
+                  "type": "keyword"
                 }
               }
             }
