@@ -66,7 +66,9 @@ $Pkg = @{
                 Url  = 'https://windows.php.net/downloads/releases/php-8.5.13-Win32-vs17-x64.zip'
                 Sha  = '792FE1553895EE98F9BC3C9D50C539910F7D0066676A6523207CA91429D4D475'; Top = '' }
     MySQL  = @{ Name = 'MySQL 8.4.13 LTS (x64)'
-                Url  = 'https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip'
+                Url  = 'https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip'
+                # (once a newer 8.4 is out, this one moves to MySQL's archive)
+                More = @('https://cdn.mysql.com/archives/mysql-8.4/mysql-8.4.13-winx64.zip', 'https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip')
                 Sha  = 'E9CD98B1D23F122987B1AFCA26AD942EFEC5891481103D48AE3CDE237FA3EA54'; Top = 'mysql-8.4.13-winx64' }
 }
 # (these two change with each release: the runtime is checked by Microsoft's signature, the CA list by curl's checksum)
@@ -108,7 +110,23 @@ function Get-Verified($pkg) {
         Remove-Item $file -Force
     }
     Note "downloading $($pkg.Name) ..."
-    Invoke-WebRequest -Uri $pkg.Url -OutFile $file -UseBasicParsing -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) zpanel-stack-installer'
+    $urls = @($pkg.Url)
+    if ($pkg.ContainsKey('More')) { $urls += $pkg.More }
+    $done = $false; $why = ''
+    foreach ($u in $urls) {
+        for ($try = 1; $try -le 3 -and -not $done; $try++) {
+            try {
+                # (the plain PowerShell client name: a browser-like one is taken for a bot by some download sites)
+                Invoke-WebRequest -Uri $u -OutFile $file -UseBasicParsing -TimeoutSec 600
+                $done = $true
+            } catch {
+                $why = "$u : $($_.Exception.Message)"
+                Start-Sleep -Seconds (5 * $try)
+            }
+        }
+        if ($done) { break }
+    }
+    if (-not $done) { Fail "$($pkg.Name) could not be downloaded ($why)." }
     $got = (Get-FileHash $file -Algorithm SHA256).Hash
     if ($got -ne $pkg.Sha) { Remove-Item $file -Force; Fail "$($pkg.Name): the download's checksum is $got, not $($pkg.Sha). It was not used." }
     Ok "$($pkg.Name): downloaded, checksum matches"
