@@ -222,7 +222,9 @@ try {
 
     $ca = Join-Path $Dl 'cacert.pem'
     Invoke-WebRequest -Uri $CaBundleUrl -OutFile $ca -UseBasicParsing
-    $caSha = ((Invoke-WebRequest -Uri ($CaBundleUrl + '.sha256') -UseBasicParsing).Content -split '\s+')[0]
+    # (saved, then read as text: curl.se serves it as a PEM file, which Windows PowerShell 5.1 hands back as bytes)
+    Invoke-WebRequest -Uri ($CaBundleUrl + '.sha256') -OutFile "$ca.sha256" -UseBasicParsing
+    $caSha = ((Get-Content "$ca.sha256" -Raw).Trim() -split '\s+')[0]
     if ((Get-FileHash $ca -Algorithm SHA256).Hash -ne $caSha.ToUpper()) { Fail 'The CA list from curl.se does not match its checksum.' }
     Ok "CA list for PHP's HTTPS (curl.se): checksum matches"
 
