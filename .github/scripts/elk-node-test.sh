@@ -59,8 +59,8 @@ docker build -q -t sentora-elk-test "$W" > "$OUT/image-build.log" 2>&1 || { tail
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -h elk1.example.test sentora-elk-test > /dev/null
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
 # (test container only: RHEL 10's rsyslog cannot drop the capabilities of this runner's newer kernel, which it does not
-#  know, and exits; on a real AlmaLinux / Rocky server its own kernel matches and nothing is set: the VM test shows it)
-case "$SYS" in alma10|rocky10) in_box 'mkdir -p /etc/rsyslog.d && echo "global(libcapng.default=\"off\")" > /etc/rsyslog.d/00-test-runner-kernel.conf' ;; esac
+#  know, and exits (its config check too): dropping is switched off here; on a real AlmaLinux / Rocky server its own kernel matches and nothing is set: the VM test shows it)
+case "$SYS" in alma10|rocky10) in_box 'mkdir -p /etc/rsyslog.d && echo "global(libcapng.enable=\"off\")" > /etc/rsyslog.d/00-test-runner-kernel.conf' ;; esac
 IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 
@@ -176,10 +176,20 @@ pphp 'elk::Prepare(); echo "timing:", elk::Setting("apache_timing_log"), "\n";' 
 in_box 'systemctl is-active --quiet sentora-elk-alerts' && ok "the alerts service runs" || bad "the alerts service does not run: $(in_box 'journalctl -u sentora-elk-alerts -n 20 --no-pager' | tail -5)"
 in_box 'echo "{\"disk_pct\": 1}" > /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > "$OUT/alerts-check.txt" 2>&1
 grep -q "disk is" "$OUT/alerts-check.txt" && ok "a low disk limit makes an alert on the node" || bad "no disk alert: $(cat "$OUT/alerts-check.txt" | head -5)"
-pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc LIKE \"elk-alert-%\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-panel.txt" 2>&1
-grep -q "alerts: [1-9]" "$OUT/alerts-panel.txt" && ! grep -q "notices:0" "$OUT/alerts-panel.txt" && ok "the panel fetched the alert and shows it as a notice" || bad "panel alerts: $(cat "$OUT/alerts-panel.txt")"
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc = \"elk-alerts\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-panel.txt" 2>&1
+grep -q "alerts: [1-9]" "$OUT/alerts-panel.txt" && ! grep -q "notices:0" "$OUT/alerts-panel.txt" && ok "the panel fetched the alert and shows it in its one notice" || bad "panel alerts: $(cat "$OUT/alerts-panel.txt")"
+# the administrators' choices: the same alerts again keep the notice's version (a closed one stays closed), a muted one
+# and a kind switched off leave the notice, and both come back when undone
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; global $zdbh; $n = function () use ($zdbh) { return (string) $zdbh->query("SELECT CONCAT(COUNT(*), \"/\", COALESCE(MAX(nt_updated_ts), 0)) FROM x_notices WHERE nt_key_vc = \"elk-alerts\" AND nt_deleted_ts IS NULL")->fetchColumn(); };
+  $st = elk_alerts::State(); $id = $st["alerts"][0]["id"]; $v1 = $n(); sleep(2); elk_alerts::Run(); echo "same:", ($n() === $v1 ? 1 : 0), "\n";
+  $r = elk_alerts::Rules(); $r["mute"][$id] = array("t" => time(), "title" => "test"); elk_alerts::SaveRules($r); elk_alerts::Run(); echo "muted:", $n(), "\n";
+  unset($r["mute"][$id]); $r["kinds"][strstr($id, ":", true)] = "off"; elk_alerts::SaveRules($r); elk_alerts::Run(); echo "off:", $n(), "\n";
+  elk_alerts::SaveRules(array("kinds" => array(), "mute" => array())); elk_alerts::Run(); echo "back:", $n(), "\n";' > "$OUT/alerts-rules.txt" 2>&1
+grep -q "same:1" "$OUT/alerts-rules.txt" && ok "the same alerts again keep the notice as it was (closed stays closed)" || bad "alert notice version: $(cat "$OUT/alerts-rules.txt")"
+grep -q "muted:0/" "$OUT/alerts-rules.txt" && grep -q "off:0/" "$OUT/alerts-rules.txt" && grep -q "back:1/" "$OUT/alerts-rules.txt" \
+  && ok "a muted alert and a kind switched off leave the notice; undone, it is back" || bad "alert choices: $(cat "$OUT/alerts-rules.txt")"
 in_box 'rm -f /etc/sentora-elk-alerts/limits.json; sentora-elk-node alerts' > /dev/null 2>&1
-pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc LIKE \"elk-alert-%\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-clear.txt" 2>&1
+pphp 'require_once "modules/log_forwarder/code/alerts.php"; echo elk_alerts::Run(), "\n"; global $zdbh; echo "notices:", $zdbh->query("SELECT COUNT(*) FROM x_notices WHERE nt_key_vc = \"elk-alerts\" AND nt_deleted_ts IS NULL")->fetchColumn(), "\n";' > "$OUT/alerts-clear.txt" 2>&1
 grep -q "notices:0" "$OUT/alerts-clear.txt" && ok "the notice went when the alert cleared" || bad "alerts did not clear: $(cat "$OUT/alerts-clear.txt")"
 ( sleep 3 ) | timeout 15 openssl s_client -connect "$IP:6515" -CAfile "$W/node-ca.crt" -cert "$W/other.crt" -key "$W/other.key" -quiet > "$OUT/alerts-stranger.txt" 2>&1
 grep -q '"alerts"' "$OUT/alerts-stranger.txt" && bad "6515 answered another certificate" || ok "6515 turns away another certificate"

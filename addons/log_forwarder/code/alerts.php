@@ -5,8 +5,9 @@
  * (while paired and "Alerts" is chosen) the daemon asks the node on port 6515, over the same pinned connection as the
  * logs (the panel's certificate; the node's authority pinned): a website down, a certificate running out, a full disk,
  * mail piling up, a burst of failed logins or of requests the web firewall stopped, many bounces, a busy CPU, the logs
- * gone quiet. Each alert is a notice while it lasts (taken away when it clears) and a mail when it starts (again
- * after a day while it lasts). What the node sends is checked and cut to size: names and words only, no links but
+ * gone quiet. What needs a look is one notice (it comes back after a close only when something new starts) and a mail
+ * when an alert starts (again after a day while it lasts); the administrators choose per kind (notice and mail, notice
+ * only, off) and can mute one alert (Log Forwarder's Alerts card). What the node sends is checked and cut to size: names and words only, no links but
  * the one to its own Kibana board made here.
  *
  * @package Sentora
@@ -18,7 +19,84 @@ class elk_alerts
 {
     const PORT = 6515;
     const KEY = 'elk-alert-';
+    const NOTICE = 'elk-alerts';
     const STATE = 'alerts.json';
+    /** The administrators' choices (x_settings, hidden): {"kinds": {kind: "both"|"notice"|"off"}, "mute": {id: {t, title}}}. */
+    const S_RULES = 'elk_alert_rules';
+
+    /**
+     * Every kind of alert the node sends (the part of its id before ":"), by source, with a name.
+     *
+     * @return array<string, array<string, string>>
+     */
+    static function Kinds()
+    {
+        return array(
+            'This panel' => array('site-down' => 'A website does not answer', 'cert' => 'A certificate runs out soon', 'disk-root' => 'The system disk fills up',
+                'disk-sites' => 'The websites\' disk fills up', 'cpu' => 'The CPU stays busy', 'mailq' => 'Mail piles up', 'bounces' => 'Many mails bounce',
+                'logins' => 'Many failed logins (SSH, panel, mail, FTP)', 'waf' => 'The web firewall stops many requests', 'quiet' => 'The panel\'s logs go quiet',
+                'attacker' => 'An address attacks in several places'),
+            'FortiGate' => array('fortigate' => 'Many failed VPN or admin logins'),
+            'Veeam' => array('veeam' => 'A backup job failed', 'backup-stale' => 'A machine has no recent backup', 'repo-full' => 'A repository fills up'),
+            'Microsoft 365' => array('office-new' => 'A sign-in from a new country', 'office-travel' => 'Sign-ins too far apart to travel'),
+            'Active Directory' => array('ad-lockout' => 'An account is locked out', 'ad-guess' => 'Many failed logons for one account', 'ad-admin' => 'Someone added to an admin group',
+                'ad-cleared' => 'A security log was cleared', 'ad-quiet' => 'A domain controller goes quiet'),
+            'VMware vSphere' => array('vsphere-host' => 'A host is red', 'vsphere-alarm' => 'A red alarm in vCenter', 'vsphere-ds' => 'A datastore fills up',
+                'vsphere-busy' => 'A host is busy', 'vsphere-snap' => 'An old snapshot', 'vsphere-quiet' => 'vCenter goes quiet'),
+        );
+    }
+
+    /**
+     * The administrators' choices, checked.
+     *
+     * @return array{kinds: array<string, string>, mute: array<string, array{t: int, title: string}>}
+     */
+    static function Rules()
+    {
+        $j = json_decode(elk::Setting(self::S_RULES), true);
+        $r = array('kinds' => array(), 'mute' => array());
+        if (is_array($j)) {
+            foreach ((array) ($j['kinds'] ?? array()) as $k => $v) {
+                if (is_string($k) && preg_match('/^[a-z-]{1,20}$/', $k) && in_array($v, array('notice', 'off'), true)) {
+                    $r['kinds'][$k] = $v;
+                }
+            }
+            foreach ((array) ($j['mute'] ?? array()) as $id => $m) {
+                if (is_string($id) && preg_match('/^[a-z-]{1,20}:[a-z0-9.-]{1,253}$/', $id) && is_array($m)) {
+                    $r['mute'][$id] = array('t' => (int) ($m['t'] ?? 0), 'title' => mb_substr((string) ($m['title'] ?? ''), 0, 120, 'UTF-8'));
+                }
+            }
+        }
+        return $r;
+    }
+
+    /**
+     * Save the choices (the page; administrators only).
+     *
+     * @param array $r As Rules() gives.
+     * @return void
+     */
+    static function SaveRules(array $r)
+    {
+        $mute = isset($r['mute']) && is_array($r['mute']) ? array_slice($r['mute'], -500, 500, true) : array();
+        elk::Save(self::S_RULES, json_encode(array('kinds' => (object) ($r['kinds'] ?? array()), 'mute' => (object) $mute), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * What happens to an alert: 'both' (notice and mail), 'notice', 'off' (kind switched off) or 'muted'.
+     *
+     * @param string $id The alert's id.
+     * @param array $rules From Rules().
+     * @return string
+     */
+    static function Mode($id, array $rules)
+    {
+        if (isset($rules['mute'][$id])) {
+            return 'muted';
+        }
+        $kind = strstr($id, ':', true);
+        return isset($rules['kinds'][$kind]) ? $rules['kinds'][$kind] : 'both';
+    }
 
     /**
      * Root: fetch the node's alerts and bring the notices and the mail up to date.
@@ -39,6 +117,7 @@ class elk_alerts
             foreach (array_keys($had) as $id) {
                 ctrl_notices::Withdraw(self::KEY . md5($id), 0);
             }
+            ctrl_notices::Withdraw(self::NOTICE, 0);
             if ($had || $st) {
                 @unlink($file);
             }
@@ -57,35 +136,89 @@ class elk_alerts
         $out['sources'] = $got['sources'];
         $node = elk::Node();
         $host = filter_var($node['addr'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '[' . $node['addr'] . ']' : $node['addr'];
+        $rules = self::Rules();
         $sent = array();
         $mail = array();
+        $show = array();
         foreach ($got['alerts'] as $a) {
-            $board = $a['board'] !== '' ? $a['board'] : 'sentora-overview';
-            ctrl_notices::Send(array('scope' => 'groups', 'targets' => array(1), 'type' => $a['level'], 'from' => 0, 'source' => 'log_forwarder',
-                'key' => self::KEY . md5($a['id']), 'closable' => 'login', 'title' => mb_substr('Elk node: ' . $a['title'], 0, 120, 'UTF-8'),
-                'body' => $a['text'] . "\n\n[See it in Kibana](https://" . $host . '/app/dashboards#/view/' . $board . ')'));
+            $mode = self::Mode($a['id'], $rules);
+            if ($mode === 'off' || $mode === 'muted') {
+                continue;
+            }
+            $show[] = $a;
             $last = isset($had[$a['id']]) ? (int) $had[$a['id']] : 0;
-            if ($last < time() - 86400) {
+            if ($mode === 'both' && $last < time() - 86400) {
                 $mail[] = $a;
                 $sent[$a['id']] = time();
             } else {
                 $sent[$a['id']] = $last;
             }
         }
-        $cleared = 0;
-        foreach (array_keys($had) as $id) {
-            if (!isset($sent[$id])) {
+        // (the one-notice-per-alert notices of Log Forwarder 211 and older go, once)
+        if (empty($st['one'])) {
+            foreach (array_keys($had) as $id) {
                 ctrl_notices::Withdraw(self::KEY . md5($id), 0);
-                $cleared++;
             }
         }
+        $out['one'] = 1;
+        $before = isset($st['shown']) && is_array($st['shown']) ? $st['shown'] : array();
+        $out['shown'] = self::Notice($show, $host, $before);
+        $cleared = count(array_diff(array_keys($had), array_keys($sent)));
         $out['sent'] = $sent;
         $mailed = $mail ? self::Mail($mail, $host) : 0;
         elk::WriteFile($file, json_encode($out, JSON_UNESCAPED_SLASHES), 0640, 'sentora');
         if (!$got['alerts'] && !$cleared) {
             return '';
         }
-        return 'alerts: ' . count($got['alerts']) . ' now' . ($cleared ? ', ' . $cleared . ' cleared' : '') . ($mailed ? ', mailed ' . $mailed . ' administrator(s)' : '') . '.';
+        return 'alerts: ' . count($got['alerts']) . ' now, ' . count($show) . ' shown' . ($cleared ? ', ' . $cleared . ' cleared' : '') . ($mailed ? ', mailed ' . $mailed . ' administrator(s)' : '') . '.';
+    }
+
+    /**
+     * The one notice for the administrators: what needs a look now, outages first. It comes back after a close only when
+     * a new alert starts; while the same ones go on (their figures change) or some clear, its text is brought up to date
+     * quietly, so a closed notice stays closed. None left: it goes.
+     *
+     * @param array $show The alerts to show (from Fetch(), the choices applied).
+     * @param string $host The node's address (for the Kibana link).
+     * @param array $before The alert ids the notice showed when it last came back.
+     * @return array<int, string> The ids it shows (kept for the next run).
+     */
+    static function Notice(array $show, $host, array $before)
+    {
+        global $zdbh;
+        if (!$show) {
+            ctrl_notices::Withdraw(self::NOTICE, 0);
+            return array();
+        }
+        usort($show, function ($x, $y) { return array($x['level'] === 'outage' ? 0 : 1, $x['title']) <=> array($y['level'] === 'outage' ? 0 : 1, $y['title']); });
+        $ids = array_map(function ($a) { return $a['id']; }, $show);
+        $down = count(array_filter($show, function ($a) { return $a['level'] === 'outage'; }));
+        $lines = array();
+        foreach (array_slice($show, 0, 12) as $a) {
+            $lines[] = '- ' . ($a['level'] === 'outage' ? '**' . $a['title'] . '**' : $a['title']);
+        }
+        if (count($show) > 12) {
+            $lines[] = '- ' . 'and ' . (count($show) - 12) . ' more';
+        }
+        $title = count($show) === 1 ? 'Elk node: ' . $show[0]['title']
+            : 'Elk node: ' . count($show) . ' things need a look';
+        $body = implode("\n", $lines) . "\n\n[See them all, mute one or choose which alerts show](./?module=log_forwarder&elk=alerts)"
+            . ' · [Kibana](https://' . $host . '/app/dashboards#/view/sentora-overview)';
+        $type = $down ? 'outage' : 'warning';
+        $title = mb_substr($title, 0, 120, 'UTF-8');
+        $new = array_diff($ids, $before);
+        $q = $zdbh->prepare("SELECT nt_id_pk, nt_type_vc FROM x_notices WHERE nt_key_vc = :k AND nt_acc_fk = 0 AND nt_deleted_ts IS NULL ORDER BY nt_id_pk DESC LIMIT 1");
+        $q->execute(array(':k' => self::NOTICE));
+        $row = $q->fetch(PDO::FETCH_ASSOC);
+        if (!$row || $new || ($type === 'outage' && $row['nt_type_vc'] !== 'outage')) {
+            ctrl_notices::Send(array('scope' => 'groups', 'targets' => array(1), 'type' => $type, 'from' => 0, 'source' => 'log_forwarder',
+                'key' => self::NOTICE, 'closable' => true, 'title' => $title, 'body' => $body));
+            return $ids;
+        }
+        // (nothing new: the same notice, its words up to date, its version kept)
+        $zdbh->prepare("UPDATE x_notices SET nt_title_vc = :t, nt_body_tx = :b, nt_type_vc = :y WHERE nt_id_pk = :id")
+            ->execute(array(':t' => $title, ':b' => $body, ':y' => $type, ':id' => (int) $row['nt_id_pk']));
+        return array_values(array_intersect($before, $ids)) ?: $ids;
     }
 
     /**
@@ -168,7 +301,8 @@ class elk_alerts
         $m = new sys_email();
         $m->Subject = 'Elk node: ' . (count($alerts) === 1 ? $alerts[0]['title'] : count($alerts) . ' things need a look');
         $m->Body = "Hello,\n\nThe Elk node found:\n\n" . implode("\n", $lines) . "\n\nKibana: https://" . $host . "/\n"
-            . "Each one is also a notice in the panel until it clears; this mail comes again after a day while it lasts.\n";
+            . "They are also in the notice at the top of the panel until they clear; this mail comes again after a day while one lasts.\n"
+            . "Log Forwarder's Alerts card chooses which kinds come by mail, and mutes one.\n";
         foreach ($to as $a) {
             $m->AddAddress($a);
         }

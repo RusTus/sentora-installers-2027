@@ -383,6 +383,7 @@ class module_controller extends ctrl_module
             'plus' => '<path d="M12 5v14M5 12h14"/>',
             'bell' => '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
             'refresh' => '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+            'mute' => '<path d="M6 8a6 6 0 0 1 9.3-5"/><path d="M18 8c0 7 3 9 3 9H9"/><path d="M6 8c0 7-3 9-3 9h3"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
             'save' => '<path d="M5 21h14a2 2 0 0 0 2-2V8l-5-5H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/><path d="M7 3v5h8"/><path d="M7 21v-7h10v7"/>',
         );
         return '<svg class="ek-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -517,6 +518,132 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * "Alerts": what needs a look now (each with Mute), which kinds come as a notice and a mail, and what is muted. The
+     * daemon applies it at its next run (started now): one notice at the top of the panel, back after a close only when
+     * something new starts.
+     *
+     * @return string HTML.
+     */
+    static function ElkAlerts()
+    {
+        if (!elk::Paired() || !in_array('alerts', elk::Chosen(), true)) {
+            return '';
+        }
+        $tok = runtime_csfr::Token();
+        $rules = elk_alerts::Rules();
+        $al = elk_alerts::State();
+        $now = isset($al['alerts']) && is_array($al['alerts']) ? $al['alerts'] : array();
+        usort($now, function ($x, $y) { return array($x['level'] === 'outage' ? 0 : 1, $x['title']) <=> array($y['level'] === 'outage' ? 0 : 1, $y['title']); });
+        $out = '<div class="ek-card" id="elk-alerts"><h3>' . self::t('Alerts') . '</h3>'
+            . '<p class="ek-muted ek-after-top">' . self::t('What the Elk node finds that needs a look is one notice at the top of the panel: closed, it comes back only when something new starts. Mute one you know about (an old test machine, a website only reachable inside), or choose below which kinds show at all.') . '</p>';
+        $rows = '';
+        $off = 0;
+        foreach ($now as $a) {
+            $mode = elk_alerts::Mode((string) $a['id'], $rules);
+            if ($mode === 'off' || $mode === 'muted') {
+                $off++;
+                continue;
+            }
+            $rows .= '<div class="ek-row"><div class="ek-row-main"><div><span class="ek-pill is-' . ($a['level'] === 'outage' ? 'bad' : 'watch') . '">' . self::t($a['level'] === 'outage' ? 'Down' : 'Warning') . '</span> '
+                . '<b>' . self::h($a['title']) . '</b><div class="ek-muted">' . self::h($a['text']) . ($mode === 'notice' ? ' &middot; ' . self::t('no mail') : '') . '</div></div></div>'
+                . '<div class="ek-row-btns"><form method="post" action="./?module=log_forwarder&action=ElkMute" class="ek-inline">' . $tok
+                . '<input type="hidden" name="inId" value="' . self::h($a['id']) . '"><input type="hidden" name="inTitle" value="' . self::h($a['title']) . '">'
+                . '<button type="submit" class="btn btn-default btn-sm">' . self::ElkIcon('mute') . ' ' . self::t('Mute') . '</button></form></div></div>';
+        }
+        $out .= $rows !== '' ? '<div class="ek-alerts">' . $rows . '</div>'
+            : '<p class="ek-muted">' . self::t(!$al ? 'The first check comes with the panel\'s next run.' : 'Nothing needs a look.') . '</p>';
+        if ($off) {
+            $out .= '<p class="ek-muted ek-after">' . self::h(str_replace('%n', (string) $off, ui_language::translate('%n more, muted or of a kind switched off.'))) . '</p>';
+        }
+        // the kinds
+        $opts = array('both' => 'Notice and mail', 'notice' => 'Notice only', 'off' => 'Off');
+        $out .= '<form method="post" action="./?module=log_forwarder&action=ElkAlertKinds">' . $tok . '<h4 class="ek-sub">' . self::t('Which kinds show') . '</h4>';
+        foreach (elk_alerts::Kinds() as $source => $kinds) {
+            $out .= '<div class="ek-kinds"><b class="ek-kinds-head">' . self::t($source) . '</b>';
+            foreach ($kinds as $k => $name) {
+                $cur = isset($rules['kinds'][$k]) ? $rules['kinds'][$k] : 'both';
+                $sel = '';
+                foreach ($opts as $v => $label) {
+                    $sel .= '<option value="' . $v . '"' . ($v === $cur ? ' selected' : '') . '>' . self::t($label) . '</option>';
+                }
+                $out .= '<label class="ek-kind"><span>' . self::t($name) . '</span><select name="inKind[' . self::h($k) . ']">' . $sel . '</select></label>';
+            }
+            $out .= '</div>';
+        }
+        $out .= '<button type="submit" class="btn btn-primary">' . self::ElkIcon('save') . ' ' . self::t('Save') . '</button></form>';
+        // what is muted
+        if ($rules['mute']) {
+            $out .= '<h4 class="ek-sub">' . self::t('Muted') . '</h4><div class="ek-alerts">';
+            foreach ($rules['mute'] as $id => $m) {
+                $out .= '<div class="ek-row"><div class="ek-row-main"><div><b>' . self::h($m['title'] !== '' ? $m['title'] : $id) . '</b><div class="ek-muted">'
+                    . self::h(str_replace('%d', $m['t'] ? date('Y-m-d', $m['t']) : '-', ui_language::translate('muted on %d'))) . '</div></div></div>'
+                    . '<div class="ek-row-btns"><form method="post" action="./?module=log_forwarder&action=ElkUnmute" class="ek-inline">' . $tok
+                    . '<input type="hidden" name="inId" value="' . self::h($id) . '"><button type="submit" class="btn btn-default btn-sm">' . self::ElkIcon('bell') . ' ' . self::t('Unmute') . '</button></form></div></div>';
+            }
+            $out .= '</div>';
+        }
+        return $out . '</div>';
+    }
+
+    static function doElkMute()
+    {
+        runtime_csfr::Protect();
+        if (!log_forwarder::IsAdmin(self::Uid())) {
+            return;
+        }
+        $id = (string) ($_POST['inId'] ?? '');
+        if (preg_match('/^[a-z-]{1,20}:[a-z0-9.-]{1,253}$/', $id)) {
+            $r = elk_alerts::Rules();
+            $title = preg_replace('/[\x00-\x1F\x7F]/u', ' ', (string) ($_POST['inTitle'] ?? ''));
+            $r['mute'][$id] = array('t' => time(), 'title' => mb_substr($title, 0, 120, 'UTF-8'));
+            elk_alerts::SaveRules($r);
+            self::ElkRunNow();
+        }
+        header('location: ./?module=log_forwarder&elk=muted#elk-alerts');
+        exit;
+    }
+
+    static function doElkUnmute()
+    {
+        runtime_csfr::Protect();
+        if (!log_forwarder::IsAdmin(self::Uid())) {
+            return;
+        }
+        $id = (string) ($_POST['inId'] ?? '');
+        $r = elk_alerts::Rules();
+        if (isset($r['mute'][$id])) {
+            unset($r['mute'][$id]);
+            elk_alerts::SaveRules($r);
+            self::ElkRunNow();
+        }
+        header('location: ./?module=log_forwarder&elk=unmuted#elk-alerts');
+        exit;
+    }
+
+    static function doElkAlertKinds()
+    {
+        runtime_csfr::Protect();
+        if (!log_forwarder::IsAdmin(self::Uid())) {
+            return;
+        }
+        $r = elk_alerts::Rules();
+        $r['kinds'] = array();
+        $got = isset($_POST['inKind']) && is_array($_POST['inKind']) ? $_POST['inKind'] : array();
+        foreach (elk_alerts::Kinds() as $kinds) {
+            foreach (array_keys($kinds) as $k) {
+                $v = isset($got[$k]) ? (string) $got[$k] : 'both';
+                if ($v === 'notice' || $v === 'off') {
+                    $r['kinds'][$k] = $v;
+                }
+            }
+        }
+        elk_alerts::SaveRules($r);
+        self::ElkRunNow();
+        header('location: ./?module=log_forwarder&elk=alertkinds#elk-alerts');
+        exit;
+    }
+
+    /**
      * "More sources": what else the node can show (a FortiGate, Veeam, Microsoft 365), whether each is on (the node
      * says, with its alerts), and the command that switches it on.
      *
@@ -597,7 +724,10 @@ class module_controller extends ctrl_module
                 'removed' => 'The Elk node was removed: the panel stops sending to it. Its logs stay on the node.',
                 'saved' => 'Saved: the panel sends the chosen logs from its next run (within a minute or two).',
                 'checked' => 'Checked again.',
-                'import' => 'The panel sends that website\'s older logs now (a big log takes a few minutes; this card shows when it is done).') as $g => $text) {
+                'import' => 'The panel sends that website\'s older logs now (a big log takes a few minutes; this card shows when it is done).',
+                'muted' => 'Muted: it leaves the notice and the mail at the panel\'s next run (started now). Unmute it under Alerts.',
+                'unmuted' => 'Unmuted: it shows again while it lasts.',
+                'alertkinds' => 'Saved: the notice and the mail follow these choices from the panel\'s next run (started now).') as $g => $text) {
                 if ($g0 === $g) {
                     $m = ui_language::translate($text);
                 }
@@ -689,7 +819,7 @@ class module_controller extends ctrl_module
                 $nAl = isset($al['alerts']) && is_array($al['alerts']) ? count($al['alerts']) : 0;
                 $out .= '<p class="ek-muted ek-after">' . self::ElkIcon('bell') . ' ' . (!$al ? self::t('Alerts: the first check comes with the panel\'s next run.')
                     : (empty($al['reach']) ? self::t('Alerts: the node does not answer on port 6515 yet. On the node, as root: sentora-elk-node update')
-                    : ($nAl ? self::h(str_replace('%n', (string) $nAl, ui_language::translate('Alerts: %n now, each one a notice at the top of the panel and mailed to the administrators.')))
+                    : ($nAl ? self::h(str_replace('%n', (string) $nAl, ui_language::translate('Alerts: %n now (see Alerts below).')))
                     : self::t('Alerts: nothing needs a look.')))) . '</p>';
             }
             if (elk::Paired()) {
@@ -806,7 +936,9 @@ class module_controller extends ctrl_module
         }
         return '<section class="ek" id="elk"><h3 class="ek-title">' . self::ElkIcon('server') . self::t('Elk node: this server\'s logs in Kibana') . '</h3>'
             . '<p class="ek-muted ek-lead">' . self::t('Administrators: send this server\'s logs (websites, mail, logins, bans, FTP, DNS, the panel) to an Elk node of its own, with Elasticsearch, Logstash and Kibana and ready-made dashboards, the world map among them.') . '</p>'
-            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkGroups() . self::ElkShop() . self::ElkImport() . self::ElkSources() . self::ElkHelp() . '</section>';
+            . self::ElkResult() . self::ElkTiles() . self::ElkNode() . self::ElkAlerts() . self::ElkGroups() . self::ElkShop() . self::ElkImport() . self::ElkSources() . self::ElkHelp() . '</section>'
+            // (the alert notice links here: open on the Alerts card)
+            . (isset($_GET['elk']) && $_GET['elk'] === 'alerts' ? '<script>(function(){var c=document.getElementById("elk-alerts");if(c){c.scrollIntoView();}})();</script>' : '');
     }
 
     /**

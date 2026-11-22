@@ -61,6 +61,14 @@
 div.ek-group { cursor: default; }
 .ek-src-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ek-group .ek-cmd { display: block; margin-top: 4px; padding: 4px 6px; font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
+/* alerts: what needs a look as card rows, the kinds as a list of choices */
+.ek-alerts { display: grid; gap: 8px; }
+.ek-sub { margin: 18px 0 10px; font-size: 13px; font-weight: 700; }
+.ek-kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin-bottom: 12px; }
+.ek-kinds-head { grid-column: 1 / -1; font-size: 12px; color: var(--ek-muted); text-transform: uppercase; letter-spacing: .04em; }
+.ek-kind { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 0; padding: 6px 10px; border: 1px solid var(--ek-line); border-radius: 6px; font-weight: normal; font-size: 13px; }
+.ek-kind span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ek-kind select { flex: 0 0 auto; width: auto; max-width: 55%; height: auto; padding: 4px 6px; border: 1px solid var(--ek-line); border-radius: 4px; background: var(--ek-card); color: var(--ek-ink); font-size: 12px; }
 /* the commands on the node */
 .ek-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ek-table td { padding: 7px 8px; border-bottom: 1px solid var(--ek-line); vertical-align: top; }
@@ -70,7 +78,7 @@ div.ek-group { cursor: default; }
 @media (max-width: 760px) {
   .ek { padding: 10px; }
   .ek-tiles { grid-template-columns: 1fr 1fr; }
-  .ek-form, .ek-groups { grid-template-columns: 1fr; }
+  .ek-form, .ek-groups, .ek-kinds { grid-template-columns: 1fr; }
   .ek-table td:first-child { white-space: normal; }
   .ek-table tr { display: flex; flex-direction: column; border-bottom: 1px solid var(--ek-line); }
   .ek-table td { border: 0; width: auto; }
