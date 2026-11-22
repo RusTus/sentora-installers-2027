@@ -192,6 +192,7 @@ waitcnt() { # index query want
 }
 # FortiGate: switched on for the runner's address (the runner plays the FortiGate), its certificate from the .p12 made for it
 in_box "sentora-elk-node fortigate $GW" > "$OUT/fortigate-on.txt" 2>&1 && ok "sentora-elk-node fortigate: switched on" || bad "fortigate on: $(tail -5 "$OUT/fortigate-on.txt")"
+in_box 'cat /etc/sentora-elk/rsyslog-check.txt; ls -la /etc/rsyslog.d /etc/rsyslog.d/sentora-sources; journalctl -u rsyslog --no-pager | tail -30' > "$OUT/rsyslog-node.txt" 2>&1
 P12PW=$(sed -n "s/.*import password (shown only now): \([A-Za-z0-9]*\).*/\1/p" "$OUT/fortigate-on.txt")
 grep -q "set certificate \"sentora-fortigate\"" "$OUT/fortigate-on.txt" && [ -n "$P12PW" ] && ok "it shows the FortiGate's steps and the certificate's password" || bad "fortigate steps: $(head -20 "$OUT/fortigate-on.txt")"
 if in_box "openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nokeys -clcerts -out /root/fgt-test.crt && openssl pkcs12 -in /root/sentora-fortigate.p12 -passin 'pass:$P12PW' -nocerts -nodes -out /root/fgt-test.key" > "$OUT/p12.txt" 2>&1; then

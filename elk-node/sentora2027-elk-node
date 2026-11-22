@@ -376,13 +376,13 @@ ui_step "Certificates (this node's own, and the panel's)"
 if [ ! -f "$CONF/ca.crt" ]; then
     # a small authority of this node's own: only it signs this node's certificates; its key stays here
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/ca.key" -out "$CONF/ca.crt" -days 7300 \
-        -subj "/CN=Sentora Elk node CA $(hostname -s)" -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" || die "Could not make this node's certificate authority."
+        -subj "/CN=Sentora Elk node CA $(hostname -s)" -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash" || die "Could not make this node's certificate authority."
 fi
 ADDR=$(hostname -I 2> /dev/null | awk '{print $1}')
 # the certificate the panel sees on port 6514 (the panel checks the name, signed by this node's authority)
 if [ ! -f "$CONF/node.crt" ]; then
     openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/node.key" -out "$CONF/node.csr" -subj "/CN=$NODE_CN"
-    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:%s\n' "$NODE_CN" > "$CONF/node.ext"
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:%s\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' "$NODE_CN" > "$CONF/node.ext"
     openssl x509 -req -in "$CONF/node.csr" -CA "$CONF/ca.crt" -CAkey "$CONF/ca.key" -CAcreateserial -out "$CONF/node.crt" -days 3650 -extfile "$CONF/node.ext" || die "Could not make this node's certificate."
 fi
 # the certificate a browser sees on Kibana (its name, its addresses), from the same authority
@@ -390,7 +390,7 @@ if [ ! -f "$CONF/web.crt" ]; then
     SAN="DNS:$NODE_CN,DNS:$(hostname -f 2> /dev/null || hostname),DNS:localhost,IP:127.0.0.1"
     for a in $(hostname -I 2> /dev/null); do SAN="$SAN,IP:$a"; done
     openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$CONF/web.key" -out "$CONF/web.csr" -subj "/CN=$(hostname -f 2> /dev/null || hostname)"
-    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\n' "$SAN" > "$CONF/web.ext"
+    printf 'basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=%s\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' "$SAN" > "$CONF/web.ext"
     openssl x509 -req -in "$CONF/web.csr" -CA "$CONF/ca.crt" -CAkey "$CONF/ca.key" -CAcreateserial -out "$CONF/web.crt" -days 825 -extfile "$CONF/web.ext" || die "Could not make Kibana's certificate."
 fi
 [ "$UPDATE" != 1 ] && { install -m 600 "$CERTTMP" "$CONF/panel.crt"; rm -f "$CERTTMP"; echo "$PANEL" > "$CONF/panel-url"; }

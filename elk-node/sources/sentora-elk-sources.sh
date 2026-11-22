@@ -82,7 +82,7 @@ pipelines() {
 windows_ca() {
     [ -s "$SRC/windows-ca.crt" ] && return 0
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-384 -nodes -keyout "$SRC/windows-ca.key" -out "$SRC/windows-ca.crt" \
-        -subj "/CN=Sentora Elk node: domain controllers" -days 7300 -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign 2> /dev/null
+        -subj "/CN=Sentora Elk node: domain controllers" -days 7300 -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign -addext subjectKeyIdentifier=hash 2> /dev/null
 }
 windows_certs() {
     local d=/etc/logstash/sentora/windows
@@ -151,7 +151,8 @@ rsyslog_conf() {
     chmod 644 "$f.new"; mv "$f.new" "$f"
     if ! rsyslogd -N1 > $C/rsyslog-check.txt 2>&1; then
         rm -f "$f"; systemctl restart rsyslog > /dev/null 2>&1
-        say "rsyslog refused the settings (see $C/rsyslog-check.txt); nothing was changed."; return 1
+        say "rsyslog refused the settings (see $C/rsyslog-check.txt); nothing was changed."
+        grep -v -e 'config validation run' -e 'End of config validation' $C/rsyslog-check.txt | head -5 | sed 's/^/  /'; return 1
     fi
     systemctl enable rsyslog > /dev/null 2>&1; systemctl restart rsyslog
 }
@@ -225,7 +226,7 @@ case "${1:-sources}" in
         # its certificate (a client certificate signed by this node's authority), for the FortiGate to show
         if [ ! -s "$SRC/fortigate.crt" ]; then
             openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$SRC/fortigate.key" -out "$SRC/fortigate.csr" -subj "/CN=sentora-fortigate" 2> /dev/null
-            printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=clientAuth\nsubjectAltName=DNS:sentora-fortigate\n' > "$SRC/fortigate.ext"
+            printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=clientAuth\nsubjectAltName=DNS:sentora-fortigate\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' > "$SRC/fortigate.ext"
             openssl x509 -req -in "$SRC/fortigate.csr" -CA $C/ca.crt -CAkey $C/ca.key -CAcreateserial -out "$SRC/fortigate.crt" -days 3650 -extfile "$SRC/fortigate.ext" 2> /dev/null \
                 || { say "Could not make the FortiGate's certificate."; exit 1; }
             rm -f "$SRC/fortigate.csr" "$SRC/fortigate.ext"
@@ -326,7 +327,7 @@ case "${1:-sources}" in
         if [ ! -s "$SRC/dc-$a.crt" ]; then
             openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$SRC/dc-$a.key.tmp" -out "$SRC/dc-$a.csr" -subj "/CN=sentora-dc-$a" 2> /dev/null
             openssl pkcs8 -topk8 -nocrypt -in "$SRC/dc-$a.key.tmp" -out "$SRC/dc-$a.key"; rm -f "$SRC/dc-$a.key.tmp"
-            printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n' > "$SRC/dc.ext"
+            printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' > "$SRC/dc.ext"
             openssl x509 -req -in "$SRC/dc-$a.csr" -CA "$SRC/windows-ca.crt" -CAkey "$SRC/windows-ca.key" -CAcreateserial -out "$SRC/dc-$a.crt" -days 3650 -extfile "$SRC/dc.ext" 2> /dev/null \
                 || { say "Could not make the domain controller's certificate."; exit 1; }
             rm -f "$SRC/dc-$a.csr" "$SRC/dc.ext"
