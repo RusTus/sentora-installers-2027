@@ -583,6 +583,11 @@ printf '%s\n' '[Unit]' "Description=Sentora Elk node: the uptime checks from the
 printf '%s\n' '[Unit]' "Description=Sentora Elk node: the uptime checks from the panel's list of websites, every 5 minutes" '[Timer]' \
     'OnBootSec=2min' 'OnUnitActiveSec=5min' '[Install]' 'WantedBy=timers.target' > /etc/systemd/system/sentora-elk-monitors.timer
 chmod 644 /etc/systemd/system/sentora-elk-monitors.service /etc/systemd/system/sentora-elk-monitors.timer
+# (Heartbeat alone sees the DNS and hosts files made by 'sentora-elk-node monitors': $CONF/heartbeat, see there)
+mkdir -p /etc/systemd/system/heartbeat-elastic.service.d
+printf '%s\n' '# Sentora Elk node: the uptime checks ask the DNS and use the hosts file made by sentora-elk-node monitors' '[Service]' \
+    "BindReadOnlyPaths=-$CONF/heartbeat/resolv.conf:/etc/resolv.conf -$CONF/heartbeat/hosts:/etc/hosts" > /etc/systemd/system/heartbeat-elastic.service.d/sentora-net.conf
+chmod 644 /etc/systemd/system/heartbeat-elastic.service.d/sentora-net.conf
 run systemctl daemon-reload
 run systemctl enable --now sentora-elk-monitors.timer
 run systemctl enable heartbeat-elastic
@@ -665,6 +670,8 @@ chmod 644 /etc/systemd/system/sentora-elk-reader.service
 mkdir -p /usr/local/lib/sentora-elk; chmod 700 /usr/local/lib/sentora-elk
 get sources/sentora-elk-sources.sh /usr/local/lib/sentora-elk/sources.sh.new && bash -n /usr/local/lib/sentora-elk/sources.sh.new || die "Could not get the sources tool."
 install -m 700 -o root -g root /usr/local/lib/sentora-elk/sources.sh.new /usr/local/lib/sentora-elk/sources.sh; rm -f /usr/local/lib/sentora-elk/sources.sh.new
+get sources/monitors.py /usr/local/lib/sentora-elk/monitors.py.new && python3 -I -m py_compile /usr/local/lib/sentora-elk/monitors.py.new 2> /dev/null || die "Could not get the uptime checks' maker."
+install -m 600 -o root -g root /usr/local/lib/sentora-elk/monitors.py.new /usr/local/lib/sentora-elk/monitors.py; rm -f /usr/local/lib/sentora-elk/monitors.py.new
 get sources/winsetup.py /usr/local/lib/sentora-elk/winsetup.py.new && python3 -I -m py_compile /usr/local/lib/sentora-elk/winsetup.py.new 2> /dev/null || die "Could not get the domain controllers' setup maker."
 install -m 600 -o root -g root /usr/local/lib/sentora-elk/winsetup.py.new /usr/local/lib/sentora-elk/winsetup.py; rm -f /usr/local/lib/sentora-elk/winsetup.py.new
 run systemctl daemon-reload
@@ -727,6 +734,10 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #   sentora-elk-node panel-from LIST   the panel's address as this server sees it ("any": the certificate only)
 #   sentora-elk-node firewall          make the firewall rules again from those two lists
 #   sentora-elk-node monitors          the uptime checks made again from the panel's list of websites
+#   sentora-elk-node dns auto|panel|SERVER..   the DNS the uptime checks ask: auto (the servers this one has), panel
+#                                      (the panel's own DNS) or up to 3 servers
+#   sentora-elk-node sites-at auto|panel|dns|ADDRESS   where the websites are checked: auto (at the panel's own address
+#                                      when it is an inside one), panel, dns (where DNS points), or one address
 #   sentora-elk-node alerts            check for alerts now and show them (the panel fetches them every 5 minutes)
 #   sentora-elk-node fortigate ADDRESS | veeam ADDRESS | veeam-api ADDRESS USER | m365 TENANT APP | windows DC-ADDRESS | vsphere VCENTER USER | sources   other sources (also: SOURCE off)
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
@@ -738,7 +749,9 @@ ip_list() { local a; for a in "$@"; do [ "$a" = any ] || [[ "$a" =~ ^[0-9a-fA-F:
 case "${1:-status}" in
     status)
         for s in elasticsearch logstash kibana heartbeat-elastic sentora-elk-alerts; do printf '%-18s %s\n' "$s" "$(systemctl is-active $s)"; done
-        echo "Websites watched: $(grep -c '"type": "http"' /etc/heartbeat/monitors.d/sentora-sites.yml 2> /dev/null || echo 0)"
+        echo "Websites watched: $(grep -c '"type": "http"' /etc/heartbeat/monitors.d/sentora-sites.yml 2> /dev/null || echo 0), checked at: $(cat $C/heartbeat/at 2> /dev/null || echo '-')"
+        echo "Their DNS:     $(awk '/^nameserver/ {printf "%s ", $2}' $C/heartbeat/resolv.conf 2> /dev/null)($(cat $C/dns 2> /dev/null || echo auto))"
+        [ -s $C/heartbeat/not-in-dns ] && echo "Not in any DNS, so not checked: $(paste -sd' ' $C/heartbeat/not-in-dns)"
         echo "Logs kept:     $(cat $C/retention) days"
         es "https://127.0.0.1:9200/_data_stream/logs-sentora-*/_stats?human" 2> /dev/null | python3 -I -c 'import json,sys
 try:
@@ -809,33 +822,19 @@ except Exception: print("Stored:        nothing yet")'
             ufw status 2> /dev/null | grep -q '^Status: active' || { echo "ufw did not switch on: no firewall on this server"; exit 1; }
         fi
         echo "Firewall ($fw): SSH ($(echo $ports | tr '\n' ' ')), Kibana 443 from $(cat $C/kibana-from), the panel's logs 6514 and alerts 6515 from $(cat $C/panel-from)." ;;
+    dns)
+        shift; [ $# -ge 1 ] && [ $# -le 3 ] || { echo "sentora-elk-node dns auto | panel | SERVER [SERVER2 SERVER3]"; exit 2; }
+        if [ "$1" = auto ] || [ "$1" = panel ]; then echo "$1" > $C/dns
+        else for a in "$@"; do python3 -I -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$a" 2> /dev/null || { echo "Not an address: $a"; exit 2; }; done; echo "$*" > $C/dns; fi
+        exec "$0" monitors ;;
+    sites-at)
+        a=${2:-}
+        case "$a" in auto|panel|dns) ;; *) python3 -I -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$a" 2> /dev/null || { echo "sentora-elk-node sites-at auto | panel | dns | ADDRESS"; exit 2; } ;; esac
+        echo "$a" > $C/sites-at
+        exec "$0" monitors ;;
     monitors)
-        # the panel's list of websites (kept by Logstash) -> Heartbeat's checks; written only when it changed
-        python3 -I -c '
-import json, os, re
-src, dst = "/var/lib/logstash/sentora/sites.json", "/etc/heartbeat/monitors.d/sentora-sites.yml"
-try:
-    d = json.load(open(src))
-except Exception:
-    raise SystemExit(0)
-sites = []
-for x in ((d.get("sites") or [])[:2000] if isinstance(d, dict) else []):
-    h = str(x.get("host", "")).lower() if isinstance(x, dict) else ""
-    if re.fullmatch(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?", h) and "." in h:
-        sites.append((h, x.get("https") is True))
-mon = [{"type": "http", "id": "site-" + h, "name": h, "urls": [("https://" if tls else "http://") + h + "/"],
-        "schedule": "@every 1m", "timeout": "15s", "tags": ["sentora-site"],
-        "check.response.status": [200, 201, 204, 301, 302, 303, 307, 308, 401, 403, 404]} for h, tls in sorted(set(sites))]
-new = "# Made by sentora-elk-node monitors from the panel list of websites; replaced when it changes.\n" + json.dumps(mon, indent=1) + "\n"
-old = open(dst).read() if os.path.exists(dst) else ""
-if new != old:
-    tmp = dst + ".tmp"
-    with open(tmp, "w") as f:
-        f.write(new)
-    os.chmod(tmp, 0o640)
-    os.replace(tmp, dst)
-    print("%d website(s) checked every minute" % len(mon))
-' ;;
+        # the panel's list of websites (kept by Logstash) -> Heartbeat's checks, its DNS and hosts (see monitors.py)
+        python3 -I /usr/local/lib/sentora-elk/monitors.py ;;
     fortigate|veeam|veeam-api|m365|windows|vsphere|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
     alerts)
         runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py check ;;

@@ -160,7 +160,14 @@ done
 in_box 'systemctl is-active --quiet heartbeat-elastic' && ok "Heartbeat runs" || bad "Heartbeat does not run"
 for _ in $(seq 1 20); do in_box 'test -s /var/lib/logstash/sentora/sites.json' && break; sleep 3; done
 in_box 'grep -q panel.elktest.example /var/lib/logstash/sentora/sites.json' && ok "the node got the panel's list of websites" || bad "no list of websites on the node: $(in_box 'cat /var/lib/logstash/sentora/sites.json 2>&1' | head -c 200)"
+# (a website no DNS knows is not in use yet and is left out: the test panel's name is in no DNS, so first not checked,
+#  then named in the node's /etc/hosts as an administrator can; checked at the panel's own address, an inside one)
+in_box 'sentora-elk-node monitors > /dev/null; grep -qx panel.elktest.example /etc/sentora-elk/heartbeat/not-in-dns && ! grep -q "panel.elktest.example" /etc/heartbeat/monitors.d/sentora-sites.yml' \
+    && ok "a website no DNS knows is left out of the checks" || bad "unknown website: $(in_box 'cat /etc/sentora-elk/heartbeat/not-in-dns; resolvectl status 2>&1 | head -5' | head -c 300)"
+in_box "echo '$PIP panel.elktest.example' >> /etc/hosts"
 in_box 'sentora-elk-node monitors > /dev/null; grep -q "\"name\": \"panel.elktest.example\"" /etc/heartbeat/monitors.d/sentora-sites.yml' && ok "the list became Heartbeat checks" || bad "no Heartbeat checks: $(in_box 'cat /etc/heartbeat/monitors.d/sentora-sites.yml 2>&1' | head -c 300)"
+sleep 3; in_box 'p=$(systemctl show -p MainPID --value heartbeat-elastic); grep -q "sites-at" /proc/$p/root/etc/hosts && ! grep -q "sites-at" /etc/hosts' \
+    && ok "Heartbeat alone sees its hosts file (the panel's websites at the panel's own address)" || bad "Heartbeat's hosts: $(in_box 'cat /etc/sentora-elk/heartbeat/at; systemctl cat heartbeat-elastic | tail -4')"
 n=0; for _ in $(seq 1 40); do n=$(es "'https://127.0.0.1:9200/heartbeat-*/_count?q=monitor.name:panel.elktest.example'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${n:-0}" -gt 0 ] && break; sleep 5; done
 [ "${n:-0}" -gt 0 ] && ok "Heartbeat checked the panel's website ($n)" || bad "Heartbeat stored no check of the panel's website"
 es "'https://127.0.0.1:9200/logs-sentora-*/_count?q=sentora.log:sites'" | grep -q '"count":0' && ok "the list of websites is not stored among the logs" || bad "the list of websites was stored among the logs"
