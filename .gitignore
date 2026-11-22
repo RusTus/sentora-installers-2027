@@ -13,3 +13,4 @@ Dev/Etc/sentora/*
 !Dev/Etc/proftpd/git.index
 !Dev/Etc/zpanel/git.index
 !Dev/Etc/sentora/git.indexwindows/output/
+__pycache__/
