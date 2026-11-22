@@ -222,7 +222,7 @@
      }
     ],
     "query": {
-     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\"",
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and not windows.system_account : true and not user.name : (dwm-* or umfd-*)",
      "language": "kql"
     },
     "title": "People who logged on",
@@ -635,7 +635,7 @@
      }
     ],
     "query": {
-     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and windows.off_hours : true",
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and not windows.system_account : true and not user.name : (dwm-* or umfd-*) and windows.off_hours : true",
      "language": "kql"
     },
     "rows": [
@@ -686,7 +686,7 @@
      "operation": "count"
     },
     "query": {
-     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and windows.hour_n : *",
+     "expression": "event.action : (\"logon\" or \"kerberos-logon\") and event.outcome : \"success\" and not windows.system_account : true and not user.name : (dwm-* or umfd-*) and windows.hour_n : *",
      "language": "kql"
     },
     "title": "When people log on (by hour and day, the office's time)",
@@ -731,7 +731,7 @@
      }
     ],
     "query": {
-     "expression": "event.action : \"logon\" and windows.logon_kind : *",
+     "expression": "event.action : \"logon\" and windows.logon_kind : * and not windows.system_account : true and not user.name : (dwm-* or umfd-*)",
      "language": "kql"
     },
     "rows": [

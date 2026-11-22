@@ -67,6 +67,9 @@
             },
             "from": {
               "type": "keyword"
+            },
+            "system_account": {
+              "type": "boolean"
             }
           }
         },

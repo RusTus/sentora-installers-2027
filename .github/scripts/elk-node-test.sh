@@ -277,20 +277,23 @@ fbsend() { # name cert key: Filebeat on the runner (the node sees the gateway's 
 }
 for _ in $(seq 1 60); do in_box 'ss -ltn | grep -q ":6518 "' && break; sleep 3; done
 fbsend dc "$W/dc.crt" "$W/dc.key"
-n=$(waitcnt 'logs-windows-*' '{"query":{"match_all":{}}}' 13)
-[ "$n" = 13 ] && ok "the domain controller's 13 events arrived" || bad "windows events: $n of 13 ($(docker logs elk-fb-dc 2>&1 | grep -i -m3 -e error -e fail))"
+n=$(waitcnt 'logs-windows-*' '{"query":{"match_all":{}}}' 14)
+[ "$n" = 14 ] && ok "the domain controller's 14 events arrived" || bad "windows events: $n of 14 ($(docker logs elk-fb-dc 2>&1 | grep -i -m3 -e error -e fail))"
 docker rm -f elk-fb-dc > /dev/null 2>&1
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"locked-out"}},{"term":{"user.name":"mlee"}},{"term":{"windows.from":"PC-31"}}]}}}')" = 1 ] && ok "a lockout with its account and computer" || bad "the lockout was not read"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"group.name":"Domain Admins"}},{"term":{"windows.member":"Eve Example"}},{"term":{"windows.admin_group":true}},{"term":{"user.name":"admin.rb"}}]}}}')" = 1 ] && ok "a change to Domain Admins: who, whom, an admin group" || bad "the admin group change was not read"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"logon-failed"}},{"term":{"windows.reason":"wrong password"}},{"term":{"source.ip":"203.0.113.9"}}]}}}')" = 3 ] && ok "failed logons with why and from where" || bad "failed logons not read"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"windows.logon_kind":"remote desktop"}},{"term":{"windows.off_hours":true}},{"term":{"windows.weekday":"7 Sun"}},{"term":{"windows.hour_n":3}}]}}}')" = 1 ] && ok "a remote desktop logon on Sunday at 3, outside working hours" || bad "the office time was not worked out"
+[ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"user.name":"dwm-1"}},{"term":{"windows.system_account":true}}]}}}')" = 1 ] \
+  && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"user.name":"akhan"}},{"term":{"windows.system_account":false}}]}}}')" = 1 ] \
+  && ok "Windows' own DWM-1 is marked as a system account, a person is not" || bad "system accounts: $(es "'https://127.0.0.1:9200/logs-windows-*/_search?q=user.name:dwm-1&filter_path=hits.hits._source.windows'")"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"gpo-changed"}}]}}}')" = 1 ] && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"log-cleared"}},{"term":{"user.name":"admin.rb"}}]}}}')" = 1 ] && ok "a Group Policy change and a cleared log" || bad "GPO change or cleared log not read"
 in_box 'sentora-elk-node alerts' > "$OUT/ad-alerts.txt" 2>&1
 grep -q "mlee is locked out" "$OUT/ad-alerts.txt" && grep -q "Eve Example was added to Domain Admins" "$OUT/ad-alerts.txt" && grep -q "security log of dc01 was cleared" "$OUT/ad-alerts.txt" \
     && ok "a lockout, a new Domain Admin and a cleared log are alerts" || bad "AD alerts: $(grep -i -e ad- -e locked "$OUT/ad-alerts.txt" | head -5)"
 fbsend wrongip "$W/dcx.crt" "$W/dcx.key"; fbsend other "$W/other.crt" "$W/other.key"
 sleep 30; docker rm -f elk-fb-wrongip elk-fb-other > /dev/null 2>&1; es -X POST 'https://127.0.0.1:9200/logs-windows-*/_refresh' > /dev/null 2>&1
-[ "$(cnt 'logs-windows-*' '{"query":{"match_all":{}}}')" = 13 ] && ok "6518 takes nothing with another address's or another authority's certificate" || bad "6518 took events it should not have"
+[ "$(cnt 'logs-windows-*' '{"query":{"match_all":{}}}')" = 14 ] && ok "6518 takes nothing with another address's or another authority's certificate" || bad "6518 took events it should not have"
 # VMware vCenter: Metricbeat on the node reads it (VMware's own simulator, vcsim, stands in: 4 hosts, 12 VMs, 2 datastores)
 docker rm -f elk-vcsim > /dev/null 2>&1
 docker run -d --name elk-vcsim vmware/vcsim:latest -l 0.0.0.0:443 -cluster 1 -host 3 -vm 6 -ds 2 > /dev/null
@@ -317,7 +320,7 @@ in_box 'cd /root && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-25
 printf 'test-secret\n' | docker exec -i "$NAME" sentora-elk-node m365 11111111-2222-3333-4444-555555555555 66666666-7777-8888-9999-000000000000 > "$OUT/m365-on.txt" 2>&1
 in_box 'systemctl stop sentora-elk-reader; runuser -u sentora-elk-reader -- env SENTORA_TEST_LOGIN=https://localhost:18443 SENTORA_TEST_GRAPH=https://localhost:18443 SENTORA_TEST_CA=/usr/local/share/fg-test.crt /usr/bin/python3 -I /usr/local/lib/sentora-elk-reader/sentora-elk-reader.py check' > "$OUT/m365-check.txt" 2>&1
 grep -q "2 sign-in(s) read, 2 new" "$OUT/m365-check.txt" && grep -q "6 row(s), 6 new" "$OUT/m365-check.txt" && grep -q "1 open, 4 service(s)" "$OUT/m365-check.txt" && ok "the reader read sign-ins, Teams and mail reports, service health" || bad "m365: $(cat "$OUT/m365-on.txt" "$OUT/m365-check.txt" | tail -6)"
-n=$(waitcnt 'logs-m365-*' '{"query":{"match_all":{}}}' 13)
+n=$(waitcnt 'logs-m365-*' '{"query":{"match_all":{}}}' 14)
 [ "$n" = 13 ] && ok "Microsoft 365's 13 documents are in" || bad "m365 documents: $n of 13"
 [ "$(cnt 'logs-m365-*' '{"query":{"bool":{"filter":[{"term":{"m365.kind":"service-health"}},{"term":{"m365.health":0}}]}}}')" = 1 ] && ok "a service down shows as down (health 0)" || bad "service health tiles: no service at 0"
 [ "$(cnt 'logs-m365-*' '{"query":{"bool":{"filter":[{"term":{"m365.kind":"signin"}},{"term":{"event.outcome":"failure"}},{"exists":{"field":"source.geo.location"}}]}}}')" = 1 ] && ok "a failed sign-in with its place" || bad "the failed sign-in was not read"

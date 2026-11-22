@@ -1011,7 +1011,10 @@ WIN = {"type": "data_view_reference", "ref_id": "sentora-windows"}
 NAMES.update({"windows.reason": "Why", "windows.from": "From", "windows.from_machine": "From computer", "windows.target": "Account",
               "windows.member": "Member", "group.name": "Group", "windows.logon_kind": "How", "windows.object": "Object", "windows.weekday": "Day"})
 AD_FAIL = 'event.outcome : "failure" and not event.action : "locked-out"'
-AD_LOGON = 'event.action : ("logon" or "kerberos-logon") and event.outcome : "success"'
+# (people only: Windows' own accounts, DWM-n, UMFD-n, computer accounts, NT AUTHORITY, are marked by the pipeline;
+#  the names as well, for events stored before the mark)
+AD_PEOPLE = ' and not windows.system_account : true and not user.name : (dwm-* or umfd-*)'
+AD_LOGON = 'event.action : ("logon" or "kerberos-logon") and event.outcome : "success"' + AD_PEOPLE
 AD_ADMIN = 'event.action : ("group-member-added" or "group-member-removed") and windows.admin_group : true'
 AD_ACCOUNTS = 'event.action : ("account-created" or "account-deleted" or "account-enabled" or "account-disabled" or "account-renamed" or "password-reset")'
 TODAY = ' and @timestamp >= "now/d"'
@@ -1061,7 +1064,7 @@ BOARDS["sentora-ad"] = build_src("sentora-ad", "Active Directory", [
                "metric": {"operation": "count", "label": "Logons"},
                "x": {"operation": "histogram", "field": "windows.hour_n", "granularity": "auto", "label": "Hour"},
                "y": {"operation": "terms", "fields": ["windows.weekday"], "limit": 7, "label": "Day", "rank_by": {"type": "alphabetical", "direction": "asc"}}})],
-    [(24, 12, on(WIN, table("Remote desktop and keyboard logons on the domain controllers", 'event.action : "logon" and windows.logon_kind : *',
+    [(24, 12, on(WIN, table("Remote desktop and keyboard logons on the domain controllers", 'event.action : "logon" and windows.logon_kind : *' + AD_PEOPLE,
                             ["user.name", "windows.logon_kind", "host.name"], 15, "Logons"))),
      (24, 12, on(WIN, table("Group Policy and audit changes", 'event.action : ("gpo-changed" or "audit-policy-changed" or "log-cleared")',
                             ["event.action", "user.name", "host.name"], 15, "Times")))],

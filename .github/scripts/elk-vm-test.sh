@@ -116,7 +116,7 @@ printf 'filebeat.inputs:\n  - type: filestream\n    id: dc\n    paths: ["/data/w
 chmod 644 "$W/fb"/*
 for _ in $(seq 1 60); do vm 'ss -ltn | grep -q ":6518 "' && break; sleep 3; done
 docker run -d --name elk-vm-fb --network host --user root -v "$W/fb:/data" docker.elastic.co/beats/filebeat:9.5.6 filebeat -c /data/fb.yml --strict.perms=false --path.data /tmp/fbd > /dev/null
-n=$(waitcnt 'logs-windows-*' '{"query":{"match_all":{}}}' 13); [ "$n" = 13 ] && ok "the domain controller's 13 events arrived" || bad "windows events: $n of 13 ($(docker logs elk-vm-fb 2>&1 | grep -i -m2 error))"
+n=$(waitcnt 'logs-windows-*' '{"query":{"match_all":{}}}' 14); [ "$n" = 14 ] && ok "the domain controller's 14 events arrived" || bad "windows events: $n of 14 ($(docker logs elk-vm-fb 2>&1 | grep -i -m2 error))"
 docker rm -f elk-vm-fb > /dev/null 2>&1
 
 say "VMware vCenter (the simulator on the runner, read by Metricbeat on the node)"

@@ -23,6 +23,8 @@ def ev(eid, data, when=None, user_data=None, tz="+00:00"):
 E = [
     ev(4624, {"TargetUserName": "jsmith", "TargetDomainName": "OFFICE", "LogonType": "10", "IpAddress": "10.0.1.25", "WorkstationName": "PC-25"}, sunday),
     ev(4624, {"TargetUserName": "akhan", "TargetDomainName": "OFFICE", "LogonType": "2", "IpAddress": "-", "WorkstationName": "DC01"}),
+    # (Windows itself: each new session logs its screen manager on at the keyboard; marked, left out of the people tables)
+    ev(4624, {"TargetUserName": "DWM-1", "TargetDomainName": "Window Manager", "LogonType": "2", "IpAddress": "-", "WorkstationName": "-"}),
 ] + [
     ev(4625, {"TargetUserName": "mlee", "TargetDomainName": "OFFICE", "LogonType": "3", "IpAddress": "203.0.113.9", "WorkstationName": "-",
               "Status": "0xC000006D", "SubStatus": "0xC000006A"}) for _ in range(3)
