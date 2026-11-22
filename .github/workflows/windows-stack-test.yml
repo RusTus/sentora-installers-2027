@@ -1,0 +1,67 @@
+# Temporary (deleted after the test): the owner's Windows stack installer on a fresh Windows Server 2025.
+name: Windows stack test
+on:
+  push:
+    branches: [claude/windows-stack-test]
+jobs:
+  win:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free port 80 (the runner may have IIS)
+        shell: powershell
+        run: |
+          Get-Service W3SVC -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+          Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue | Format-Table -AutoSize
+          $PSVersionTable.PSVersion; [Environment]::OSVersion.Version
+      - name: Install (Windows PowerShell 5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1
+      - name: Check from outside the installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Service ZPanelApache, ZPanelMySQL | Format-Table Name, Status, StartType -AutoSize
+          'C:\zpanel\panel','C:\zpanel\hostdata','C:\zpanel\logs\apache\access.log','C:\zpanel\logs\apache\panel-access.log','C:\zpanel\configs\apache\httpd-vhosts.conf','C:\zpanel\bin\php\php.ini','C:\zpanel\configs\mysql\my.ini' | ForEach-Object { if (-not (Test-Path $_)) { throw "missing $_" } else { "ok   $_" } }
+          Set-Content C:\zpanel\panel\hello.html '<p>hello from html</p>' -Encoding ascii
+          Set-Content C:\zpanel\panel\db.php ('<?php $p = trim(file_get_contents("C:/zpanel/configs/mysql/root-password.txt")); $m = new mysqli("127.0.0.1", "root", $p); $m->query("CREATE DATABASE IF NOT EXISTS apptest"); $m->select_db("apptest"); $m->query("CREATE TABLE IF NOT EXISTS t (id INT PRIMARY KEY AUTO_INCREMENT, v VARCHAR(20))"); $m->query("INSERT INTO t (v) VALUES (''x'')"); echo "rows:", $m->query("SELECT COUNT(*) FROM t")->fetch_row()[0], " https:", (strlen(file_get_contents("https://www.php.net/")) > 1000 ? "ok" : "no");') -Encoding ascii
+          (Invoke-WebRequest http://127.0.0.1/ -UseBasicParsing).Content
+          (Invoke-WebRequest http://127.0.0.1/hello.html -UseBasicParsing).Content
+          (Invoke-WebRequest http://127.0.0.1/ -Headers @{ Host = 'any-other-name.example' } -UseBasicParsing).Content
+          $r = (Invoke-WebRequest http://127.0.0.1/db.php -UseBasicParsing).Content; $r
+          if ($r -notmatch 'rows:1 https:ok') { throw "db.php: $r" }
+          try { Invoke-WebRequest http://127.0.0.1/.htaccess -UseBasicParsing | Out-Null; throw '.ht files served' } catch { if ($_.Exception.Response.StatusCode.value__ -ne 403 -and $_.Exception.Response.StatusCode.value__ -ne 404) { throw } ; 'ok   .ht* not served' }
+          $h = (Invoke-WebRequest http://127.0.0.1/ -UseBasicParsing).Headers; "Server: $($h['Server'])   X-Powered-By: $($h['X-Powered-By'])"
+          Get-NetTCPConnection -LocalPort 3306 -State Listen | Format-Table LocalAddress, LocalPort -AutoSize
+          Get-NetFirewallRule -DisplayName 'ZPanel Apache (HTTP)' | Format-Table DisplayName, Enabled, Action -AutoSize
+          & C:\zpanel\bin\php\php.exe -v
+      - name: Run again (repair keeps the databases, the password and the vhosts)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pw1 = Get-Content C:\zpanel\configs\mysql\root-password.txt -Raw
+          Add-Content C:\zpanel\configs\apache\httpd-vhosts.conf '# my own line'
+          powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1
+          if ((Get-Content C:\zpanel\configs\mysql\root-password.txt -Raw) -ne $pw1) { throw 'the password changed' }
+          if (-not (Select-String -Path C:\zpanel\configs\apache\httpd-vhosts.conf -Pattern '# my own line' -Quiet)) { throw 'the vhosts file was replaced' }
+          $r = (Invoke-WebRequest http://127.0.0.1/db.php -UseBasicParsing).Content; $r
+          if ($r -notmatch 'rows:2') { throw "the database did not survive: $r" }
+          'ok   repair kept the password, the vhosts and the data'
+      - name: Uninstall keeps the data
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -Uninstall
+          if (Get-Service ZPanelApache, ZPanelMySQL -ErrorAction SilentlyContinue) { throw 'services still there' }
+          if (-not (Test-Path C:\zpanel\data\mysql\mysql.ibd)) { throw 'data gone' }
+          'ok   services removed, data kept'
+      - name: Keep the logs and settings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpanel-logs
+          path: |
+            C:\zpanel\logs
+            C:\zpanel\configs\apache
+            C:\zpanel\configs\mysql\my.ini
+            C:\zpanel\bin\php\php.ini
