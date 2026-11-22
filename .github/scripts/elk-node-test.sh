@@ -162,8 +162,10 @@ for _ in $(seq 1 20); do in_box 'test -s /var/lib/logstash/sentora/sites.json' &
 in_box 'grep -q panel.elktest.example /var/lib/logstash/sentora/sites.json' && ok "the node got the panel's list of websites" || bad "no list of websites on the node: $(in_box 'cat /var/lib/logstash/sentora/sites.json 2>&1' | head -c 200)"
 # (a website no DNS knows is not in use yet and is left out: the test panel's name is in no DNS, so first not checked,
 #  then named in the node's /etc/hosts as an administrator can; checked at the panel's own address, an inside one)
-in_box 'sentora-elk-node monitors > /dev/null; grep -qx panel.elktest.example /etc/sentora-elk/heartbeat/not-in-dns && ! grep -q "panel.elktest.example" /etc/heartbeat/monitors.d/sentora-sites.yml' \
-    && ok "a website no DNS knows is left out of the checks" || bad "unknown website: $(in_box 'cat /etc/sentora-elk/heartbeat/not-in-dns; resolvectl status 2>&1 | head -5' | head -c 300)"
+# (asked with sites-at dns: the test panel's own DNS gives an error answer, which rightly keeps a website in)
+in_box 'sentora-elk-node sites-at dns > /dev/null; grep -qx panel.elktest.example /etc/sentora-elk/heartbeat/not-in-dns && ! grep -q "panel.elktest.example" /etc/heartbeat/monitors.d/sentora-sites.yml' \
+    && ok "a website no DNS knows is left out of the checks" || bad "unknown website: $(in_box 'cat /etc/sentora-elk/heartbeat/not-in-dns /etc/sentora-elk/heartbeat/resolv.conf' | head -c 300)"
+in_box 'sentora-elk-node sites-at auto > /dev/null'
 in_box "echo '$PIP panel.elktest.example' >> /etc/hosts"
 in_box 'sentora-elk-node monitors > /dev/null; grep -q "\"name\": \"panel.elktest.example\"" /etc/heartbeat/monitors.d/sentora-sites.yml' && ok "the list became Heartbeat checks" || bad "no Heartbeat checks: $(in_box 'cat /etc/heartbeat/monitors.d/sentora-sites.yml 2>&1' | head -c 300)"
 sleep 3; in_box 'p=$(systemctl show -p MainPID --value heartbeat-elastic); grep -q "sites-at" /proc/$p/root/etc/hosts && ! grep -q "sites-at" /etc/hosts' \
@@ -188,9 +190,9 @@ grep -q "alerts: [1-9]" "$OUT/alerts-panel.txt" && ! grep -q "notices:0" "$OUT/a
 # the administrators' choices: the same alerts again keep the notice's version (a closed one stays closed), a muted one
 # and a kind switched off leave the notice, and both come back when undone
 pphp 'require_once "modules/log_forwarder/code/alerts.php"; global $zdbh; $n = function () use ($zdbh) { return (string) $zdbh->query("SELECT CONCAT(COUNT(*), \"/\", COALESCE(MAX(nt_updated_ts), 0)) FROM x_notices WHERE nt_key_vc = \"elk-alerts\" AND nt_deleted_ts IS NULL")->fetchColumn(); };
-  $st = elk_alerts::State(); $id = $st["alerts"][0]["id"]; $v1 = $n(); sleep(2); elk_alerts::Run(); echo "same:", ($n() === $v1 ? 1 : 0), "\n";
-  $r = elk_alerts::Rules(); $r["mute"][$id] = array("t" => time(), "title" => "test"); elk_alerts::SaveRules($r); elk_alerts::Run(); echo "muted:", $n(), "\n";
-  unset($r["mute"][$id]); $r["kinds"][strstr($id, ":", true)] = "off"; elk_alerts::SaveRules($r); elk_alerts::Run(); echo "off:", $n(), "\n";
+  $st = elk_alerts::State(); $ids = array_map(function ($a) { return $a["id"]; }, $st["alerts"]); $v1 = $n(); sleep(2); elk_alerts::Run(); echo "same:", ($n() === $v1 ? 1 : 0), "\n";
+  $r = elk_alerts::Rules(); foreach ($ids as $id) { $r["mute"][$id] = array("t" => time(), "title" => "test"); } elk_alerts::SaveRules($r); elk_alerts::Run(); echo "muted:", $n(), "\n";
+  $r["mute"] = array(); foreach ($ids as $id) { $r["kinds"][strstr($id, ":", true)] = "off"; } elk_alerts::SaveRules($r); elk_alerts::Run(); echo "off:", $n(), " (", implode(" ", $ids), ")\n";
   elk_alerts::SaveRules(array("kinds" => array(), "mute" => array())); elk_alerts::Run(); echo "back:", $n(), "\n";' > "$OUT/alerts-rules.txt" 2>&1
 grep -q "same:1" "$OUT/alerts-rules.txt" && ok "the same alerts again keep the notice as it was (closed stays closed)" || bad "alert notice version: $(cat "$OUT/alerts-rules.txt")"
 grep -q "muted:0/" "$OUT/alerts-rules.txt" && grep -q "off:0/" "$OUT/alerts-rules.txt" && grep -q "back:1/" "$OUT/alerts-rules.txt" \
