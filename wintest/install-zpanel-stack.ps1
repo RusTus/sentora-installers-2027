@@ -98,6 +98,16 @@ function Ok($text)   { Write-Host "   ok   $text" -ForegroundColor Green }
 function Note($text) { Write-Host "   $text" }
 function Fail($text) { Write-Host ''; Write-Host "STOPPED: $text" -ForegroundColor Red; throw $text }
 
+function Invoke-Native([string]$exe, [string[]]$argv) {
+    # A program's messages on its error output are text, not a failure: Windows PowerShell 5.1 would stop the script on
+    # them under 'Stop' (MySQL and Apache write their normal progress there). The exit code is in $LASTEXITCODE.
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $out = & $exe @argv 2>&1 | ForEach-Object { "$_" } }
+    finally { $ErrorActionPreference = $old }
+    return $out
+}
+
 function Write-Utf8NoBom($path, $text) {
     # (Apache and MySQL read a byte-order mark as part of the first line)
     [System.IO.File]::WriteAllText($path, ($text -replace "`r?`n", "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
@@ -153,7 +163,7 @@ function Stop-AndRemoveService($name) {
     $s = Get-Service -Name $name -ErrorAction SilentlyContinue
     if ($s) {
         if ($s.Status -ne 'Stopped') { Stop-Service -Name $name -Force; $s.WaitForStatus('Stopped', '00:01:00') }
-        & sc.exe delete $name | Out-Null
+        Invoke-Native 'sc.exe' @('delete', $name) | Out-Null
         for ($i = 0; $i -lt 20 -and (Get-Service -Name $name -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
     }
 }
@@ -291,8 +301,8 @@ try {
     }
     Write-Utf8NoBom (Join-Path $PhpDir 'php.ini') $ini
     $phpExe = Join-Path $PhpDir 'php.exe'
-    $v = & $phpExe -n -r 'echo PHP_VERSION;'
-    $mods = (& $phpExe -c (Join-Path $PhpDir 'php.ini') -m) -join ' '
+    $v = (Invoke-Native $phpExe @('-n', '-r', 'echo PHP_VERSION;')) -join ''
+    $mods = (Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-m')) -join ' '
     $missing = $exts | Where-Object { $mods -notmatch ('(?i)\b' + [regex]::Escape($_) + '\b') }
     if ($missing) { Fail "PHP $v did not load: $($missing -join ', ')" }
     Ok "PHP $v with $($exts -join ', ')"
@@ -330,11 +340,11 @@ default-character-set=utf8mb4
     if ($fresh) {
         if (Test-Path $DataDir) { if (Get-ChildItem $DataDir -Force) { Fail "$DataDir is not empty but holds no MySQL databases: move it away first." } }
         else { New-Item -ItemType Directory -Path $DataDir | Out-Null }
-        & $mysqld "--defaults-file=$myIni" --initialize-insecure --console 2>&1 | Out-Null
+        Invoke-Native $mysqld @("--defaults-file=$myIni", '--initialize-insecure', '--console') | Out-Null
         if (-not (Test-Path (Join-Path $DataDir 'mysql.ibd'))) { Fail "MySQL could not make its databases: see $(Join-Path $Logs 'mysql\mysql_error.log')" }
         Ok "new databases in $DataDir"
     } else { Ok "the databases in $DataDir are kept" }
-    & $mysqld --install $MySQLService "--defaults-file=$myIni" | Out-Null
+    Invoke-Native $mysqld @('--install', $MySQLService, "--defaults-file=$myIni") | Out-Null
     Set-Service -Name $MySQLService -StartupType Automatic
     Start-Service $MySQLService
     (Get-Service $MySQLService).WaitForStatus('Running', '00:01:30')
@@ -342,14 +352,14 @@ default-character-set=utf8mb4
 
     $ready = $false
     for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
-        $out = & $mysql --protocol=TCP -h 127.0.0.1 -u root --skip-password -e 'SELECT 1' 2>&1
+        $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '--skip-password', '-e', 'SELECT 1')
         if ($LASTEXITCODE -eq 0 -or ($out -join ' ') -match 'Access denied') { $ready = $true } else { Start-Sleep 1 }
     }
     if ($fresh) {
         if (-not $RootPw) { $RootPw = New-Password }
         $q = "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + ($RootPw -replace "\\", "\\\\" -replace "'", "''") + "'; FLUSH PRIVILEGES;"
-        & $mysql --protocol=TCP -h 127.0.0.1 -u root --skip-password -e $q
-        if ($LASTEXITCODE -ne 0) { Fail 'Could not set the MySQL root password.' }
+        $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '--skip-password', '-e', $q)
+        if ($LASTEXITCODE -ne 0) { Fail "Could not set the MySQL root password: $($out -join ' ')" }
         Write-Utf8NoBom $pwFile $RootPw
         Protect-File $pwFile
         Ok "root password set, saved in $pwFile (Administrators only)"
@@ -358,7 +368,7 @@ default-character-set=utf8mb4
     }
     if ($RootPw) {
         $env:MYSQL_PWD = $RootPw
-        $ver = & $mysql --protocol=TCP -h 127.0.0.1 -u root -N -e 'SELECT VERSION()'
+        $ver = (Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-N', '-e', 'SELECT VERSION()') | Where-Object { $_ -match '^\d+\.\d+' }) -join ''
         Remove-Item Env:\MYSQL_PWD
         if ($LASTEXITCODE -ne 0) { Fail 'MySQL runs but the root password did not work.' }
         Ok "MySQL $ver answers on 127.0.0.1:3306"
@@ -495,7 +505,7 @@ Header always set X-Frame-Options "SAMEORIGIN"
 Include "`${ZROOT}/configs/apache/httpd-vhosts.conf"
 "@
     $httpd = Join-Path $ApacheDir 'bin\httpd.exe'
-    $test = & $httpd -t -f $conf 2>&1
+    $test = Invoke-Native $httpd @('-t', '-f', $conf)
     if ($LASTEXITCODE -ne 0) { Fail "Apache refused the settings: $($test -join ' ')" }
     Ok 'Apache accepts the settings'
 
@@ -505,11 +515,11 @@ Include "`${ZROOT}/configs/apache/httpd-vhosts.conf"
         Ok 'a placeholder index.php in panel (the folder was empty)'
     }
 
-    & $httpd -k install -n $ApacheService -f $conf 2>&1 | Out-Null
+    Invoke-Native $httpd @('-k', 'install', '-n', $ApacheService, '-f', $conf) | Out-Null
     if (-not (Get-Service $ApacheService -ErrorAction SilentlyContinue)) { Fail 'Apache could not be installed as a service.' }
     Set-Service -Name $ApacheService -StartupType Automatic
     # (Apache after MySQL, so the app finds its database at start)
-    & sc.exe config $ApacheService depend= $MySQLService | Out-Null
+    Invoke-Native 'sc.exe' @('config', $ApacheService, 'depend=', $MySQLService) | Out-Null
     Start-Service $ApacheService
     (Get-Service $ApacheService).WaitForStatus('Running', '00:01:00')
     Ok "service $ApacheService runs (starts with Windows, after MySQL)"
