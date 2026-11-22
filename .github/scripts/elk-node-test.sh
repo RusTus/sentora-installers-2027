@@ -58,6 +58,9 @@ printf 'FROM %s\nRUN %s\nSTOPSIGNAL SIGRTMIN+3\nCMD ["/sbin/init"]\n' "$IMAGE" "
 docker build -q -t sentora-elk-test "$W" > "$OUT/image-build.log" 2>&1 || { tail -20 "$OUT/image-build.log"; echo "::error::image did not build"; exit 1; }
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -h elk1.example.test sentora-elk-test > /dev/null
 for _ in $(seq 1 60); do in_box 'systemctl is-system-running 2> /dev/null' | grep -qE 'running|degraded' && break; sleep 2; done
+# (test container only: RHEL 10's rsyslog cannot drop the capabilities of this runner's newer kernel, which it does not
+#  know, and exits; on a real AlmaLinux / Rocky server its own kernel matches and nothing is set: the VM test shows it)
+case "$SYS" in alma10|rocky10) in_box 'mkdir -p /etc/rsyslog.d && echo "global(libcapng.default=\"off\")" > /etc/rsyslog.d/00-test-runner-kernel.conf' ;; esac
 IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME")
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
 
