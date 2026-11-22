@@ -76,7 +76,10 @@ tar -C "$INST" -czf "$W/elk-node.tgz" elk-node tests/elk
 to_vm "$W/elk-node.tgz" /root/elk-node.tgz; to_vm "$W/panel.crt" /root/panel.crt
 vm 'cd /root && tar xzf elk-node.tgz'
 START=$(vm 'date +%s')
-vm "cd /root && setsid nohup bash -c 'timeout 3000 bash elk-node/sentora2027-elk-node --panel-cert /root/panel.crt --files elk-node < /dev/null > /root/screen.txt 2>&1; echo \$? > /root/install-rc' > /dev/null 2>&1 &"
+# (the panel's code, as every node computes it: the installer asks for it, here given with --panel-code)
+eval "$(sed -n '/^# BEGIN node codes/,/^# END node codes/p' "$INST/elk-node/sentora2027-elk-node")"
+CODE=$(panel_code sentora-elk "$(openssl x509 -in "$W/panel.crt" -noout -pubkey | openssl pkey -pubin -outform DER | base64 -w0)")
+vm "cd /root && setsid nohup bash -c 'timeout 3000 bash elk-node/sentora2027-elk-node --panel-cert /root/panel.crt --panel-code $CODE --files elk-node < /dev/null > /root/screen.txt 2>&1; echo \$? > /root/install-rc' > /dev/null 2>&1 &"
 for _ in $(seq 1 300); do vm 'test -f /root/install-rc' 2> /dev/null && break; sleep 10; done
 vm 'cat /root/screen.txt' > "$OUT/install-screen.txt" 2>&1
 vm 'cat /var/log/sentora2027-elk-node.log' > "$OUT/install.log" 2>&1
