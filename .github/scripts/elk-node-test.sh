@@ -285,8 +285,8 @@ docker rm -f elk-fb-dc > /dev/null 2>&1
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"logon-failed"}},{"term":{"windows.reason":"wrong password"}},{"term":{"source.ip":"203.0.113.9"}}]}}}')" = 3 ] && ok "failed logons with why and from where" || bad "failed logons not read"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"windows.logon_kind":"remote desktop"}},{"term":{"windows.off_hours":true}},{"term":{"windows.weekday":"7 Sun"}},{"term":{"windows.hour_n":3}}]}}}')" = 1 ] && ok "a remote desktop logon on Sunday at 3, outside working hours" || bad "the office time was not worked out"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"user.name":"dwm-1"}},{"term":{"windows.system_account":true}}]}}}')" = 1 ] \
-  && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"user.name":"akhan"}},{"term":{"windows.system_account":false}}]}}}')" = 1 ] \
-  && ok "Windows' own DWM-1 is marked as a system account, a person is not" || bad "system accounts: $(es "'https://127.0.0.1:9200/logs-windows-*/_search?q=user.name:dwm-1&filter_path=hits.hits._source.windows'")"
+  && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"user.name":"akhan"}},{"term":{"windows.system_account":false}}]}}}')" = 2 ] \
+  && ok "Windows' own DWM-1 is marked as a system account, a person (akhan: a keyboard logon and a Kerberos ticket) is not" || bad "system accounts: $(es "'https://127.0.0.1:9200/logs-windows-*/_search?q=user.name:dwm-1&filter_path=hits.hits._source.windows'")"
 [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"gpo-changed"}}]}}}')" = 1 ] && [ "$(cnt 'logs-windows-*' '{"query":{"bool":{"filter":[{"term":{"event.action":"log-cleared"}},{"term":{"user.name":"admin.rb"}}]}}}')" = 1 ] && ok "a Group Policy change and a cleared log" || bad "GPO change or cleared log not read"
 in_box 'sentora-elk-node alerts' > "$OUT/ad-alerts.txt" 2>&1
 grep -q "mlee is locked out" "$OUT/ad-alerts.txt" && grep -q "Eve Example was added to Domain Admins" "$OUT/ad-alerts.txt" && grep -q "security log of dc01 was cleared" "$OUT/ad-alerts.txt" \
