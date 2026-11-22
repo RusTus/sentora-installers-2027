@@ -761,14 +761,6 @@
        "metric_index": 0,
        "type": "metric"
       }
-     },
-     {
-      "fields": [
-       "source.geo.country_iso_code"
-      ],
-      "label": "Country",
-      "limit": 5,
-      "operation": "terms"
      }
     ],
     "title": "People signing in from more than one country",
@@ -845,7 +837,7 @@
   "value": 60000
  },
  "time_range": {
-  "from": "now-24h",
+  "from": "now-7d",
   "to": "now"
  },
  "title": "Sentora: Microsoft 365"

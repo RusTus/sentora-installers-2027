@@ -589,8 +589,7 @@ BOARDS["sentora-m365"] = build_src("sentora-m365", "Microsoft 365", [
     [(48, 12, {"type": "data_table", "title": "People signing in from more than one country", "data_source": M365,
                "query": q(SIGN + ' and event.outcome : "success" and source.geo.country_iso_code : *'),
                "metrics": [{"operation": "unique_count", "field": "source.geo.country_iso_code", "label": "Countries"}, {"operation": "count", "label": "Sign-ins"}],
-               "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 15, "label": "Person", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}},
-                        {"operation": "terms", "fields": ["source.geo.country_iso_code"], "limit": 5, "label": "Country"}]})],
+               "rows": [{"operation": "terms", "fields": ["user.name"], "limit": 15, "label": "Person", "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]})],
     [(48, 10, on(M365, table("Microsoft 365 problems open now", 'm365.kind : "service-issue" and @timestamp >= "now-2h"', ["m365.issue.service", "m365.issue.title"], 20, "Seen")))],
     [(48, 3, note("Read from Microsoft Graph every 5 minutes (sign-ins, service problems) and every 6 hours (Teams and mail, Microsoft's "
                   "daily reports, a day or two behind) by sentora-elk-node m365. Sign-ins need Entra ID P1 or P2."))],
@@ -628,6 +627,7 @@ BOARDS["sentora-shop"] = build_src("sentora-shop", "Online store", [
                   "Online store); no customer names, e-mail or street addresses. Searches \"from the visits\" are read from the web logs. "
                   "Set the time range (top right) to see older orders. The visits chart is for every website: filter by Website to see the store's."))],
 ])
+BOARDS["sentora-m365"]["time_range"] = {"from": "now-7d", "to": "now"}  # (Microsoft's daily reports come a day or two late)
 BOARDS["sentora-shop"]["time_range"] = {"from": "now-30d", "to": "now"}
 
 # ---- Today: the morning look at everything, one page (each tile opens its own board through the links above)
