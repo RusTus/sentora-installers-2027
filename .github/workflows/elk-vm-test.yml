@@ -1,0 +1,35 @@
+# Elk node VM test: the Elk node on a real AlmaLinux 10 machine (KVM on the runner) with SELinux enforcing, every
+# source fed to it, and any SELinux refusal fails it (hidden ones reported). Results kept 14 days.
+# The script: .github/scripts/elk-vm-test.sh.
+name: Elk node VM test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: KVM and QEMU
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
+          ls -l /dev/kvm; nproc; free -m; df -h /
+      - name: The Elk node on AlmaLinux 10, SELinux enforcing
+        run: bash .github/scripts/elk-vm-test.sh . results
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: elk-vm-test
+          path: |
+            results/*.txt
+            results/*.summary
+            results/*.log
+          retention-days: 14
