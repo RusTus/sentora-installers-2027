@@ -781,6 +781,67 @@ $before = (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'];
 list($code, $h, $b) = web(getenv('PP_WEB') . '/modules/payment_plans/hooks/OnDaemonRun.hook.php');
 check(trim($b) === '' && (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] === $before, 'asking for it does nothing', $code . ' ' . $b);
 
+section('Billing details, extra lines and one-off invoices');
+$r = req(16, 'BillTo', array('inCompany' => 'Era Ltd', 'inBillAddress' => "2 High Street\nLeeds", 'inVat' => 'GB 123 4567 89'), array('tab' => 'billing'));
+check(strpos($r['text'], 'Saved') !== false && pp::BillTo(16)['bt_company_vc'] === 'Era Ltd', 'a client saves its own billing details', $r['text']);
+$r = req(16, 'BillTo', array('inCompany' => '<script>x</script>', 'inBillAddress' => '', 'inVat' => ''), array('tab' => 'billing'));
+check(strpos($r['text'], 'plain text only') !== false && pp::BillTo(16)['bt_company_vc'] === 'Era Ltd', 'markup is refused, nothing changes', $r['text']);
+check(strpos(req(16, '', array(), array('tab' => 'billing'))['html'], 'value="GB 123 4567 89"') !== false, 'its Billing page shows them, to change');
+req(2, 'Invoice', array('inId' => (string) lastinv(16)['in_id_pk'], 'inVoid' => '1'));
+$r = req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'next', 'inLine1' => 'Setup fee', 'inAmount1' => '25.00', 'inLine2' => 'Welcome discount', 'inAmount2' => '-5.00'));
+check(strpos($r['text'], '2 line(s) go on the next invoice of c_era') !== false && count(pp::Extras(2, 16)) === 2, 'the seller adds a setup fee and a discount to the next invoice', $r['text']);
+check(strpos(req(2)['html'], 'Waiting for the next invoice') !== false, 'they show as waiting on the seller\'s page');
+$e = pp::Extras(2, 16)[0];
+req(1, 'Charge', array('inDropExtra' => (string) $e['ex_id_pk']));
+check(count(pp::Extras(2, 16)) === 2, 'another seller can not take them away');
+$r = req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'next', 'inLine1' => 'Bad', 'inAmount1' => 'abc'));
+check(strpos($r['text'], 'Each line') !== false && count(pp::Extras(2, 16)) === 2, 'an amount that is not one is refused', $r['text']);
+$zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . time() . " WHERE pl_acc_fk = 16");
+daemon();
+$i = lastinv(16);
+check((int) $i['in_net_in'] === 3000 && (int) $i['in_tax_in'] === 600 && (int) $i['in_total_in'] === 3600 && $i['in_period_vc'] === 'month', 'the next invoice: 10.00 + 25.00 - 5.00 = 30.00, + 20% = 36.00', json_encode($i));
+check(strpos($i['in_buyer_tx'], 'Era Ltd') !== false && strpos($i['in_buyer_tx'], 'Leeds') !== false && strpos($i['in_buyer_tx'], 'GB 123 4567 89') !== false, 'with the client\'s company, address and tax ID on it', $i['in_buyer_tx']);
+check(count(pp::Lines((int) $i['in_id_pk'])) === 2 && pp::Extras(2, 16) === array(), 'its two lines are on it, and used (never on another invoice)');
+$h = req(16, '', array(), array('invoice' => (string) $i['in_id_pk'], 'tab' => 'billing'))['html'];
+check(strpos($h, 'Hosting: ') !== false && strpos($h, '10.00 USD') !== false && strpos($h, 'Setup fee') !== false && strpos($h, '-5.00 USD') !== false && strpos($h, 'Subtotal') !== false && strpos($h, '36.00 USD') !== false,
+    'the invoice shows the hosting (10.00), each line, the subtotal and the total');
+// one-off invoices
+$r = req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'now', 'inDays' => '10', 'inLine1' => 'Website design', 'inAmount1' => '150.00', 'inLine2' => 'Logo', 'inAmount2' => '50'));
+$o = lastinv(16);
+check($o['in_period_vc'] === 'once' && (int) $o['in_total_in'] === 24000 && abs((int) $o['in_due_in'] - (time() + 10 * 86400)) < 120 && strpos($r['text'], 'is made for c_era') !== false,
+    'a one-off invoice now: 150.00 + 50.00 + 20% = 240.00, due in 10 days, while the hosting invoice is open', $r['text'] . json_encode($o));
+check(count(events('email:era@example.com:%Invoice ' . $o['in_number_vc'] . ':%')) === 1, 'sent to the client');
+$r = req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'now', 'inLine1' => 'Refund', 'inAmount1' => '-10.00'));
+check(strpos($r['text'], 'no discounts') !== false, 'a one-off invoice takes no discounts', $r['text']);
+$r = req(2, 'Charge', array('inClient' => '1', 'inWhen' => 'now', 'inLine1' => 'X', 'inAmount1' => '1.00'));
+check(strpos($r['text'], 'Choose one of your clients') !== false, 'only the seller\'s own clients (never an administrator)', $r['text']);
+$h = req(16, '', array(), array('tab' => 'billing'))['html'];
+check(strpos($h, '<td>Website design</td>') !== false, 'the client\'s list names a one-off invoice by what it is, not a period');
+$until = (int) pp::Plan(16)['pl_paiduntil_in'];
+pp::MarkPaid((int) $o['in_id_pk'], 'Bank transfer');
+check((int) pp::Plan(16)['pl_paiduntil_in'] === $until, 'paying a one-off invoice pays for no hosting (the plan\'s date stays)');
+// switched off for the hosting invoice: paying a one-off does not switch it on
+$zdbh->exec("UPDATE x_pp_invoices SET in_due_in = " . (time() - 10 * 86400) . " WHERE in_id_pk = " . (int) $i['in_id_pk']);
+$zdbh->exec("UPDATE x_pp_plans SET pl_suspended_in = 1 WHERE pl_acc_fk = 16");
+$zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 16");
+ws_suspend::Set(16, pp::REASON . $i['in_number_vc'], 2);
+req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'now', 'inLine1' => 'Extra mailbox', 'inAmount1' => '5.00'));
+pp::MarkPaid((int) lastinv(16)['in_id_pk'], 'Cash');
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 16")['ac_enabled_in'] === 0, 'switched off for its hosting invoice: paying a one-off one does not switch it on');
+pp::MarkPaid((int) $i['in_id_pk'], 'Bank transfer');
+check((int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 16")['ac_enabled_in'] === 1, 'paying the hosting invoice does');
+// a discount as large as the price: nothing to pay
+req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'next', 'inLine1' => 'Free month', 'inAmount1' => '-10.00'));
+$zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . time() . " WHERE pl_acc_fk = 16");
+daemon();
+$f = lastinv(16);
+check((int) $f['in_total_in'] === 0 && $f['in_status_vc'] === 'paid' && $f['in_method_vc'] === 'Nothing to pay', 'a free month: the invoice is 0.00 and paid by itself', json_encode($f));
+if (getenv('PP_PAGES')) {
+    file_put_contents(getenv('PP_PAGES') . '/c16-billing.html', req(16, '', array(), array('tab' => 'billing'))['html']);
+    file_put_contents(getenv('PP_PAGES') . '/c16-invoice.html', req(16, '', array(), array('invoice' => (string) $i['in_id_pk'], 'tab' => 'billing'))['html']);
+    file_put_contents(getenv('PP_PAGES') . '/s2-late.html', req(2)['html']);
+}
+
 section('Removing the module');
 $out = shell_exec('php -r ' . escapeshellarg('chdir("' . $T . '/root"); require "dryden/loader.inc.php"; include "modules/payment_plans/deploy/remove.run";') . ' 2>&1');
 check((int) row("SELECT COUNT(*) n FROM x_pp_keys")['n'] === 0 && (int) row("SELECT COUNT(*) n FROM x_pp_invoices")['n'] > 0 && (int) row("SELECT COUNT(*) n FROM x_pp_log")['n'] > 0,

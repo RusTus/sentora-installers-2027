@@ -540,6 +540,92 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * A client's own billing details (company, address, tax ID): on its invoices from the next one on.
+     *
+     * @return void
+     */
+    static function doBillTo()
+    {
+        runtime_csfr::Protect();
+        $me = (int) self::Me()['userid'];
+        if ($me <= 0) {
+            return;
+        }
+        $company = self::Text(self::Post('inCompany'), 120);
+        $address = self::Text(self::Post('inBillAddress'), 400, true);
+        $vat = self::Text(self::Post('inVat'), 40);
+        if ($company === false || $address === false || $vat === false || ($vat !== '' && !preg_match('/^[A-Za-z0-9 .\-\/]{2,40}$/', $vat))) {
+            self::Say('error', 'Your billing details: plain text only (a tax ID: letters, digits, spaces, dots, dashes).');
+            return;
+        }
+        pp::SaveBillTo($me, $company, $address, $vat);
+        self::Say('ok', 'Saved: your billing details go on your invoices from the next one on.');
+    }
+
+    /**
+     * The seller's extra charges: lines for a client's next invoice (a setup fee; a discount below zero), or a
+     * one-off invoice now; or a waiting line taken away.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @return void
+     */
+    static function doCharge()
+    {
+        global $zdbh;
+        runtime_csfr::Protect();
+        $seller = self::SellerMe();
+        $s = $seller ? pp::Seller($seller) : null;
+        if (!$s || !empty($s['new'])) {
+            return;
+        }
+        if (ctype_digit(self::Post('inDropExtra'))) {
+            $zdbh->prepare("DELETE FROM x_pp_extras WHERE ex_id_pk = :e AND ex_seller_fk = :s AND ex_inv_fk IS NULL")->execute(array(':e' => (int) self::Post('inDropExtra'), ':s' => $seller));
+            self::Say('ok', 'The line is taken away.');
+            return;
+        }
+        $uid = ctype_digit(self::Post('inClient')) ? (int) self::Post('inClient') : 0;
+        $clients = pp::Clients($seller);
+        if (!isset($clients[$uid]) || $clients[$uid]['admin']) {
+            self::Say('error', 'Choose one of your clients.');
+            return;
+        }
+        $once = self::Post('inWhen') === 'now';
+        $lines = array();
+        for ($k = 1; $k <= 5; $k++) {
+            $text = self::Text(self::Post('inLine' . $k), 200);
+            $raw = trim(self::Post('inAmount' . $k));
+            if ($text === '' && $raw === '') {
+                continue;
+            }
+            $neg = $raw !== '' && $raw[0] === '-';
+            $amount = pp::Parse(ltrim($raw, '-'), (string) $s['ps_currency_vc']);
+            if ($text === false || $text === '' || $amount === false || $amount === 0 || ($neg && $once)) {
+                self::Say('error', 'Each line: what it is, and an amount (a discount on the next invoice below zero, like -5.00; a one-off invoice has no discounts).');
+                return;
+            }
+            $lines[] = array($text, $neg ? -$amount : $amount);
+        }
+        if (!$lines) {
+            self::Say('error', 'Give at least one line.');
+            return;
+        }
+        if ($once) {
+            $r = pp::MakeOneOff($seller, $uid, $lines, ctype_digit(self::Post('inDays')) ? (int) self::Post('inDays') : 7);
+            if (is_array($r)) {
+                self::Say('ok', 'Invoice %s is made for %s and sent to them.', array($r['in_number_vc'], $clients[$uid]['username']));
+            } else {
+                self::Say('error', $r);
+            }
+            return;
+        }
+        $add = $zdbh->prepare("INSERT INTO x_pp_extras (ex_seller_fk, ex_acc_fk, ex_text_vc, ex_net_in, ex_created_in) VALUES (:s, :u, :t, :n, :c)");
+        foreach ($lines as $l) {
+            $add->execute(array(':s' => $seller, ':u' => $uid, ':t' => $l[0], ':n' => $l[1], ':c' => time()));
+        }
+        self::Say('ok', '%s line(s) go on the next invoice of %s.', array(count($lines), $clients[$uid]['username']));
+    }
+
+    /**
      * Make a client's next invoice now.
      *
      * @return void
@@ -971,6 +1057,34 @@ class module_controller extends ctrl_module
             . ($rows === '' ? '<p class="pp-muted">' . self::t('You have no clients yet.') . '</p>'
                 : '<p class="pp-muted">' . self::t('Start or change a plan with the date the client has paid until: today for one who has paid nothing yet (their first invoice comes now), or the end of what they paid you before.') . ((int) $s['ps_auto_in'] ? ' ' . self::t('New clients on a priced package are billed by themselves.') : '') . '</p>'
                 . '<table class="pp-table"><thead><tr><th>' . self::t('Client') . '</th><th>' . self::t('Plan') . '</th><th>' . self::t('Start or change') . '</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>') . '</div>';
+        // extra charges: lines for a client's next invoice, or a one-off invoice
+        $copts = '';
+        foreach (pp::Clients($seller) as $c) {
+            if (!$c['admin']) {
+                $copts .= '<option value="' . (int) $c['id'] . '">' . self::h($c['username']) . '</option>';
+            }
+        }
+        if ($copts !== '') {
+            $waitingLines = '';
+            foreach ($GLOBALS['zdbh']->query("SELECT e.*, a.ac_user_vc FROM x_pp_extras e LEFT JOIN x_accounts a ON a.ac_id_pk = e.ex_acc_fk WHERE e.ex_seller_fk = " . (int) $seller . " AND e.ex_inv_fk IS NULL ORDER BY e.ex_id_pk")->fetchAll(PDO::FETCH_ASSOC) as $e) {
+                $waitingLines .= '<tr><td>' . self::h($e['ac_user_vc']) . '</td><td>' . self::h($e['ex_text_vc']) . '</td><td>' . self::h(pp::Show((int) $e['ex_net_in'], (string) $s['ps_currency_vc'])) . '</td><td class="pp-actions">'
+                    . self::Button('Charge', 'Take away', array('inDropExtra' => (string) (int) $e['ex_id_pk'])) . '</td></tr>';
+            }
+            $lineInputs = '';
+            for ($k = 1; $k <= 3; $k++) {
+                $lineInputs .= '<div class="pp-chargeline"><input class="form-control" type="text" name="inLine' . $k . '" maxlength="200" placeholder="' . self::t($k === 1 ? 'Setup fee' : ($k === 2 ? 'Discount' : 'Another line')) . '" aria-label="' . self::t('Line') . '">'
+                    . '<input class="form-control" type="text" name="inAmount' . $k . '" maxlength="12" placeholder="' . ($k === 2 ? '-5.00' : '25.00') . '" aria-label="' . self::t('Amount') . '"></div>';
+            }
+            $out .= '<div class="pp-card"><h3>' . self::t('Extra charges and one-off invoices') . '</h3>'
+                . '<p class="pp-muted">' . self::t('Lines before %s, like the prices. On the next invoice: added to the client\'s next hosting invoice (a discount below zero, like -5.00). A one-off invoice now: sent at once, on its own.', array($s['ps_taxlabel_vc'] !== '' ? $s['ps_taxlabel_vc'] : ui_language::translate('tax'))) . '</p>'
+                . '<form method="post" action="./?module=payment_plans&amp;action=Charge">' . runtime_csfr::Token()
+                . '<div class="pp-row"><label>' . self::t('Client') . '<select class="form-control" name="inClient">' . $copts . '</select></label>'
+                . '<label>' . self::t('When') . '<select class="form-control" name="inWhen"><option value="next">' . self::t('On their next invoice') . '</option><option value="now">' . self::t('A one-off invoice now') . '</option></select></label>'
+                . '<label>' . self::t('Due in (days, one-off)') . '<input class="form-control" type="text" name="inDays" maxlength="2" value="7"></label></div>'
+                . $lineInputs . '<button class="btn btn-primary btn-sm" type="submit">' . self::t('Add') . '</button></form>'
+                . ($waitingLines !== '' ? '<h4 class="pp-sub">' . self::t('Waiting for the next invoice') . '</h4><table class="pp-table"><thead><tr><th>' . self::t('Client') . '</th><th>' . self::t('Line') . '</th><th>' . self::t('Amount') . '</th><th></th></tr></thead><tbody>' . $waitingLines . '</tbody></table>' : '')
+                . '</div>';
+        }
         // invoices
         $rows = '';
         $client = pp::Clients($seller);
@@ -1175,7 +1289,8 @@ class module_controller extends ctrl_module
         $rows = '';
         foreach ($invoices as $inv) {
             $view = '<a class="btn btn-sm btn-default" href="./?module=payment_plans&amp;invoice=' . (int) $inv['in_id_pk'] . '&amp;tab=billing">' . self::t('View') . '</a>';
-            $line = '<td>' . self::h($inv['in_number_vc']) . '</td><td>' . self::h(ui_language::Date('j M Y', (int) $inv['in_from_in'])) . ' – ' . self::h(ui_language::Date('j M Y', (int) $inv['in_to_in'])) . '</td>'
+            $period = (string) $inv['in_period_vc'] === 'once' ? self::h($inv['in_package_vc']) : self::h(ui_language::Date('j M Y', (int) $inv['in_from_in'])) . ' – ' . self::h(ui_language::Date('j M Y', (int) $inv['in_to_in']));
+            $line = '<td>' . self::h($inv['in_number_vc']) . '</td><td>' . $period . '</td>'
                 . '<td>' . self::h(pp::Show((int) $inv['in_total_in'], (string) $inv['in_currency_vc'])) . '</td><td>' . self::h(ui_language::Date('j M Y', (int) $inv['in_due_in'])) . '</td><td>' . self::State($inv) . '</td>';
             if ((string) $inv['in_status_vc'] === 'open') {
                 $seller = pp::Seller((int) $inv['in_seller_fk']);
@@ -1193,6 +1308,13 @@ class module_controller extends ctrl_module
         if ($rows !== '') {
             $out .= '<div class="pp-card"><h3>' . self::t('Earlier invoices') . '</h3><table class="pp-table">' . $head . '<tbody>' . $rows . '</tbody></table></div>';
         }
+        $b = pp::BillTo($uid);
+        $out .= '<div class="pp-card"><h3>' . self::t('Your billing details') . '</h3><p class="pp-muted">' . self::t('On your invoices from the next one on (a company, its address, a VAT or tax ID). Leave them empty for none.') . '</p>'
+            . '<form method="post" action="./?module=payment_plans&amp;action=BillTo&amp;tab=billing">' . runtime_csfr::Token()
+            . '<div class="pp-row"><label>' . self::t('Company') . '<input class="form-control" type="text" name="inCompany" maxlength="120" value="' . self::h($b['bt_company_vc']) . '"></label>'
+            . '<label>' . self::t('VAT or tax ID') . '<input class="form-control" type="text" name="inVat" maxlength="40" value="' . self::h($b['bt_vatid_vc']) . '"></label></div>'
+            . '<label class="pp-block">' . self::t('Address') . '<textarea class="form-control" name="inBillAddress" rows="3" maxlength="400">' . self::h($b['bt_address_tx']) . '</textarea></label>'
+            . '<button class="btn btn-primary btn-sm" type="submit">' . self::t('Save') . '</button></form></div>';
         return $out;
     }
 
@@ -1214,6 +1336,18 @@ class module_controller extends ctrl_module
         $line = function ($a, $b, $strong = false) {
             return '<tr' . ($strong ? ' class="pp-total"' : '') . '><td>' . $a . '</td><td>' . $b . '</td></tr>';
         };
+        // the hosting line (its price: the invoice's net less its other lines), then the other lines
+        $others = pp::Lines((int) $inv['in_id_pk']);
+        $rest = (int) $inv['in_net_in'];
+        $more = '';
+        foreach ($others as $o) {
+            $rest -= (int) $o['li_net_in'];
+            $more .= $line(self::h($o['li_text_vc']), self::h(pp::Show((int) $o['li_net_in'], $cur)));
+        }
+        $body = ((string) $inv['in_period_vc'] === 'once' ? '' : $line(self::t('Hosting: %s, %s', array($inv['in_package_vc'], ui_language::translate($inv['in_period_vc'] === 'year' ? 'yearly' : 'monthly')))
+            . '<div class="pp-muted">' . self::h(ui_language::Date('j M Y', (int) $inv['in_from_in'])) . ' – ' . self::h(ui_language::Date('j M Y', (int) $inv['in_to_in'])) . '</div>',
+            self::h(pp::Show($others ? $rest : (int) $inv['in_net_in'], $cur)))) . $more
+            . ($others ? $line(self::t('Subtotal'), self::h(pp::Show((int) $inv['in_net_in'], $cur))) : '');
         $tax = (int) $inv['in_taxrate_in'] > 0 ? $line(self::h(($inv['in_taxlabel_vc'] !== '' ? $inv['in_taxlabel_vc'] : ui_language::translate('Tax')) . ' ' . rtrim(rtrim(sprintf('%.2f', (int) $inv['in_taxrate_in'] / 100), '0'), '.') . '%'),
             self::h(pp::Show((int) $inv['in_tax_in'], $cur))) : '';
         return '<div class="pp-head pp-noprint"><a class="btn btn-default btn-sm" href="' . $back . '">' . self::t('Back') . '</a><button class="btn btn-default btn-sm" type="button" onclick="window.print()">' . self::t('Print') . '</button></div>'
@@ -1222,9 +1356,7 @@ class module_controller extends ctrl_module
             . '<div class="pp-inv-mid"><div><b>' . self::t('To') . '</b><div class="pp-addr">' . nl2br(self::h($inv['in_buyer_tx'])) . '</div></div>'
             . '<div><b>' . self::t('Date') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_created_in'])) . '<br><b>' . self::t('Due') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_due_in']))
             . ((string) $inv['in_status_vc'] === 'paid' ? '<br><b>' . self::t('Paid') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_paid_in'])) . ' (' . self::h($inv['in_method_vc']) . ')' : '') . '</div></div>'
-            . '<table class="pp-table pp-lines"><tbody>'
-            . $line(self::t('Hosting: %s, %s', array($inv['in_package_vc'], ui_language::translate($inv['in_period_vc'] === 'year' ? 'yearly' : 'monthly'))) . '<div class="pp-muted">' . self::h(ui_language::Date('j M Y', (int) $inv['in_from_in'])) . ' – ' . self::h(ui_language::Date('j M Y', (int) $inv['in_to_in'])) . '</div>',
-                self::h(pp::Show((int) $inv['in_net_in'], $cur)))
+            . '<table class="pp-table pp-lines"><tbody>' . $body
             . $tax . $line(self::t('Total'), self::h(pp::Show((int) $inv['in_total_in'], $cur)), true) . '</tbody></table>'
             . self::HistoryHtml((int) $inv['in_id_pk'], (string) $inv['in_currency_vc'], (int) $inv['in_seller_fk'] === $me)
             . ((string) $inv['in_capture_vc'] !== '' ? '<p class="pp-muted">' . self::t('%s payment %s', array($inv['in_method_vc'] !== '' ? $inv['in_method_vc'] : pp_pay::Name((string) $inv['in_proc_vc']), $inv['in_capture_vc'])) . '</p>' : '') . '</div>';

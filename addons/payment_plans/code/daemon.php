@@ -61,7 +61,7 @@ class pp_daemon
                 continue;
             }
             // (live: a TEST invoice left from testing does not hold up the real ones)
-            $open = $zdbh->prepare("SELECT COUNT(*) FROM x_pp_invoices WHERE in_acc_fk = :u AND in_status_vc IN ('open', 'pending')" . ((string) $plan['ps_mode_vc'] === 'live' ? " AND in_test_in = 0" : ''));
+            $open = $zdbh->prepare("SELECT COUNT(*) FROM x_pp_invoices WHERE in_acc_fk = :u AND in_status_vc IN ('open', 'pending') AND in_period_vc <> 'once'" . ((string) $plan['ps_mode_vc'] === 'live' ? " AND in_test_in = 0" : ''));
             $open->execute(array(':u' => (int) $plan['pl_acc_fk']));
             if ((int) $open->fetchColumn() > 0) {
                 continue;

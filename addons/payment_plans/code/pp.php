@@ -111,6 +111,17 @@ class pp
             $zdbh->exec("UPDATE x_pp_sellers SET ps_before_in = 0");
         }
         self::AddColumn('x_pp_invoices', 'in_soon_in', 'TINYINT NOT NULL DEFAULT 0');
+        // (111) a client's own billing details (on its invoices), invoice lines beyond the hosting one, and
+        // lines waiting for a client's next invoice (a setup fee, a discount)
+        $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_billto (
+            bt_acc_fk INT NOT NULL PRIMARY KEY, bt_company_vc VARCHAR(120) NOT NULL DEFAULT '', bt_address_tx TEXT NULL,
+            bt_vatid_vc VARCHAR(40) NOT NULL DEFAULT '', bt_updated_in INT NOT NULL DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_lines (
+            li_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, li_inv_fk INT NOT NULL, li_text_vc VARCHAR(200) NOT NULL, li_net_in BIGINT NOT NULL,
+            KEY li_inv (li_inv_fk)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_extras (
+            ex_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, ex_seller_fk INT NOT NULL, ex_acc_fk INT NOT NULL, ex_text_vc VARCHAR(200) NOT NULL,
+            ex_net_in BIGINT NOT NULL, ex_created_in INT NOT NULL, ex_inv_fk INT NULL, KEY ex_acc (ex_acc_fk)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         // version 103: every step of every invoice, kept (made, payment started, paid, refused, voided, switched off...)
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_log (
             lg_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, lg_time_in INT NOT NULL, lg_seller_fk INT NOT NULL, lg_acc_fk INT NOT NULL, lg_inv_fk INT NOT NULL DEFAULT 0,
@@ -670,15 +681,14 @@ class pp
 
     /**
      * Make the invoice of a client's next period (from its plan: the period after what is paid),
-     * with the seller's current price and tax. Its number is the seller's next.
+     * with the seller's current price and tax, and the lines waiting for it (a setup fee, a discount).
+     * Its number is the seller's next.
      *
-     * @global db_driver $zdbh The panel's database connection.
      * @param int $uid
      * @return array|string The invoice, or why not.
      */
     static function MakeInvoice($uid)
     {
-        global $zdbh;
         self::Ensure();
         $plan = self::Plan($uid);
         if (!$plan || !(int) $plan['pl_active_in']) {
@@ -699,13 +709,63 @@ class pp
         if ($net <= 0) {
             return 'The package ' . $c['packagename'] . ' has no ' . ($period === 'year' ? 'yearly' : 'monthly') . ' price.';
         }
-        $s = self::Seller($seller);
         $from = (int) $plan['pl_paiduntil_in'];
         $to = self::PeriodEnd($from, $period, (int) ($plan['pl_anchor_in'] ?? 0));
-        $tax = (int) $s['ps_taxrate_in'] > 0 ? self::Tax($net, (int) $s['ps_taxrate_in']) : 0;
+        return self::Issue($seller, $c, $period, $from, $to, $c['packagename'], $net, self::Extras($seller, (int) $uid), max($from, time()));
+    }
+
+    /**
+     * A one-off invoice (not for a period of hosting): the seller's own lines, due in some days.
+     *
+     * @param int $seller
+     * @param int $uid
+     * @param array $lines array(text, net) each; net in the smallest unit, more than 0 in all.
+     * @param int $days Due in.
+     * @return array|string The invoice, or why not.
+     */
+    static function MakeOneOff($seller, $uid, array $lines, $days)
+    {
+        self::Ensure();
+        $clients = self::Clients($seller);
+        if (!isset($clients[(int) $uid]) || $clients[(int) $uid]['admin']) {
+            return 'Not a client of yours.';
+        }
+        $sum = 0;
+        foreach ($lines as $l) {
+            $sum += (int) $l[1];
+        }
+        if (!$lines || $sum <= 0) {
+            return 'An invoice needs at least one line, and a total above zero.';
+        }
+        $now = time();
+        $ex = array();
+        foreach ($lines as $l) {
+            $ex[] = array('ex_id_pk' => 0, 'ex_text_vc' => (string) $l[0], 'ex_net_in' => (int) $l[1]);
+        }
+        return self::Issue((int) $seller, $clients[(int) $uid], 'once', $now, $now, (string) $lines[0][0], 0, $ex, $now + max(0, min(90, (int) $days)) * 86400);
+    }
+
+    /**
+     * Write an invoice: the hosting line ($net, none for a one-off), its other lines, the seller's tax, the next
+     * number (in the same transaction, under the seller's lock). A total of nothing is paid at once.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @return array|string
+     */
+    static function Issue($seller, array $c, $period, $from, $to, $what, $net, array $extras, $due)
+    {
+        global $zdbh;
+        $uid = (int) $c['id'];
+        $s = self::Seller($seller);
+        $all = (int) $net;
+        foreach ($extras as $e) {
+            $all += (int) $e['ex_net_in'];
+        }
+        // (a discount larger than the price: nothing to pay, not less than nothing)
+        $all = max(0, $all);
+        $tax = (int) $s['ps_taxrate_in'] > 0 ? self::Tax($all, (int) $s['ps_taxrate_in']) : 0;
         $sellerText = trim((string) $s['ps_name_vc'] . "\n" . (string) $s['ps_address_tx'] . ((string) $s['ps_email_vc'] !== '' ? "\n" . $s['ps_email_vc'] : ''));
-        $buyerText = trim(($c['fullname'] !== '' ? $c['fullname'] . "\n" : '') . $c['username'] . ($c['email'] !== '' ? "\n" . $c['email'] : ''));
-        // the number: the seller's next, taken in the same transaction
+        $buyerText = self::BuyerText($c);
         $zdbh->beginTransaction();
         try {
             // (test mode: TEST- numbers of their own, so the real ones stay without gaps)
@@ -714,13 +774,15 @@ class pp
             $n->execute(array(':s' => $seller));
             $row = $n->fetch(PDO::FETCH_ASSOC);
             $n->closeCursor();
-            // (checked under the seller's lock: the daemon and "Invoice now" at the same moment make one invoice)
-            // (live: a TEST invoice left from testing does not hold up the real ones)
-            $q = $zdbh->prepare("SELECT COUNT(*) FROM x_pp_invoices WHERE in_acc_fk = :u AND in_status_vc IN ('open', 'pending')" . ($test ? '' : ' AND in_test_in = 0'));
-            $q->execute(array(':u' => (int) $uid));
-            if ((int) $q->fetchColumn() > 0) {
-                $zdbh->rollBack();
-                return 'An invoice is open already.';
+            // (checked under the seller's lock: the daemon and "Invoice now" at the same moment make one invoice;
+            // live, a TEST invoice left from testing does not hold up the real ones; a one-off invoice never does)
+            if ($period !== 'once') {
+                $q = $zdbh->prepare("SELECT COUNT(*) FROM x_pp_invoices WHERE in_acc_fk = :u AND in_status_vc IN ('open', 'pending') AND in_period_vc <> 'once'" . ($test ? '' : ' AND in_test_in = 0'));
+                $q->execute(array(':u' => $uid));
+                if ((int) $q->fetchColumn() > 0) {
+                    $zdbh->rollBack();
+                    return 'An invoice is open already.';
+                }
             }
             $next = $row ? (int) $row[$test ? 'ps_testnext_in' : 'ps_next_in'] : 1;
             $number = ($test ? 'TEST-' : ($row ? (string) $row['ps_prefix_vc'] : 'INV-')) . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
@@ -728,23 +790,113 @@ class pp
             $zdbh->prepare("INSERT INTO x_pp_invoices (in_seller_fk, in_acc_fk, in_number_vc, in_package_vc, in_period_vc, in_from_in, in_to_in, in_net_in,
                 in_taxlabel_vc, in_taxrate_in, in_tax_in, in_total_in, in_currency_vc, in_seller_tx, in_buyer_tx, in_status_vc, in_due_in, in_created_in, in_test_in)
                 VALUES (:s, :u, :no, :pk, :pe, :f, :t, :net, :tl, :tr, :tax, :tot, :cur, :st, :bt, 'open', :due, :c, :test)")
-                ->execute(array(':s' => $seller, ':u' => (int) $uid, ':no' => $number, ':pk' => $c['packagename'], ':pe' => $period, ':f' => $from, ':t' => $to,
-                    ':net' => $net, ':tl' => (string) $s['ps_taxlabel_vc'], ':tr' => (int) $s['ps_taxrate_in'], ':tax' => $tax, ':tot' => $net + $tax,
-                    ':cur' => (string) $s['ps_currency_vc'], ':st' => $sellerText, ':bt' => $buyerText, ':due' => max($from, time()), ':c' => time(), ':test' => $test ? 1 : 0));
+                ->execute(array(':s' => $seller, ':u' => $uid, ':no' => $number, ':pk' => mb_substr((string) $what, 0, 120), ':pe' => $period, ':f' => (int) $from, ':t' => (int) $to,
+                    ':net' => $all, ':tl' => (string) $s['ps_taxlabel_vc'], ':tr' => (int) $s['ps_taxrate_in'], ':tax' => $tax, ':tot' => $all + $tax,
+                    ':cur' => (string) $s['ps_currency_vc'], ':st' => $sellerText, ':bt' => $buyerText, ':due' => (int) $due, ':c' => time(), ':test' => $test ? 1 : 0));
             $id = (int) $zdbh->lastInsertId();
+            // its other lines (a hosting invoice's own line is its package and period)
+            $li = $zdbh->prepare("INSERT INTO x_pp_lines (li_inv_fk, li_text_vc, li_net_in) VALUES (:i, :t, :n)");
+            $used = $zdbh->prepare("UPDATE x_pp_extras SET ex_inv_fk = :i WHERE ex_id_pk = :e AND ex_inv_fk IS NULL");
+            foreach ($extras as $e) {
+                $li->execute(array(':i' => $id, ':t' => mb_substr((string) $e['ex_text_vc'], 0, 200), ':n' => (int) $e['ex_net_in']));
+                if ((int) $e['ex_id_pk'] > 0) {
+                    $used->execute(array(':i' => $id, ':e' => (int) $e['ex_id_pk']));
+                }
+            }
             $zdbh->commit();
         } catch (Exception $e) {
             $zdbh->rollBack();
             return 'The invoice could not be made.';
         }
         // an invoice due at once (a new client's first one): its email says it all, no reminder a minute later
-        if ((int) $from <= time()) {
+        if ((int) $due <= time() + 60) {
             $zdbh->prepare("UPDATE x_pp_invoices SET in_reminded_in = 1 WHERE in_id_pk = :i")->execute(array(':i' => $id));
         }
         $inv = self::Invoice($id);
         self::Log($inv, 'made', '', '', (int) $inv['in_total_in']);
+        if ((int) $inv['in_total_in'] === 0) {
+            // (nothing to pay: a discount the size of the price)
+            self::MarkPaid($id, 'Nothing to pay');
+            return self::Invoice($id);
+        }
         self::Tell($inv, 'new');
         return $inv;
+    }
+
+    /**
+     * The buyer as it goes on an invoice: the name, the company, the client's own billing address and tax ID,
+     * the user name and email.
+     *
+     * @param array $c A client (Clients()).
+     * @return string
+     */
+    static function BuyerText(array $c)
+    {
+        $b = self::BillTo((int) $c['id']);
+        $parts = array($c['fullname'], $b['bt_company_vc'], (string) $b['bt_address_tx'], (string) $b['bt_vatid_vc'] !== '' ? 'VAT/tax ID: ' . $b['bt_vatid_vc'] : '', $c['username'], $c['email']);
+        return trim(implode("\n", array_filter(array_map('trim', $parts), function ($x) { return $x !== ''; })));
+    }
+
+    /**
+     * A client's own billing details (empty when it gave none).
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @param int $uid
+     * @return array{bt_company_vc: string, bt_address_tx: string, bt_vatid_vc: string}
+     */
+    static function BillTo($uid)
+    {
+        global $zdbh;
+        self::Ensure();
+        $q = $zdbh->prepare("SELECT bt_company_vc, bt_address_tx, bt_vatid_vc FROM x_pp_billto WHERE bt_acc_fk = :u");
+        $q->execute(array(':u' => (int) $uid));
+        $r = $q->fetch(PDO::FETCH_ASSOC);
+        return $r ? array('bt_company_vc' => (string) $r['bt_company_vc'], 'bt_address_tx' => (string) $r['bt_address_tx'], 'bt_vatid_vc' => (string) $r['bt_vatid_vc'])
+            : array('bt_company_vc' => '', 'bt_address_tx' => '', 'bt_vatid_vc' => '');
+    }
+
+    /**
+     * Save a client's billing details (checked by the caller); they go on its invoices from the next one on.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @return void
+     */
+    static function SaveBillTo($uid, $company, $address, $vat)
+    {
+        global $zdbh;
+        self::Ensure();
+        $zdbh->prepare("REPLACE INTO x_pp_billto (bt_acc_fk, bt_company_vc, bt_address_tx, bt_vatid_vc, bt_updated_in) VALUES (:u, :c, :a, :v, :t)")
+            ->execute(array(':u' => (int) $uid, ':c' => (string) $company, ':a' => (string) $address, ':v' => (string) $vat, ':t' => time()));
+    }
+
+    /**
+     * Lines waiting for a client's next invoice from this seller (setup fees, discounts).
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @return array<int, array>
+     */
+    static function Extras($seller, $uid)
+    {
+        global $zdbh;
+        self::Ensure();
+        $q = $zdbh->prepare("SELECT * FROM x_pp_extras WHERE ex_seller_fk = :s AND ex_acc_fk = :u AND ex_inv_fk IS NULL ORDER BY ex_id_pk");
+        $q->execute(array(':s' => (int) $seller, ':u' => (int) $uid));
+        return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * An invoice's lines beyond its hosting line.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @return array<int, array>
+     */
+    static function Lines($inv)
+    {
+        global $zdbh;
+        self::Ensure();
+        $q = $zdbh->prepare("SELECT li_text_vc, li_net_in FROM x_pp_lines WHERE li_inv_fk = :i ORDER BY li_id_pk");
+        $q->execute(array(':i' => (int) $inv));
+        return $q->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -780,20 +932,29 @@ class pp
         if ($plan && (int) $plan['pl_seller_fk'] === (int) $inv['in_seller_fk']) {
             // paid up to the end of the invoice's period (never back); a TEST invoice's payment (no real
             // money) does not count as really paid: going live puts the plan back (GoLive)
-            $zdbh->prepare("UPDATE x_pp_plans SET pl_paiduntil_in = GREATEST(pl_paiduntil_in, :to)"
-                . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :to2)") . " WHERE pl_acc_fk = :u")
-                ->execute(array(':to' => (int) $inv['in_to_in'], ':u' => (int) $inv['in_acc_fk']) + ((int) $inv['in_test_in'] ? array() : array(':to2' => (int) $inv['in_to_in'])));
+            // (a one-off invoice pays for no period of hosting)
+            if ((string) $inv['in_period_vc'] !== 'once') {
+                $zdbh->prepare("UPDATE x_pp_plans SET pl_paiduntil_in = GREATEST(pl_paiduntil_in, :to)"
+                    . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :to2)") . " WHERE pl_acc_fk = :u")
+                    ->execute(array(':to' => (int) $inv['in_to_in'], ':u' => (int) $inv['in_acc_fk']) + ((int) $inv['in_test_in'] ? array() : array(':to2' => (int) $inv['in_to_in'])));
+            }
             if ((int) $plan['pl_suspended_in']) {
-                // switched off, now paid: the next period starts today (the client had no hosting meanwhile),
-                // unless the seller bills where it stopped (the months it was off are owed)
                 $s = self::Seller((int) $inv['in_seller_fk']);
-                if ((string) ($s['ps_resume_vc'] ?? 'owed') === 'today') {
-                    $now = time();
-                    $zdbh->prepare("UPDATE x_pp_plans SET pl_paiduntil_in = :n, pl_anchor_in = :a" . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :n2)")
-                        . " WHERE pl_acc_fk = :u AND pl_paiduntil_in < :n3")
-                        ->execute(array(':n' => $now, ':a' => (int) date('j', $now), ':u' => (int) $inv['in_acc_fk'], ':n3' => $now) + ((int) $inv['in_test_in'] ? array() : array(':n2' => $now)));
+                // (another of its invoices still unpaid past its grace days keeps it switched off)
+                $g = (int) ($s['ps_grace_in'] ?? 0);
+                $left = $zdbh->prepare("SELECT COUNT(*) FROM x_pp_invoices WHERE in_acc_fk = :u AND in_id_pk <> :i AND in_status_vc = 'open' AND in_due_in + :g <= :n" . ((int) $inv['in_test_in'] ? '' : ' AND in_test_in = 0'));
+                $left->execute(array(':u' => (int) $inv['in_acc_fk'], ':i' => (int) $inv['in_id_pk'], ':g' => $g * 86400, ':n' => time()));
+                if ((int) $left->fetchColumn() === 0) {
+                    // switched off, now paid: the next period starts today (the client had no hosting meanwhile),
+                    // unless the seller bills where it stopped (the months it was off are owed)
+                    if ((string) ($s['ps_resume_vc'] ?? 'owed') === 'today') {
+                        $now = time();
+                        $zdbh->prepare("UPDATE x_pp_plans SET pl_paiduntil_in = :n, pl_anchor_in = :a" . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :n2)")
+                            . " WHERE pl_acc_fk = :u AND pl_paiduntil_in < :n3")
+                            ->execute(array(':n' => $now, ':a' => (int) date('j', $now), ':u' => (int) $inv['in_acc_fk'], ':n3' => $now) + ((int) $inv['in_test_in'] ? array() : array(':n2' => $now)));
+                    }
+                    self::SwitchOn((int) $inv['in_acc_fk']);
                 }
-                self::SwitchOn((int) $inv['in_acc_fk']);
             }
         }
         self::Tell($inv, 'paid');

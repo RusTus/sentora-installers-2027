@@ -24,6 +24,10 @@
 .pp-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .pp-field small { display: block; color: var(--pp-muted); font-size: 12px; margin-top: 3px; line-height: 1.4; }
 .pp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.pp-row label, .pp-block { display: block; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.pp-row label .form-control, .pp-block .form-control { font-weight: normal; margin-top: 4px; }
+.pp-chargeline { display: grid; grid-template-columns: minmax(0, 3fr) minmax(90px, 1fr); gap: 8px; margin-bottom: 8px; }
+.pp-sub { margin: 16px 0 6px; font-size: 13px; font-weight: 700; }
 .pp-check { font-weight: normal; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
 .pp-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--pp-line); }
 .pp-foot2 { margin-top: 8px; }
