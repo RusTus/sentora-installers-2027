@@ -413,6 +413,29 @@ in_box 'sentora-elk-node kibana-from any' > /dev/null 2>&1
 [ "$(curl -sk -m 10 -o /dev/null -w '%{http_code}' "https://$IP/login")" = 200 ] && ok "kibana-from any: open again" || bad "kibana-from any did not open Kibana again"
 in_box 'sentora-elk-node kibana-from "1.2.3.4; rm -rf /"' > /dev/null 2>&1 && bad "kibana-from took a command" || ok "kibana-from takes addresses only"
 
+say "A dashboard someone made (sentora-elk-node dashboard)"
+printf '%s\n' '{"type":"index-pattern","id":"test-dv","attributes":{"title":"logs-sentora-*","timeFieldName":"@timestamp","name":"Test logs"},"references":[]}' \
+    '{"type":"dashboard","id":"test-dash","attributes":{"title":"A shared dashboard","panelsJSON":"[]","optionsJSON":"{}","kibanaSavedObjectMeta":{"searchSourceJSON":"{}"}},"references":[]}' \
+    '{"exportedCount":2,"missingRefCount":0,"missingReferences":[]}' > "$W/shared.ndjson"
+printf '%s\n' '{"type":"action","id":"test-conn","attributes":{"actionTypeId":".webhook","name":"out"},"references":[]}' \
+    '{"type":"dashboard","id":"test-dash2","attributes":{"title":"x","panelsJSON":"[]"},"references":[]}' > "$W/connector.ndjson"
+printf '%s\n' '{"type":"dashboard","id":"sentora-overview","attributes":{"title":"Mine now","panelsJSON":"[]"},"references":[]}' > "$W/takeover.ndjson"
+printf 'not a kibana export\n' > "$W/junk.ndjson"
+for f in shared connector takeover junk; do docker cp "$W/$f.ndjson" "$NAME:/root/$f.ndjson"; done
+KBA() { in_box "curl -sS --resolve sentora-elk-node:443:127.0.0.1 --cacert /etc/sentora-elk/ca.crt -u elastic:\$(cat /etc/sentora-elk/elastic.pw) -H 'elastic-api-version: 2023-10-31' $*"; }
+in_box 'sentora-elk-node dashboard install /root/shared.ndjson' > "$OUT/dashboard-install.txt" 2>&1 && grep -q "Added 'shared': 2 object" "$OUT/dashboard-install.txt" \
+    && ok "dashboard install: a Kibana export added" || bad "dashboard install: $(cat "$OUT/dashboard-install.txt")"
+KBA https://sentora-elk-node/api/saved_objects/dashboard/test-dash | grep -q '"title":"A shared dashboard"' && ok "it is in Kibana" || bad "the added dashboard is not in Kibana"
+in_box 'sentora-elk-node dashboard list' | grep -q "^shared .*2 object(s)  dashboards: A shared dashboard" && ok "dashboard list shows it" || bad "dashboard list: $(in_box 'sentora-elk-node dashboard list')"
+[ "$(in_box 'stat -c %a /etc/sentora-elk/dashboards')" = 700 ] && ok "what was added is kept for root only" || bad "the dashboards folder is open to others"
+in_box 'sentora-elk-node dashboard install /root/connector.ndjson' > "$OUT/dashboard-connector.txt" 2>&1; grep -q "Refused: it holds a 'action'" "$OUT/dashboard-connector.txt" \
+    && [ "$(KBA "-o /dev/null -w %{http_code} https://sentora-elk-node/api/saved_objects/dashboard/test-dash2")" = 404 ] && ok "a file with a connector is refused, nothing of it added" || bad "connector: $(cat "$OUT/dashboard-connector.txt")"
+in_box 'sentora-elk-node dashboard install /root/takeover.ndjson' > "$OUT/dashboard-takeover.txt" 2>&1; grep -q "Refused: it would replace Sentora's own" "$OUT/dashboard-takeover.txt" \
+    && ! KBA https://sentora-elk-node/api/saved_objects/dashboard/sentora-overview | grep -q '"title":"Mine now"' && ok "Sentora's own dashboards can not be replaced" || bad "takeover: $(cat "$OUT/dashboard-takeover.txt")"
+in_box 'sentora-elk-node dashboard install /root/junk.ndjson' 2>&1 | grep -q "is not JSON" && ok "a file that is not an export is refused" || bad "a junk file was not refused"
+in_box 'sentora-elk-node dashboard install http://example.com/a.ndjson' 2>&1 | grep -q "Only a file here or an https" && ok "plain http addresses are refused" || bad "an http address was not refused"
+in_box 'sentora-elk-node dashboard remove "../x"' > /dev/null 2>&1 && bad "dashboard remove took a path" || ok "dashboard remove takes names only"
+
 say "Settings and update"
 in_box 'sentora-elk-node retention 7' > /dev/null && es https://127.0.0.1:9200/_ilm/policy/sentora-logs | grep -q '"min_age":"7d"' && ok "retention 7: logs kept 7 days" || bad "retention did not change"
 in_box 'sentora-elk-node status' > "$OUT/status.txt" 2>&1; grep -q "Logs kept: *7 days" "$OUT/status.txt" && ok "status shows it" || bad "status: $(cat "$OUT/status.txt")"
@@ -428,6 +451,12 @@ N3=$(es "'https://127.0.0.1:9200/logs-sentora-*/_count' -d '{\"query\":{\"term\"
 SENT2=$(python3 -I "$REPO/tests/elk/send.py" "$IP" "$W/node-ca.crt" "$W/panel.crt" "$W/panel.key" "$REPO/tests/elk/lines.tsv" panel1.example.test)
 for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_refresh > /dev/null 2>&1; N4=$(es "'https://127.0.0.1:9200/logs-sentora-*/_count' -d '{\"query\":{\"term\":{\"sentora.panel\":\"panel1.example.test\"}}}'" | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${N4:-0}" -ge $((N + SENT2)) ] && break; sleep 3; done
 [ "${N4:-0}" = $((N + SENT2)) ] && ok "lines arrive after the update" || bad "after the update $N4, expected $((N + SENT2))"
+KBA https://sentora-elk-node/api/saved_objects/dashboard/test-dash | grep -q '"title":"A shared dashboard"' && ok "the update kept the added dashboard" || bad "the update lost the added dashboard"
+in_box 'sentora-elk-node dashboard remove shared' > "$OUT/dashboard-remove.txt" 2>&1 && grep -q "Removed 'shared': 2 object" "$OUT/dashboard-remove.txt" \
+    && [ "$(KBA "-o /dev/null -w %{http_code} https://sentora-elk-node/api/saved_objects/dashboard/test-dash")" = 404 ] \
+    && [ "$(KBA "-o /dev/null -w %{http_code} https://sentora-elk-node/api/saved_objects/index-pattern/test-dv")" = 404 ] \
+    && KBA https://sentora-elk-node/api/saved_objects/dashboard/sentora-overview | grep -q '"id":"sentora-overview"' \
+    && ok "dashboard remove: exactly what it added is gone, Sentora's stay" || bad "dashboard remove: $(cat "$OUT/dashboard-remove.txt")"
 
 echo; echo "ELK NODE TEST: $FAILS FAIL"
 [ "$FAILS" -eq 0 ]

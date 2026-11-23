@@ -674,6 +674,8 @@ get sources/monitors.py /usr/local/lib/sentora-elk/monitors.py.new && python3 -I
 install -m 600 -o root -g root /usr/local/lib/sentora-elk/monitors.py.new /usr/local/lib/sentora-elk/monitors.py; rm -f /usr/local/lib/sentora-elk/monitors.py.new
 get sources/winsetup.py /usr/local/lib/sentora-elk/winsetup.py.new && python3 -I -m py_compile /usr/local/lib/sentora-elk/winsetup.py.new 2> /dev/null || die "Could not get the domain controllers' setup maker."
 install -m 600 -o root -g root /usr/local/lib/sentora-elk/winsetup.py.new /usr/local/lib/sentora-elk/winsetup.py; rm -f /usr/local/lib/sentora-elk/winsetup.py.new
+get sources/dashboards.py /usr/local/lib/sentora-elk/dashboards.py.new && python3 -I -m py_compile /usr/local/lib/sentora-elk/dashboards.py.new 2> /dev/null || die "Could not get the dashboard installer."
+install -m 600 -o root -g root /usr/local/lib/sentora-elk/dashboards.py.new /usr/local/lib/sentora-elk/dashboards.py; rm -f /usr/local/lib/sentora-elk/dashboards.py.new
 run systemctl daemon-reload
 # Logstash: Sentora's pipeline plus one per source switched on (and the newest of their settings)
 bash /usr/local/lib/sentora-elk/sources.sh refresh || echo "WARNING: the other sources were not set up again (sentora-elk-node sources)"
@@ -740,6 +742,8 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #                                      when it is an inside one), panel, dns (where DNS points), or one address
 #   sentora-elk-node alerts            check for alerts now and show them (the panel fetches them every 5 minutes)
 #   sentora-elk-node fortigate ADDRESS | veeam ADDRESS | veeam-api ADDRESS USER | m365 TENANT APP | windows DC-ADDRESS | vsphere VCENTER USER | sources   other sources (also: SOURCE off)
+#   sentora-elk-node dashboard install FILE.ndjson|https://.. [NAME] | list | remove NAME   a Kibana export someone made
+#                                      (dashboards and what they show only; never alerts or connectors)
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
@@ -836,6 +840,9 @@ except Exception: print("Stored:        nothing yet")'
         # the panel's list of websites (kept by Logstash) -> Heartbeat's checks, its DNS and hosts (see monitors.py)
         python3 -I /usr/local/lib/sentora-elk/monitors.py ;;
     fortigate|veeam|veeam-api|m365|windows|vsphere|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
+    dashboard)
+        # a Kibana export (.ndjson) checked, imported through Kibana's API and remembered (see dashboards.py)
+        python3 -I /usr/local/lib/sentora-elk/dashboards.py "${@:2}" ;;
     alerts)
         runuser -u sentora-elk-alerts -- /usr/bin/python3 -I /usr/local/lib/sentora-elk-alerts/sentora-elk-alerts.py check ;;
     update)
@@ -849,7 +856,7 @@ except Exception: print("Stored:        nothing yet")'
         fi
         rm -f "$t"
         exec bash /usr/local/lib/sentora-elk/installer --update ;;
-    *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-elk-node
