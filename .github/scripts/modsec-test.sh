@@ -83,16 +83,22 @@ daemon
 ph 'ph::Set("flood_on", "1"); ph::Set("flood_limit", "30"); ph::Set("flood_minutes", "10");'
 daemon
 "$F2B" status sentora-flood > /dev/null 2>&1 && ok "flood protection on: fail2ban has the jail" || bad "flood protection on: no sentora-flood jail ($("$F2B" status 2>&1 | tail -1))"
-ip addr add 203.0.113.50/32 dev lo 2> /dev/null
-for i in $(seq 1 45); do curl -sk -o /dev/null --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/?flood=$i"; done
-for i in $(seq 1 5); do curl -sk -o /dev/null --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/style-$i.css"; done
+# (from outside: a network of its own on this box, joined by a cable pair; fail2ban never bans the box's own addresses)
+ip netns add sflood 2> /dev/null; ip link add vflood0 type veth peer name vflood1 2> /dev/null
+ip link set vflood1 netns sflood; ip addr add 10.199.0.1/30 dev vflood0; ip link set vflood0 up
+ip netns exec sflood ip addr add 10.199.0.2/30 dev vflood1; ip netns exec sflood ip link set vflood1 up; ip netns exec sflood ip link set lo up
+FC() { ip netns exec sflood curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$H:80:10.199.0.1" "http://$H$1" 2> /dev/null || true; }
+c=$(FC /); echo "        from 10.199.0.2 the site answers $c before the flood"
+for i in $(seq 1 45); do FC "/?flood=$i" > /dev/null; done
+for i in $(seq 1 5); do FC "/style-$i.css" > /dev/null; done
 banned=0
-for _ in $(seq 1 20); do "$F2B" get sentora-flood banip 2> /dev/null | grep -q '203\.0\.113\.50' && { banned=1; break; }; sleep 2; done
-[ $banned = 1 ] && ok "45 requests in a minute from 203.0.113.50: banned by flood protection" || { bad "the flood was not banned"; "$F2B" status sentora-flood 2>&1 | sed 's/^/        /'; tail -3 /var/log/fail2ban.log 2> /dev/null | sed 's/^/        /'; }
-c=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/" || true)
-[ "$c" = 000 ] && ok "the banned address gets no answer at all (the firewall drops it)" || echo "        (the banned address still got $c: this container's firewall may not filter its own loopback)"
+for _ in $(seq 1 20); do "$F2B" get sentora-flood banip 2> /dev/null | grep -q '10\.199\.0\.2' && { banned=1; break; }; sleep 2; done
+[ $banned = 1 ] && ok "45 requests in a minute from 10.199.0.2: banned by flood protection" || { bad "the flood was not banned"; "$F2B" status sentora-flood 2>&1 | sed 's/^/        /'; tail -3 /var/log/fail2ban.log 2> /dev/null | sed 's/^/        /'; }
+c=$(FC /); [ "$c" = 000 ] && ok "the banned address gets no answer at all (the firewall drops it)" || bad "the banned address still got $c"
 c=$(code "$H" '/'); [ "$c" != 000 ] && ok "everyone else still gets the site ($c)" || bad "the site does not answer others"
-"$F2B" unban 203.0.113.50 > /dev/null 2>&1; ip addr del 203.0.113.50/32 dev lo 2> /dev/null
+"$F2B" unban 10.199.0.2 > /dev/null 2>&1
+c=$(FC /); [ "$c" != 000 ] && ok "unbanned: it gets the site again ($c)" || bad "unbanned, but still no answer"
+ip link del vflood0 2> /dev/null; ip netns del sflood 2> /dev/null
 ph 'ph::Set("flood_on", "0");'
 daemon
 "$F2B" status sentora-flood > /dev/null 2>&1 && bad "flood protection off: the jail is still there" || ok "flood protection off: the jail is gone"
