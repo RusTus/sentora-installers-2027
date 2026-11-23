@@ -12,7 +12,7 @@ FAIL=0
 ok()  { echo "  ok   $*"; }
 bad() { echo "  FAIL $*"; FAIL=1; }
 ph()  { php -r 'chdir("/etc/sentora/panel"); require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php";
-    require "modules/php_hardening/code/ph.php"; require "modules/php_hardening/code/daemon.php"; require "modules/php_hardening/code/modsec.php"; '"$1"; }
+    require "modules/php_hardening/code/ph.php"; require "modules/php_hardening/code/daemon.php"; require "modules/php_hardening/code/modsec.php"; require "modules/php_hardening/code/bans.php"; '"$1"; }
 daemon() { php "$PANEL/bin/daemon.php" > /root/modsec-daemon.txt 2>&1; grep -E 'Web Hardening' /root/modsec-daemon.txt | sed 's/^/        daemon: /'; }
 # the final answer for a page of a host (followed through the site's http-to-https redirect, if it has one)
 code() { curl -sk -L --max-time 20 --resolve "$1:80:127.0.0.1" --resolve "$1:443:127.0.0.1" -o /dev/null -w '%{http_code}' "http://$1$2"; }
@@ -63,5 +63,44 @@ daemon
 [ ! -f "$(sp modsec_conf_dir)/sentora-web-hardening.conf" ] && ok "its settings file is gone" || bad "its settings file is still there"
 if $(sp apache_modules_cmd) 2> /dev/null | grep -q security2_module; then bad "Apache still has ModSecurity loaded"; else ok "Apache runs without ModSecurity"; fi
 systemctl is-active --quiet "$(sp apache_sn)" && ok "Apache runs" || bad "Apache does not run"
+
+echo "== Bans (fail2ban, the real one)"
+F2B=$(command -v fail2ban-client || echo /usr/bin/fail2ban-client)
+if ! "$F2B" ping > /dev/null 2>&1; then systemctl start fail2ban > /dev/null 2>&1; sleep 3; fi
+daemon
+ST=$(ph 'echo json_encode(ph_bans::State());'); echo "        state: ${ST:0:400}"
+case "$ST" in *'"running":true'*) ok "the add-on sees fail2ban running" ;; *) bad "the add-on does not see fail2ban running" ;; esac
+case "$ST" in *'"sentora-manual"'*) ok "its jail for bans by hand is there" ;; *) bad "no jail for bans by hand" ;; esac
+case "$ST" in *'"reqtimeout":true'*) ok "Apache's request timeouts (mod_reqtimeout) are loaded" ;; *) bad "Apache has no mod_reqtimeout loaded" ;; esac
+ph 'ph_bans::Ask("ban", "203.0.113.77", 1, "install test", "zadmin");'
+daemon
+"$F2B" get sentora-manual banip 2> /dev/null | grep -q '203\.0\.113\.77' && ok "banned by hand: fail2ban has 203.0.113.77" || bad "banned by hand: fail2ban does not have it"
+ph 'echo json_encode(ph_bans::State());' | grep -q '"ip":"203.0.113.77"' && ok "the page's list shows it" || bad "the page's list does not show it"
+ph 'ph_bans::Ask("unban", "203.0.113.77");'
+daemon
+"$F2B" get sentora-manual banip 2> /dev/null | grep -q '203\.0\.113\.77' && bad "unban: still banned" || ok "unbanned"
+# flood protection: an address of its own on this box sends more than the limit to the hosted site
+ph 'ph::Set("flood_on", "1"); ph::Set("flood_limit", "30"); ph::Set("flood_minutes", "10");'
+daemon
+"$F2B" status sentora-flood > /dev/null 2>&1 && ok "flood protection on: fail2ban has the jail" || bad "flood protection on: no sentora-flood jail ($("$F2B" status 2>&1 | tail -1))"
+ip addr add 203.0.113.50/32 dev lo 2> /dev/null
+for i in $(seq 1 45); do curl -sk -o /dev/null --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/?flood=$i"; done
+for i in $(seq 1 5); do curl -sk -o /dev/null --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/style-$i.css"; done
+banned=0
+for _ in $(seq 1 20); do "$F2B" get sentora-flood banip 2> /dev/null | grep -q '203\.0\.113\.50' && { banned=1; break; }; sleep 2; done
+[ $banned = 1 ] && ok "45 requests in a minute from 203.0.113.50: banned by flood protection" || { bad "the flood was not banned"; "$F2B" status sentora-flood 2>&1 | sed 's/^/        /'; tail -3 /var/log/fail2ban.log 2> /dev/null | sed 's/^/        /'; }
+c=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --interface 203.0.113.50 --resolve "$H:80:127.0.0.1" "http://$H/" || true)
+[ "$c" = 000 ] && ok "the banned address gets no answer at all (the firewall drops it)" || echo "        (the banned address still got $c: this container's firewall may not filter its own loopback)"
+c=$(code "$H" '/'); [ "$c" != 000 ] && ok "everyone else still gets the site ($c)" || bad "the site does not answer others"
+"$F2B" unban 203.0.113.50 > /dev/null 2>&1; ip addr del 203.0.113.50/32 dev lo 2> /dev/null
+ph 'ph::Set("flood_on", "0");'
+daemon
+"$F2B" status sentora-flood > /dev/null 2>&1 && bad "flood protection off: the jail is still there" || ok "flood protection off: the jail is gone"
+if command -v ausearch > /dev/null 2>&1; then
+    D=$(ausearch -m avc -ts boot 2> /dev/null | grep -ciE 'fail2ban' || true)
+    [ "${D:-0}" -eq 0 ] && ok "no SELinux refusals for fail2ban" || { bad "$D SELinux refusal(s) for fail2ban:"; ausearch -m avc -ts boot 2> /dev/null | grep -i fail2ban | tail -5; }
+fi
+php modules/php_hardening/deploy/remove.run > /dev/null 2>&1
+[ ! -f /etc/fail2ban/jail.d/sentora-web-hardening.local ] && "$F2B" ping > /dev/null 2>&1 && ok "removing the add-on takes its jails away; fail2ban keeps running" || bad "after removing the add-on: its jail file is still there, or fail2ban stopped"
 
 [ $FAIL -eq 0 ] && echo "MODSEC: PASSED" || echo "MODSEC: FAILED"

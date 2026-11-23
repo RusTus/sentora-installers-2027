@@ -13,6 +13,7 @@
  */
 require_once dirname(__FILE__) . '/ph.php';
 require_once dirname(__FILE__) . '/modsec.php';
+require_once dirname(__FILE__) . '/bans.php';
 
 class module_controller extends ctrl_module
 {
@@ -278,7 +279,379 @@ class module_controller extends ctrl_module
         if (!self::Admin()) {
             return $out . '<div class="ph-card"><p>' . self::t('Only administrators can use Web Hardening.') . '</p></div>';
         }
-        return $out . self::Intro() . self::ModSecCard() . self::VersionsCard() . self::RulesCard() . self::ExemptCard() . self::CaughtCard();
+        $tab = isset($_GET['tab']) && is_string($_GET['tab']) ? $_GET['tab'] : '';
+        $tabs = array('' => 'Web firewall and PHP', 'bans' => 'Bans', 'flood' => 'Flood protection');
+        $tab = isset($tabs[$tab]) ? $tab : '';
+        $bar = '<nav class="ph-tabs ph-pagetabs" aria-label="' . self::t('Web Hardening') . '">';
+        foreach ($tabs as $k => $label) {
+            $bar .= '<a href="./?module=' . self::Folder() . ($k !== '' ? '&amp;tab=' . $k : '') . '"' . ($k === $tab ? ' class="on" aria-current="page"' : '') . '>' . self::t($label) . '</a>';
+        }
+        $bar .= '</nav>';
+        if ($tab === 'bans') {
+            return $out . $bar . self::BansPage();
+        }
+        if ($tab === 'flood') {
+            return $out . $bar . self::FloodPage();
+        }
+        return $out . $bar . self::Intro() . self::ModSecCard() . self::VersionsCard() . self::RulesCard() . self::ExemptCard() . self::CaughtCard();
+    }
+
+    /**
+     * The module's folder (it was php_hardening before its name changed; links follow where it is).
+     *
+     * @return string
+     */
+    static function Folder()
+    {
+        return rawurlencode(basename(dirname(dirname(__FILE__))));
+    }
+
+    // ----- bans and flood protection -----
+
+    /**
+     * The daemon runs now (zsudo daemon-run), at most once every 10 seconds.
+     *
+     * @return bool
+     */
+    static function RunNow()
+    {
+        if ((int) ph::Get('bans_run_at') > time() - 10) {
+            return true;
+        }
+        $zsudo = (string) ctrl_options::GetSystemOption('zsudo');
+        $rc = 1;
+        if ($zsudo !== '' && is_executable($zsudo) && function_exists('exec')) {
+            $out = array();
+            exec(escapeshellcmd($zsudo) . ' daemon-run 2>&1', $out, $rc);
+        }
+        if ((int) $rc === 0) {
+            ph::Set('bans_run_at', (string) time());
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Said after a change: done now, or on the daemon's next run.
+     *
+     * @param string $what English.
+     * @param array $args
+     * @return void
+     */
+    static function Done($what, array $args = array())
+    {
+        self::Say('ok', $what . (self::RunNow() ? ' The server does it now; this page shows it within a few seconds.' : ' The server does it on its next run (within 5 minutes).'), $args);
+    }
+
+    /**
+     * The address of the browser in use now ('' when it is not known).
+     *
+     * @return string
+     */
+    static function MyIp()
+    {
+        return ph_bans::Ip(isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '');
+    }
+
+    /**
+     * Why an address may not be banned ('' when it may).
+     *
+     * @param string $ip
+     * @return string English.
+     */
+    static function NotBannable($ip)
+    {
+        if ($ip === self::MyIp()) {
+            return 'That is your own address now: banning it would shut you out of the panel.';
+        }
+        foreach (ph_bans::OwnIgnored() as $n) {
+            if (ph_bans::InNet($ip, $n)) {
+                return 'That is this server\'s own address.';
+            }
+        }
+        foreach (ph_bans::Never() as $n) {
+            if (ph_bans::InNet($ip, $n)) {
+                return 'That address is on the never-ban list (%s).';
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Ban an address by hand.
+     *
+     * @return void
+     */
+    static function doBan()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        $ip = ph_bans::Ip(self::Post('inBanIp'));
+        if ($ip === '') {
+            self::Say('error', 'Type one address (like 203.0.113.7 or 2001:db8::7).');
+            return;
+        }
+        $why = self::NotBannable($ip);
+        if ($why !== '') {
+            self::Say('error', $why, array($ip));
+            return;
+        }
+        $hours = (int) self::Post('inBanHours');
+        if (!in_array($hours, array(0, 1, 24, 168, 720), true)) {
+            $hours = 24;
+        }
+        $me = ctrl_users::GetUserDetail();
+        if (!ph_bans::Ask('ban', $ip, $hours, self::Post('inBanWhy'), (string) $me['username'])) {
+            self::Say('error', 'Too much is waiting for the server already; try again in a minute.');
+            return;
+        }
+        self::Done('%s will be banned.', array($ip));
+    }
+
+    /**
+     * Unban an address (from every jail).
+     *
+     * @return void
+     */
+    static function doUnban()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        $ip = ph_bans::Ip(self::Post('inUnban'));
+        if ($ip === '') {
+            self::Say('error', 'That is not an address.');
+            return;
+        }
+        $me = ctrl_users::GetUserDetail();
+        if (!ph_bans::Ask('unban', $ip, 0, '', (string) $me['username'])) {
+            self::Say('error', 'Too much is waiting for the server already; try again in a minute.');
+            return;
+        }
+        self::Done('%s will be unbanned.', array($ip));
+    }
+
+    /**
+     * Save the never-ban list.
+     *
+     * @return void
+     */
+    static function doNever()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        $good = array();
+        $bad = array();
+        foreach (preg_split('/[\s,]+/', self::Post('inNever')) as $w) {
+            if ($w === '') {
+                continue;
+            }
+            $n = ph_bans::Net($w);
+            if ($n === '') {
+                $bad[] = ph_bans::Line($w, 50);
+            } elseif (!in_array($n, $good, true)) {
+                $good[] = $n;
+            }
+        }
+        if ($bad) {
+            self::Say('error', 'Not saved: these are not addresses or networks: %s', array(implode(', ', array_slice($bad, 0, 5))));
+            return;
+        }
+        if (count($good) > 200) {
+            self::Say('error', 'At most 200 addresses or networks.');
+            return;
+        }
+        ph::Set('ban_never', implode("\n", $good));
+        self::Done('Saved: %s address(es) or network(s) are never banned.', array(count($good)));
+    }
+
+    /**
+     * Save flood protection.
+     *
+     * @return void
+     */
+    static function doFlood()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        $on = self::Post('inFloodOn') === '1';
+        $limit = (int) self::Post('inFloodLimit');
+        $minutes = (int) self::Post('inFloodMinutes');
+        if ($limit < 30 || $limit > 100000) {
+            self::Say('error', 'The limit: between 30 and 100000 requests a minute.');
+            return;
+        }
+        if (!in_array($minutes, array(10, 60, 360, 1440, 10080), true)) {
+            $minutes = 60;
+        }
+        ph::Set('flood_on', $on ? '1' : '0');
+        ph::Set('flood_limit', (string) $limit);
+        ph::Set('flood_minutes', (string) $minutes);
+        self::Done($on ? 'Flood protection is on: more than %s requests a minute from one address is a ban.' : 'Flood protection is off.', array($limit));
+    }
+
+    /**
+     * Look again now (who is banned).
+     *
+     * @return void
+     */
+    static function doBansLook()
+    {
+        runtime_csfr::Protect();
+        if (!self::Admin()) {
+            return;
+        }
+        if (self::RunNow()) {
+            self::Say('ok', 'The server looks now; this page shows it within a few seconds.');
+        } else {
+            self::Say('error', 'The server could not be asked to look now (its root actions are not set up: run sentora-update on the server). It still looks every 5 minutes.');
+        }
+    }
+
+    /**
+     * A time as "2026-11-23 10:40", or a dash.
+     *
+     * @param int $t
+     * @return string
+     */
+    static function When($t)
+    {
+        return (int) $t > 0 ? self::h(date('Y-m-d H:i', (int) $t)) : '&ndash;';
+    }
+
+    /**
+     * How long ago, in words.
+     *
+     * @param int $t
+     * @return string
+     */
+    static function Ago($t)
+    {
+        $d = time() - (int) $t;
+        if ((int) $t <= 0) {
+            return self::t('never');
+        }
+        return $d < 90 ? self::t('just now') : ($d < 5400 ? self::t('%s minutes ago', array((int) round($d / 60))) : self::t('%s hours ago', array((int) round($d / 3600))));
+    }
+
+    /**
+     * The state line: fail2ban running, when it was last looked at, Look now.
+     *
+     * @param array $st
+     * @return string
+     */
+    static function BansStatus(array $st)
+    {
+        $wait = ph_bans::Asked() ? ' data-ph-wait="1"' : '';
+        $pill = $st['at'] === 0 ? '<span class="ph-pill is-wait">' . self::t('not looked yet') . '</span>'
+            : ($st['running'] ? '<span class="ph-pill is-ok">' . self::t('fail2ban running') . '</span>' : '<span class="ph-pill is-bad">' . self::t('fail2ban not running') . '</span>');
+        return '<div class="ph-card ph-live-head"' . $wait . '><div>' . $pill . ' <span class="ph-muted">' . self::t('Looked %s', array(self::Ago($st['at'])))
+            . ($st['version'] !== '' ? ' &middot; fail2ban ' . self::h($st['version']) : '') . '</span>'
+            . ($st['problem'] !== '' ? '<div class="ph-note">' . self::h(ui_language::translate($st['problem'])) . '</div>' : '') . '</div>'
+            . '<form method="post" class="ph-inline" action="./?module=' . self::Folder() . '&amp;tab=' . (isset($_GET['tab']) && $_GET['tab'] === 'flood' ? 'flood' : 'bans') . '&amp;action=BansLook">' . runtime_csfr::Token()
+            . '<button class="btn btn-default btn-sm" type="submit">' . self::t('Look now') . '</button></form></div>';
+    }
+
+    /**
+     * The Bans tab.
+     *
+     * @return string
+     */
+    static function BansPage()
+    {
+        $st = ph_bans::State();
+        $names = ph_bans::Names();
+        $manual = ph_bans::Manual();
+        $rows = array();
+        $byIp = array();
+        foreach ($st['jails'] as $jail => $list) {
+            foreach ($list as $b) {
+                $rows[] = array('jail' => (string) $jail) + $b;
+                $byIp[$b['ip']] = true;
+            }
+        }
+        usort($rows, function ($a, $b) { return $b['since'] <=> $a['since']; });
+        $flood = count(isset($st['jails'][ph_bans::FLOOD]) ? $st['jails'][ph_bans::FLOOD] : array());
+        $tiles = '<div class="ph-tiles">'
+            . '<div class="ph-tile' . ($rows ? ' is-bad' : '') . '"><b>' . count($byIp) . '</b><span>' . self::t('addresses banned now') . '</span></div>'
+            . '<div class="ph-tile"><b>' . count($st['jails']) . '</b><span>' . self::t('jails watching') . '</span></div>'
+            . '<div class="ph-tile' . ($flood ? ' is-watch' : '') . '"><b>' . $flood . '</b><span>' . self::t('for too many requests') . '</span></div>'
+            . '<div class="ph-tile"><b>' . count(ph_bans::Never()) . '</b><span>' . self::t('never banned') . '</span></div></div>';
+        $asked = '';
+        foreach (ph_bans::Asked() as $a) {
+            $asked .= '<li><span class="ph-pill is-wait">' . self::t('waiting for the server') . '</span> ' . self::t($a['do'] === 'unban' ? 'Unban %s' : 'Ban %s', array($a['ip'])) . '</li>';
+        }
+        $table = '';
+        foreach ($rows as $r) {
+            $m = $r['jail'] === ph_bans::MANUAL && isset($manual[$r['ip']]) ? $manual[$r['ip']] : null;
+            $until = $m !== null ? (int) $m['until'] : (int) $r['until'];
+            $table .= '<tr><td class="ph-nowrap" data-label="' . self::t('Address') . '"><b>' . self::h($r['ip']) . '</b></td><td data-label="' . self::t('Why') . '"><div>' . self::t(isset($names[$r['jail']]) ? $names[$r['jail']] : $r['jail'])
+                . ($m !== null && $m['why'] !== '' ? '<div class="ph-muted">' . self::h($m['why']) . ($m['by'] !== '' ? ' &middot; ' . self::t('by %s', array($m['by'])) : '') . '</div>' : '') . '</div></td>'
+                . '<td class="ph-nowrap" data-label="' . self::t('Since') . '">' . self::When($r['since']) . '</td><td class="ph-nowrap" data-label="' . self::t('Until') . '">' . ($until > 0 ? self::When($until) : self::t('until unbanned')) . '</td>'
+                . '<td class="ph-unban"><form method="post" class="ph-inline" action="./?module=' . self::Folder() . '&amp;tab=bans&amp;action=Unban">' . runtime_csfr::Token()
+                . '<input type="hidden" name="inUnban" value="' . self::h($r['ip']) . '"><button class="btn btn-default btn-xs" type="submit">' . self::t('Unban') . '</button></form></td></tr>';
+        }
+        $list = '<div class="ph-card"><h3>' . self::t('Banned now') . '</h3>'
+            . ($asked !== '' ? '<ul class="ph-asked">' . $asked . '</ul>' : '')
+            . ($table !== '' ? '<div class="ph-scroll ph-bans-box"><table class="ph-table ph-bans"><thead><tr><th>' . self::t('Address') . '</th><th>' . self::t('Why') . '</th><th>' . self::t('Since') . '</th><th>' . self::t('Until') . '</th><th></th></tr></thead><tbody>' . $table . '</tbody></table></div>'
+                : '<p class="ph-muted">' . self::t($st['at'] ? 'Nobody is banned right now.' : 'The server has not looked yet: Look now, or wait for its next run.') . '</p>')
+            . '<p class="ph-muted">' . self::t('Addresses are banned by fail2ban when they keep failing to log in (SSH, mail, FTP, webmail, the panel, phpMyAdmin), send too many requests (Flood protection), or are banned here by hand. Unban takes an address out of every jail.') . '</p></div>';
+        $mine = self::MyIp();
+        $ban = '<div class="ph-card"><h3>' . self::t('Ban an address') . '</h3>'
+            . '<form method="post" class="ph-banform" action="./?module=' . self::Folder() . '&amp;tab=bans&amp;action=Ban">' . runtime_csfr::Token()
+            . '<input class="form-control" type="text" name="inBanIp" maxlength="45" placeholder="' . self::t('Address (203.0.113.7)') . '" aria-label="' . self::t('Address') . '" required>'
+            . '<select class="form-control" name="inBanHours" aria-label="' . self::t('For how long') . '"><option value="1">' . self::t('for an hour') . '</option><option value="24" selected>' . self::t('for a day') . '</option>'
+            . '<option value="168">' . self::t('for a week') . '</option><option value="720">' . self::t('for 30 days') . '</option><option value="0">' . self::t('until unbanned') . '</option></select>'
+            . '<input class="form-control" type="text" name="inBanWhy" maxlength="200" placeholder="' . self::t('Why (optional)') . '" aria-label="' . self::t('Why') . '">'
+            . '<button class="btn btn-danger btn-sm" type="submit">' . self::t('Ban') . '</button></form>'
+            . '<p class="ph-muted">' . self::t('Banned from every port of this server: websites, mail, FTP and SSH.') . '</p></div>';
+        $never = '<div class="ph-card"><h3>' . self::t('Never ban') . '</h3>'
+            . '<form method="post" action="./?module=' . self::Folder() . '&amp;tab=bans&amp;action=Never">' . runtime_csfr::Token()
+            . '<textarea class="form-control ph-never" name="inNever" rows="4" aria-label="' . self::t('Never ban') . '" placeholder="203.0.113.7&#10;198.51.100.0/24">' . self::h(implode("\n", ph_bans::Never())) . '</textarea>'
+            . '<p class="ph-muted">' . self::t('One address or network per line: your office, your monitoring service. No jail bans them, flood protection included. This server\'s own addresses are never banned anyway.')
+            . ($mine !== '' ? ' ' . self::t('Your address now: %s', array($mine)) : '') . '</p>'
+            . '<button class="btn btn-primary btn-sm" type="submit">' . self::t('Save') . '</button></form></div>';
+        return self::BansStatus($st) . $tiles . $list . '<div class="ph-two">' . $ban . $never . '</div>';
+    }
+
+    /**
+     * The Flood protection tab.
+     *
+     * @return string
+     */
+    static function FloodPage()
+    {
+        $st = ph_bans::State();
+        $f = ph_bans::Flood();
+        $opt = function ($v, $label, $cur) { return '<option value="' . (int) $v . '"' . ((int) $v === (int) $cur ? ' selected' : '') . '>' . self::t($label) . '</option>'; };
+        $mine = self::MyIp();
+        $mineKept = $mine === '';
+        foreach (array_merge(ph_bans::OwnIgnored(), ph_bans::Never()) as $n) {
+            $mineKept = $mineKept || ph_bans::InNet($mine, $n);
+        }
+        $flood = '<div class="ph-card"><h3>' . self::t('Too many requests') . ' ' . ($f['on'] ? '<span class="ph-pill is-ok">' . self::t('On') . '</span>' : '<span class="ph-pill">' . self::t('Off') . '</span>') . '</h3>'
+            . '<p class="ph-wide">' . self::t('One address sending more requests to the websites than a person could (a flood, a bad crawler, a script) is banned for a while, at the firewall, so Apache never sees it again until the ban ends. Pictures, styles, scripts and fonts are not counted: a page brings many of them.') . '</p>'
+            . '<form method="post" action="./?module=' . self::Folder() . '&amp;tab=flood&amp;action=Flood">' . runtime_csfr::Token()
+            . '<table class="ph-table ph-form ph-wide"><tbody>'
+            . '<tr><th>' . self::t('Flood protection') . '</th><td><select class="form-control" name="inFloodOn"><option value="0"' . ($f['on'] ? '' : ' selected') . '>' . self::t('Off') . '</option><option value="1"' . ($f['on'] ? ' selected' : '') . '>' . self::t('On') . '</option></select></td></tr>'
+            . '<tr><th>' . self::t('Requests a minute') . '</th><td><input class="form-control" type="number" name="inFloodLimit" min="30" max="100000" value="' . (int) $f['limit'] . '"><div class="ph-muted">' . self::t('From one address, before it is banned. 300 is about five pages a second, more than any person.') . '</div></td></tr>'
+            . '<tr><th>' . self::t('Banned for') . '</th><td><select class="form-control" name="inFloodMinutes">' . $opt(10, '10 minutes', $f['minutes']) . $opt(60, 'an hour', $f['minutes']) . $opt(360, '6 hours', $f['minutes']) . $opt(1440, 'a day', $f['minutes']) . $opt(10080, 'a week', $f['minutes']) . '</select></td></tr>'
+            . '</tbody></table><button class="btn btn-primary btn-sm" type="submit">' . self::t('Save') . '</button></form>'
+            . ($f['on'] && $st['at'] > 0 ? '<p class="ph-muted">' . self::t('Watching %s website log(s).', array($st['flood_logs'])) . '</p>' : '')
+            . (!$mineKept ? '<p class="ph-muted">' . self::t('Your own address (%s) is not on the never-ban list: add it on the Bans tab if you work on the sites heavily from here.', array($mine)) . '</p>' : '')
+            . '</div>';
+        $slow = '<div class="ph-card"><h3>' . self::t('Slow attacks') . ' ' . ($st['at'] === 0 ? '<span class="ph-pill is-wait">' . self::t('not looked yet') . '</span>' : ($st['reqtimeout'] ? '<span class="ph-pill is-ok">' . self::t('On') . '</span>' : '<span class="ph-pill is-bad">' . self::t('Off') . '</span>')) . '</h3>'
+            . '<p class="ph-wide">' . self::t('Some attacks open many connections and send each request a few bytes at a time, to keep every Apache worker busy (Slowloris). Apache\'s request timeouts (mod_reqtimeout) close a connection that does not send its request within 20 to 40 seconds, or sends slower than 500 bytes a second.') . '</p>'
+            . ($st['at'] > 0 && !$st['reqtimeout'] ? '<p class="ph-note">' . self::t('Apache does not have mod_reqtimeout loaded on this server: load it again (it comes with Apache).') . '</p>' : '')
+            . '</div>';
+        return self::BansStatus($st) . $flood . $slow;
     }
 
     /**

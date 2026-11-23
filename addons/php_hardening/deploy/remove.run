@@ -15,6 +15,7 @@ $phRemove = function () {
     require_once dirname(__FILE__) . '/../code/ph.php';
     require_once dirname(__FILE__) . '/../code/daemon.php';
     require_once dirname(__FILE__) . '/../code/modsec.php';
+    require_once dirname(__FILE__) . '/../code/bans.php';
     try {
         foreach (ph_daemon::AllOff() as $line) {
             echo $line . "\n";

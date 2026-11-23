@@ -39,6 +39,7 @@ $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_modules (mo_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, mo_folder_vc TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_groups (ug_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ug_name_vc TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_vhosts (vh_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, vh_name_vc TEXT, vh_acc_fk INT, vh_deleted_ts INT)");
+$zdbh->exec("CREATE TABLE IF NOT EXISTS x_settings (so_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, so_name_vc TEXT, so_cleanname_vc TEXT, so_value_tx TEXT, so_defvalues_tx TEXT, so_desc_tx TEXT, so_module_vc TEXT, so_usereditable_en TEXT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_permissions (pe_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, pe_group_fk INT, pe_module_fk INT)");
 date_default_timezone_set('UTC');
 
@@ -62,7 +63,7 @@ class ctrl_options
     {
         $w = getenv('PH_W');
         $o = array('sentora_root' => $w . '/panel/', 'hosted_dir' => $w . '/hosted/', 'apache_vhost' => $w . '/apache/httpd-vhosts.conf',
-            'apache_sn' => 'apache2', 'sentora_domain' => 'panel.example');
+            'apache_sn' => 'apache2', 'sentora_domain' => 'panel.example', 'log_dir' => $w . '/logs/', 'zsudo' => '');
         return isset($o[$n]) ? $o[$n] : '';
     }
 }

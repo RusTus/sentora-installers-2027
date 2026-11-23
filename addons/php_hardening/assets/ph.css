@@ -30,6 +30,20 @@
 .ph-nowrap { white-space: nowrap; }
 .ph-file { overflow-wrap: anywhere; }
 .ph-form th { width: 190px; vertical-align: middle; } .ph-form td { vertical-align: middle; }
+/* bans */
+.ph-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ph-two .ph-card { margin: 0 0 14px; }
+.ph-banform { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(150px, 1.5fr) auto; gap: 8px; align-items: center; }
+.ph-never { font-family: var(--sn-mono, monospace); font-size: 12px; margin-bottom: 6px; }
+.ph-asked { list-style: none; margin: 0 0 10px; padding: 0; font-size: 13px; }
+.ph-asked li { padding: 3px 0; }
+.ph-bans td { vertical-align: middle; }
+@media (max-width: 900px) { .ph-two { grid-template-columns: 1fr; } .ph-banform { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .ph-banform { grid-template-columns: 1fr; } .ph-form th { width: auto; } .ph-form tr { display: grid; }
+    .ph-pagetabs { flex-wrap: wrap; overflow-x: visible; } .ph-pagetabs a { padding: 6px 10px; }
+    .ph-bans-box { max-height: none; overflow: visible; border: 0; } .ph-bans thead { display: none; } .ph-bans, .ph-bans tbody, .ph-bans tr, .ph-bans td { display: block; width: 100%; }
+    .ph-bans tr { border: 1px solid var(--ph-line); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; } .ph-bans td { border: 0; padding: 2px 0; display: flex; gap: 10px; white-space: normal; }
+    .ph-bans td[data-label]::before { content: attr(data-label); flex: 0 0 30%; color: var(--ph-muted); font-size: 11px; } .ph-bans td.ph-unban { padding-top: 6px; } }
 /* the live list of what was caught */
 .ph-live-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ph-live-head h3 { margin: 0; }
@@ -50,6 +64,10 @@
 .ph-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--ph-line); margin: 4px 0 12px; }
 .ph-tabs button { border: 0; background: none; padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--ph-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
 .ph-tabs button.on { color: var(--ph-accent); border-bottom-color: var(--ph-accent); }
+.ph-pagetabs { margin: 0 0 14px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ph-pagetabs a { padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--ph-muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.ph-pagetabs a:hover { color: var(--ph-ink); text-decoration: none; }
+.ph-pagetabs a.on { color: var(--ph-accent); border-bottom-color: var(--ph-accent); }
 .ph-filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(140px, 1fr)); gap: 8px; margin-bottom: 6px; }
 @media (max-width: 900px) { .ph-filters { grid-template-columns: 1fr 1fr; } }
 .ph-count { margin: 4px 0 6px; }

@@ -59,6 +59,10 @@ class ph_daemon
         if ($line !== '') {
             $log[] = 'Web Hardening, ' . $line;
         }
+        // bans and flood protection (fail2ban)
+        if (class_exists('ph_bans')) {
+            $log = array_merge($log, ph_bans::DaemonRun());
+        }
         $n = self::ReadLog() + ph_modsec::ReadLog();
         // (the page's live list says when the server last looked)
         ph::Set('read_at', (string) time());
@@ -446,6 +450,9 @@ class ph_daemon
                 }
                 ph::Set('so:' . $v, '');
             }
+        }
+        if (class_exists('ph_bans')) {
+            $log = array_merge($log, ph_bans::AllOff());
         }
         return $log;
     }

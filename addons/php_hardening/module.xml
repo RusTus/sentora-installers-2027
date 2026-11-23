@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <module>
     <name>Web Hardening</name>
-    <version>106</version>
+    <version>107</version>
     <defaultcat>Server Admin</defaultcat>
-    <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught, the domains, accounts and rules left alone.</desc>
+    <desc>ModSecurity (Apache's web application firewall, with the OWASP rules) and Snuffleupagus (inside PHP, the successor of Suhosin): each off, watch only or on, with what they caught. Bans: who fail2ban has banned and why, unban, ban an address by hand, addresses never banned. Flood protection: an address sending too many requests is banned at the firewall.</desc>
     <authorname>Sentora-2027</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>

@@ -12,6 +12,8 @@ W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 if [ $# -gt 0 ]; then cp -r "$1" "$W/php_hardening"
 else unzip -q "$REPO/sentora-repo/php_hardening.zpp" -d "$W/php_hardening"; fi
+# bans and flood protection first (no Snuffleupagus needed)
+bash "$T/bans.sh" "$W/php_hardening" || exit 1
 if [ -z "${PH_SO:-}" ]; then
     . "$REPO/preconf/php-build/snuffleupagus.sh"
     echo "Building Snuffleupagus $SP_VERSION for $(php -r 'echo PHP_VERSION;')..."

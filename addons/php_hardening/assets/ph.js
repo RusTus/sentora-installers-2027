@@ -297,3 +297,19 @@
         if (!paused && !busy && !document.hidden && Date.now() - statsAt > 15000) { stats(true); }
     }, 3000);
 })();
+/* Bans: while something waits for the server, the page looks again every 5 seconds (at most 6 times). */
+(function () {
+    'use strict';
+    var wait = document.querySelector('[data-ph-wait]'), key = 'ph-bans-wait';
+    var n = 0;
+    try { n = parseInt(sessionStorage.getItem(key) || '0', 10) || 0; } catch (e) { n = 6; }
+    if (!wait) {
+        try { sessionStorage.removeItem(key); } catch (e) { /* (nothing kept) */ }
+        return;
+    }
+    if (n >= 6) { return; }
+    setTimeout(function () {
+        try { sessionStorage.setItem(key, String(n + 1)); } catch (e) { return; }
+        window.location.href = window.location.href.replace(/&action=[A-Za-z]+/, '');
+    }, 5000);
+})();

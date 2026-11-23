@@ -15,6 +15,7 @@ if (PHP_SAPI !== 'cli') {
 require_once dirname(__FILE__) . '/../code/ph.php';
 require_once dirname(__FILE__) . '/../code/daemon.php';
 require_once dirname(__FILE__) . '/../code/modsec.php';
+require_once dirname(__FILE__) . '/../code/bans.php';
 // (found by its folder: its name in the panel was "PHP Hardening" before version 101)
 $phQ = $GLOBALS['zdbh']->prepare("SELECT mo_enabled_en FROM x_modules WHERE mo_folder_vc = :f");
 $phQ->execute(array(':f' => basename(dirname(dirname(__FILE__)))));
