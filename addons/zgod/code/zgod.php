@@ -236,6 +236,20 @@ class zgod
         $a['domain_list'] = self::Rows("SELECT vh_name_vc AS name, vh_directory_vc AS dir, vh_type_in AS type, vh_active_in AS active, vh_enabled_in AS enabled, vh_php_version_vc AS php, vh_created_ts AS created
             FROM x_vhosts WHERE vh_acc_fk = :u AND vh_deleted_ts IS NULL ORDER BY vh_type_in, vh_name_vc", array(':u' => $id));
         $a['database_list'] = self::Rows("SELECT my_name_vc AS name, my_usedspace_bi AS size, my_created_ts AS created FROM x_mysql_databases WHERE my_acc_fk = :u AND my_deleted_ts IS NULL ORDER BY my_name_vc", array(':u' => $id));
+        // (the MySQL users: names, where from and which databases; never a password)
+        $a['dbuser_list'] = self::Rows("SELECT mu_id_pk AS id, mu_name_vc AS name, mu_access_vc AS access, mu_created_ts AS created FROM x_mysql_users WHERE mu_acc_fk = :u AND mu_deleted_ts IS NULL ORDER BY mu_name_vc", array(':u' => $id));
+        foreach ($a['dbuser_list'] as $k => $mu) {
+            $a['dbuser_list'][$k]['databases'] = array_map(function ($r) { return (string) $r['name']; }, self::Rows("SELECT d.my_name_vc AS name FROM x_mysql_dbmap m JOIN x_mysql_databases d ON d.my_id_pk = m.mm_database_fk
+                WHERE m.mm_user_fk = :m AND d.my_deleted_ts IS NULL ORDER BY d.my_name_vc", array(':m' => (int) $mu['id'])));
+        }
+        // (DNS records, by domain)
+        $a['dns_list'] = array();
+        foreach (self::Rows("SELECT dn_name_vc AS domain, dn_type_vc AS type, dn_host_vc AS host, dn_target_vc AS target, dn_ttl_in AS ttl, dn_priority_in AS priority
+            FROM x_dns WHERE dn_acc_fk = :u AND dn_deleted_ts IS NULL ORDER BY dn_name_vc, dn_type_vc, dn_host_vc", array(':u' => $id)) as $r) {
+            $a['dns_list'][(string) $r['domain']]['domain'] = (string) $r['domain'];
+            $a['dns_list'][(string) $r['domain']]['records'][] = $r;
+        }
+        $a['dns_list'] = array_values($a['dns_list']);
         $a['mailbox_list'] = self::Rows("SELECT mb_id_pk AS id, mb_address_vc AS address, mb_enabled_in AS enabled, mb_created_ts AS created FROM x_mailboxes WHERE mb_acc_fk = :u AND mb_deleted_ts IS NULL ORDER BY mb_address_vc", array(':u' => $id));
         $a['forwarder_list'] = self::Rows("SELECT fw_address_vc AS address, fw_destination_vc AS dest, fw_keepmessage_in AS keep FROM x_forwarders WHERE fw_acc_fk = :u AND fw_deleted_ts IS NULL ORDER BY fw_address_vc", array(':u' => $id));
         $a['alias_list'] = self::Rows("SELECT al_address_vc AS address, al_destination_vc AS dest FROM x_aliases WHERE al_acc_fk = :u AND al_deleted_ts IS NULL ORDER BY al_address_vc", array(':u' => $id));
@@ -252,8 +266,122 @@ class zgod
             }
         }
         $a['log_list'] = self::Rows("SELECT lg_when_ts AS t, lg_module_vc AS module, lg_detail_tx AS detail FROM x_logs WHERE lg_user_fk = :u ORDER BY lg_when_ts DESC, lg_id_pk DESC LIMIT 25", array(':u' => $id));
+        $a['docker_list'] = array_values(array_filter(self::HasDocker() ? self::All('docker') : array(), function ($c) use ($id) { return (int) $c['acc'] === $id; }));
         $a['reason'] = (!$a['enabled'] && class_exists('ws_suspend') && method_exists('ws_suspend', 'Reason')) ? (string) ws_suspend::Reason($id) : '';
         return $a;
+    }
+
+    /**
+     * How active an account is, by its last login: recent (7 days), active (90 days), inactive (longer), never.
+     *
+     * @param int $lastlogon
+     * @param int|null $now
+     * @return string
+     */
+    static function Activity($lastlogon, $now = null)
+    {
+        $now = $now === null ? time() : (int) $now;
+        if ((int) $lastlogon <= 0) {
+            return 'never';
+        }
+        $days = ($now - (int) $lastlogon) / 86400;
+        return $days <= 7 ? 'recent' : ($days <= 90 ? 'active' : 'inactive');
+    }
+
+    /**
+     * Every domain, subdomain and parked domain on the panel, with its account and that account's reseller.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    static function Domains()
+    {
+        $out = array();
+        foreach (self::Rows("SELECT v.vh_id_pk AS id, v.vh_name_vc AS name, v.vh_directory_vc AS dir, v.vh_type_in AS type, v.vh_active_in AS active, v.vh_php_version_vc AS php,
+                v.vh_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username, a.ac_enabled_in AS acc_enabled, r.ac_id_pk AS reseller, r.ac_user_vc AS resellername
+            FROM x_vhosts v JOIN x_accounts a ON a.ac_id_pk = v.vh_acc_fk LEFT JOIN x_accounts r ON r.ac_id_pk = a.ac_reseller_fk
+            WHERE v.vh_deleted_ts IS NULL AND a.ac_deleted_ts IS NULL ORDER BY v.vh_name_vc") as $r) {
+            foreach (array('id', 'type', 'active', 'created', 'acc', 'acc_enabled', 'reseller') as $k) {
+                $r[$k] = (int) $r[$k];
+            }
+            $out[] = $r;
+        }
+        return $out;
+    }
+
+    /**
+     * Everything of one kind on the panel, each with its account (for zGod's lists): mailboxes, forwarders, aliases,
+     * distlists, databases, dbusers, ftp, cron, packages. Never a password.
+     *
+     * @param string $what
+     * @return array<int, array<string, mixed>>
+     */
+    static function All($what)
+    {
+        $acc = " JOIN x_accounts a ON a.ac_id_pk = %s AND a.ac_deleted_ts IS NULL";
+        $sql = array(
+            'mailboxes' => "SELECT t.mb_address_vc AS name, t.mb_enabled_in AS enabled, t.mb_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_mailboxes t" . sprintf($acc, 't.mb_acc_fk') . " WHERE t.mb_deleted_ts IS NULL ORDER BY t.mb_address_vc",
+            'forwarders' => "SELECT t.fw_address_vc AS name, t.fw_destination_vc AS dest, t.fw_keepmessage_in AS keep, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_forwarders t" . sprintf($acc, 't.fw_acc_fk') . " WHERE t.fw_deleted_ts IS NULL ORDER BY t.fw_address_vc",
+            'aliases' => "SELECT t.al_address_vc AS name, t.al_destination_vc AS dest, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_aliases t" . sprintf($acc, 't.al_acc_fk') . " WHERE t.al_deleted_ts IS NULL ORDER BY t.al_address_vc",
+            'distlists' => "SELECT t.dl_address_vc AS name, t.dl_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_distlists t" . sprintf($acc, 't.dl_acc_fk') . " WHERE t.dl_deleted_ts IS NULL ORDER BY t.dl_address_vc",
+            'databases' => "SELECT t.my_id_pk AS id, t.my_name_vc AS name, t.my_usedspace_bi AS size, t.my_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username,
+                    (SELECT COUNT(*) FROM x_mysql_dbmap m JOIN x_mysql_users u ON u.mu_id_pk = m.mm_user_fk AND u.mu_deleted_ts IS NULL WHERE m.mm_database_fk = t.my_id_pk) AS users
+                FROM x_mysql_databases t" . sprintf($acc, 't.my_acc_fk') . " WHERE t.my_deleted_ts IS NULL ORDER BY t.my_name_vc",
+            'dbusers' => "SELECT t.mu_id_pk AS id, t.mu_name_vc AS name, t.mu_access_vc AS access, t.mu_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_mysql_users t" . sprintf($acc, 't.mu_acc_fk') . " WHERE t.mu_deleted_ts IS NULL ORDER BY t.mu_name_vc",
+            'ftp' => "SELECT t.ft_user_vc AS name, t.ft_directory_vc AS dir, t.ft_access_vc AS access, t.ft_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_ftpaccounts t" . sprintf($acc, 't.ft_acc_fk') . " WHERE t.ft_deleted_ts IS NULL ORDER BY t.ft_user_vc",
+            'cron' => "SELECT t.ct_timing_vc AS timing, t.ct_script_vc AS name, t.ct_description_tx AS description, t.ct_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_cronjobs t" . sprintf($acc, 't.ct_acc_fk') . " WHERE t.ct_deleted_ts IS NULL ORDER BY a.ac_user_vc, t.ct_id_pk",
+            'packages' => "SELECT t.pk_id_pk AS id, t.pk_name_vc AS name, t.pk_enablephp_in AS php, t.pk_created_ts AS created, a.ac_id_pk AS acc, a.ac_user_vc AS username,
+                    q.qt_diskspace_bi AS diskq, q.qt_bandwidth_bi AS bwq, q.qt_domains_in AS domains, q.qt_subdomains_in AS subdomains, q.qt_mailboxes_in AS mailboxes, q.qt_mysql_in AS mysql, q.qt_ftpaccounts_in AS ftp,
+                    (SELECT COUNT(*) FROM x_accounts c WHERE c.ac_package_fk = t.pk_id_pk AND c.ac_deleted_ts IS NULL) AS used
+                FROM x_packages t" . sprintf($acc, 't.pk_reseller_fk') . " LEFT JOIN x_quotas q ON q.qt_package_fk = t.pk_id_pk WHERE t.pk_deleted_ts IS NULL ORDER BY a.ac_user_vc, t.pk_name_vc",
+        );
+        if (self::HasDocker()) {
+            $sql['docker'] = "SELECT t.dc_id_pk AS id, t.dc_app_vc AS app, t.dc_label_vc AS name, t.dc_domain_vc AS domain, t.dc_state_vc AS state, t.dc_cpu_in AS cpu, t.dc_mem_in AS mem,
+                    t.dc_disk_in AS disk, t.dc_used_in AS used, t.dc_created_in AS created, n.nd_name_vc AS node, a.ac_id_pk AS acc, a.ac_user_vc AS username
+                FROM x_dh_containers t" . sprintf($acc, 't.dc_acc_fk') . " LEFT JOIN x_dh_nodes n ON n.nd_id_pk = t.dc_node_fk WHERE t.dc_deleted_in IS NULL ORDER BY a.ac_user_vc, t.dc_app_vc";
+        }
+        if (!isset($sql[$what])) {
+            return array();
+        }
+        $rows = self::Rows($sql[$what]);
+        if ($what === 'dbusers') {
+            foreach ($rows as $k => $u) {
+                $rows[$k]['databases'] = array_map(function ($r) { return (string) $r['name']; }, self::Rows("SELECT d.my_name_vc AS name FROM x_mysql_dbmap m JOIN x_mysql_databases d ON d.my_id_pk = m.mm_database_fk
+                    WHERE m.mm_user_fk = :m AND d.my_deleted_ts IS NULL ORDER BY d.my_name_vc", array(':m' => (int) $u['id'])));
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Whether Docker Hosting (the add-on) is on this panel: its table is there.
+     *
+     * @return bool
+     */
+    static function HasDocker()
+    {
+        try {
+            self::One("SELECT COUNT(*) FROM x_dh_containers WHERE 1 = 0");
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the panel's Shadowing module is there and on (zGod's Shadow button uses it, with its own checks and log).
+     *
+     * @return bool
+     */
+    static function CanShadow()
+    {
+        return (string) self::One("SELECT mo_enabled_en FROM x_modules WHERE mo_folder_vc = 'shadowing'") === 'true';
     }
 
     /**
@@ -287,6 +415,21 @@ class zgod
     }
 
     /**
+     * A time from the panel's tables as a Unix time: x_logs keeps a TIMESTAMP ('2026-11-23 10:40:00'), others a number.
+     *
+     * @param mixed $v
+     * @return int
+     */
+    static function When($v)
+    {
+        if (is_numeric($v)) {
+            return (int) $v;
+        }
+        $t = strtotime((string) $v);
+        return $t === false ? 0 : $t;
+    }
+
+    /**
      * Note what zGod did in the panel's log (System Log Viewer shows it).
      *
      * @global db_driver $zdbh The panel's database connection.
@@ -297,8 +440,9 @@ class zgod
     static function Log($by, $text)
     {
         global $zdbh;
-        $zdbh->prepare("INSERT INTO x_logs (lg_user_fk, lg_code_vc, lg_module_vc, lg_detail_tx, lg_stack_tx, lg_when_ts) VALUES (:u, 'zgod', 'zgod', :d, '', :t)")
-            ->execute(array(':u' => (int) $by, ':d' => (string) $text, ':t' => time()));
+        // (the time is the database's own: lg_when_ts is a TIMESTAMP that fills itself, as the panel's logger leaves it)
+        $zdbh->prepare("INSERT INTO x_logs (lg_user_fk, lg_code_vc, lg_module_vc, lg_detail_tx, lg_stack_tx) VALUES (:u, 'zgod', 'zgod', :d, '')")
+            ->execute(array(':u' => (int) $by, ':d' => (string) $text));
     }
 
     /**
@@ -552,7 +696,7 @@ class zgod
                     continue;
                 }
                 $rest = substr((string) $r['lg_detail_tx'], strlen($pre));
-                $line = array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z', (int) $r['lg_when_ts']), 'type' => 'action', 'action' => $act,
+                $line = array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z', self::When($r['lg_when_ts'])), 'type' => 'action', 'action' => $act,
                     'by' => isset($users[(int) $r['lg_user_fk']]) ? $users[(int) $r['lg_user_fk']] : '');
                 if ($act === 'suspend' || $act === 'unsuspend') {
                     $m = array();

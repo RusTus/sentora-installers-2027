@@ -449,8 +449,8 @@ in_box 'sentora-elk-node dashboard install /root/connector.ndjson' > "$OUT/dashb
     && [ "$(KBA "-o /dev/null -w %{http_code} https://sentora-elk-node/api/saved_objects/dashboard/test-dash2")" = 404 ] && ok "a file with a connector is refused, nothing of it added" || bad "connector: $(cat "$OUT/dashboard-connector.txt")"
 in_box 'sentora-elk-node dashboard install /root/takeover.ndjson' > "$OUT/dashboard-takeover.txt" 2>&1; grep -q "Refused: it would replace Sentora's own" "$OUT/dashboard-takeover.txt" \
     && ! KBA https://sentora-elk-node/api/saved_objects/dashboard/sentora-overview | grep -q '"title":"Mine now"' && ok "Sentora's own dashboards can not be replaced" || bad "takeover: $(cat "$OUT/dashboard-takeover.txt")"
-in_box 'sentora-elk-node dashboard install /root/junk.ndjson' 2>&1 | grep -q "is not JSON" && ok "a file that is not an export is refused" || bad "a junk file was not refused"
-in_box 'sentora-elk-node dashboard install http://example.com/a.ndjson' 2>&1 | grep -q "Only a file here or an https" && ok "plain http addresses are refused" || bad "an http address was not refused"
+in_box 'sentora-elk-node dashboard install /root/junk.ndjson' > "$OUT/dashboard-junk.txt" 2>&1; grep -q "is not JSON" "$OUT/dashboard-junk.txt" && ok "a file that is not an export is refused" || bad "junk: $(cat "$OUT/dashboard-junk.txt")"
+in_box 'sentora-elk-node dashboard install http://example.com/a.ndjson' > "$OUT/dashboard-http.txt" 2>&1; grep -q "Only a file here or an https" "$OUT/dashboard-http.txt" && ok "plain http addresses are refused" || bad "http: $(cat "$OUT/dashboard-http.txt")"
 in_box 'sentora-elk-node dashboard remove "../x"' > /dev/null 2>&1 && bad "dashboard remove took a path" || ok "dashboard remove takes names only"
 
 say "Settings and update"

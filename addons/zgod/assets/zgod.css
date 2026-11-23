@@ -13,7 +13,7 @@
 .zg-msg.is-bad { color: var(--zg-bad); background: var(--zg-bad-soft); }
 
 /* the tab bar */
-.zg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--zg-line); margin: 0 0 14px; overflow-x: auto; }
+.zg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--zg-line); margin: 0 0 14px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .zg-tabs a { padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--zg-muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .zg-tabs a:hover { color: var(--zg-ink); }
 .zg-tabs a.on { color: var(--zg-accent); border-bottom-color: var(--zg-accent); }
@@ -87,9 +87,25 @@ a.zg-row:hover { border-color: var(--zg-accent); background: var(--zg-accent-sof
 .zg-use.is-bad .zg-bar span { background: var(--zg-bad); }
 .zg-use.is-bad b { color: var(--zg-bad); }
 
+/* the lists: plain tables (on a phone each row a small card) */
+.zg-find { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+.zg-find .form-control { width: auto; flex: 1 1 220px; max-width: 360px; }
+.zg-find select.form-control { flex: 0 1 180px; }
+.zg-tablebox { overflow-x: auto; }
+.zg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.zg-table th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--zg-muted); padding: 6px 8px; border-bottom: 1px solid var(--zg-line); white-space: nowrap; }
+.zg-table td { padding: 6px 8px; border-bottom: 1px solid var(--zg-line); vertical-align: top; overflow-wrap: anywhere; }
+.zg-table tbody tr:hover td { background: var(--zg-bg); }
+.zg-table tbody tr:last-child td { border-bottom: 0; }
+.zg-table .zg-chip { margin: 0 3px 3px 0; display: inline-block; }
+.zg-hot { color: var(--zg-bad); }
+.zg-manage { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; font-size: 12px; }
+.zg-manage .zg-del { color: var(--zg-bad); }
+
 /* pills */
 .zg-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--zg-line); color: var(--zg-muted); white-space: nowrap; vertical-align: middle; }
 .zg-pill.is-ok { background: var(--zg-ok-soft); color: var(--zg-ok); }
+.zg-pill.is-on { background: var(--zg-accent-soft); color: var(--zg-accent); }
 .zg-pill.is-warn { background: var(--zg-warn-soft); color: var(--zg-warn); }
 .zg-pill.is-bad { background: var(--zg-bad-soft); color: var(--zg-bad); }
 .zg-count-pill { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; background: var(--zg-bg); color: var(--zg-muted); letter-spacing: 0; }
@@ -107,18 +123,23 @@ a.zg-row:hover { border-color: var(--zg-accent); background: var(--zg-accent-sof
 .zg-dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0; font-size: 13px; }
 .zg-dl dt { color: var(--zg-muted); font-weight: 400; }
 .zg-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.zg-shadow .btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .zg-suspend { display: grid; gap: 6px; }
 .zg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
 .zg-sec { margin-bottom: 14px; }
+.zg-span { grid-column: 1 / -1; }
 .zg-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px solid var(--zg-line); font-size: 13px; }
 .zg-line:last-child { border-bottom: 0; }
 .zg-line b { overflow-wrap: anywhere; }
 .zg-line span { color: var(--zg-muted); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
 .zg-line .zg-dim { margin-left: auto; }
 .zg-line .zg-pill, .zg-line .zg-chip { color: inherit; }
-.zg-line .zg-pill.is-ok { color: var(--zg-ok); } .zg-line .zg-pill.is-bad { color: var(--zg-bad); } .zg-line .zg-pill.is-warn { color: var(--zg-warn); }
-.zg-line .zg-chip { color: var(--zg-accent); }
+.zg-line .zg-pill.is-ok { color: var(--zg-ok); } .zg-line .zg-pill.is-on { color: var(--zg-accent); } .zg-line .zg-pill.is-bad { color: var(--zg-bad); } .zg-line .zg-pill.is-warn { color: var(--zg-warn); }
+.zg-line .zg-chip:not(.is-none) { color: var(--zg-accent); }
 .zg-inline { display: inline; margin: 0; }
+.zg-zone { display: flex; align-items: center; gap: 8px; padding: 10px 0 4px; font-size: 13px; }
+.zg-zone:not(:first-child) { border-top: 1px solid var(--zg-line); margin-top: 4px; }
+.zg-rec .zg-pill { min-width: 52px; text-align: center; }
 
 /* daily report */
 .zg-check { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 8px 0 12px; }
@@ -128,4 +149,5 @@ a.zg-row:hover { border-color: var(--zg-accent); background: var(--zg-accent-sof
 
 @media (max-width: 1100px) { .zg-cols, .zg-grid { grid-template-columns: 1fr; } .zg-head { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .zg-tiles { grid-template-columns: 1fr 1fr; } .zg-filters { grid-template-columns: 1fr 1fr; } .zg-row { flex-wrap: wrap; } .zg-uses, .zg-when { width: 100%; text-align: left; } }
+@media (max-width: 640px) { .zg-tabs { flex-wrap: wrap; overflow-x: visible; } .zg-tabs a { padding: 6px 10px; } .zg-table thead { display: none; } .zg-table, .zg-table tbody, .zg-table tr, .zg-table td { display: block; width: 100%; } .zg-table tr { border: 1px solid var(--zg-line); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; } .zg-table td { border: 0; padding: 2px 0; display: flex; gap: 10px; } .zg-table td::before { content: attr(data-label); flex: 0 0 38%; color: var(--zg-muted); font-size: 11px; text-transform: uppercase; } .zg-find .form-control, .zg-find select.form-control { max-width: none; flex-basis: 100%; } }
 @media (max-width: 640px) { .zg { padding: 12px; } .zg-tiles, .zg-filters { grid-template-columns: 1fr; } .zg-figs { width: 100%; } .zg-what { width: auto; } .zg-row { padding: 10px; } .zg-res .btn { width: 100%; } }

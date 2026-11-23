@@ -3,7 +3,7 @@
     <name>zGod</name>
     <version>101</version>
     <defaultcat>Server Admin</defaultcat>
-    <desc>Everything on the panel in one place, across every reseller: each account's package, reseller, disk and bandwidth against its quotas, websites, databases, mailboxes, FTP and cron jobs; the server's totals; suspend an account or switch a mailbox off; a daily report by email. For administrators. (The ZPanel classic, written again for Sentora-2027.)</desc>
+    <desc>Everything on the panel in one place, across every reseller: every account (its activity, package, reseller, disk and bandwidth against its quotas) and lists of every domain, mailbox, forwarder, alias, MySQL database and user, FTP account, cron job, package and Docker app; shadow an account, suspend it or switch a mailbox off; a daily report by email; its figures on the Elk node. For administrators. (The ZPanel classic, written again for Sentora-2027.)</desc>
     <authorname>RusTus</authorname>
     <authoremail></authoremail>
     <authorurl></authorurl>
