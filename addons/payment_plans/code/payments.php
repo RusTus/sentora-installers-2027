@@ -518,6 +518,16 @@ class pp_pay
             $said[] = ($dispute === 'open' ? 'The client\'s bank or ' . $name . ' ' : $name . ' ') . $what[$dispute][1] . ' invoice ' . $inv['in_number_vc'] . ' (' . $client . ', ' . pp::Show($total, $cur) . ').'
                 . ($dispute === 'open' ? ' Answer it at ' . $name . ' before its deadline.' : '');
         }
+        // a credit note for the money given back (what is not credited yet: a refund the seller already
+        // wrote a credit note for by hand gets no second one); a lost chargeback credits the rest
+        $fresh = pp::Invoice((int) $inv['in_id_pk']);
+        if ($refund !== '' && $amt !== null && $amt > (int) $fresh['in_credited_in']) {
+            pp::MakeCredit($fresh, $amt - (int) $fresh['in_credited_in'], 'Refunded at ' . $name);
+            $fresh = pp::Invoice((int) $inv['in_id_pk']);
+        }
+        if ($dispute === 'lost' && $old[2] !== 'lost' && (int) $fresh['in_total_in'] > (int) $fresh['in_credited_in']) {
+            pp::MakeCredit($fresh, (int) $fresh['in_total_in'] - (int) $fresh['in_credited_in'], 'Charged back at ' . $name);
+        }
         if ($said) {
             pp::TellSeller($inv, $dispute !== '' && $dispute !== $old[2] ? 'Chargeback on invoice ' . $inv['in_number_vc'] : 'Refund on invoice ' . $inv['in_number_vc'], implode(' ', $said));
         }

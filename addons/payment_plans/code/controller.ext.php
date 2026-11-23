@@ -149,6 +149,25 @@ class module_controller extends ctrl_module
         $old = pp::Seller($seller);
         $v['resume'] = isset($_POST['inResume']) ? (self::Post('inResume') === 'owed' ? 'owed' : 'today') : (string) ($old['ps_resume_vc'] ?? 'today');
         $v['before'] = isset($_POST['inBefore']) ? trim(self::Post('inBefore')) : (string) (int) ($old['ps_before_in'] ?? 3);
+        // (112) tax options; a form without them (an older page) keeps them as they are
+        $v['taxincl'] = isset($_POST['inTaxOpts']) ? self::Post('inTaxIncl') === '1' : (int) ($old['ps_taxincl_in'] ?? 0) === 1;
+        $v['reverse'] = isset($_POST['inTaxOpts']) ? self::Post('inReverse') === '1' : (int) ($old['ps_reverse_in'] ?? 0) === 1;
+        $v['country'] = isset($_POST['inCountry']) ? strtoupper(trim(self::Post('inCountry'))) : (string) ($old['ps_country_vc'] ?? '');
+        $v['rates'] = isset($_POST['inRates']) ? trim(str_replace("\r", '', self::Post('inRates'))) : (string) ($old['ps_rates_tx'] ?? '');
+        if (!preg_match('/^([A-Z]{2})?$/', $v['country'])) {
+            self::Say('error', 'Your country: its two-letter code (such as GB, DE, US), or empty.');
+            return;
+        }
+        $rates = pp::Rates($v['rates']);
+        if (!is_array($rates) || strlen($v['rates']) > 4000) {
+            self::Say('error', 'Tax rates by country: one a line, its two-letter code and its rate (such as DE 19), 50 at most (%s).', array(is_array($rates) ? 'too long' : $rates));
+            return;
+        }
+        $v['rates'] = implode("\n", array_map(function ($c, $r) { return $c . ' ' . rtrim(rtrim(sprintf('%.2f', $r / 100), '0'), '.'); }, array_keys($rates), $rates));
+        if ($v['reverse'] && $v['country'] === '') {
+            self::Say('error', 'The reverse charge needs your own country (to know which clients are abroad).');
+            return;
+        }
         if (!ctype_digit($v['before']) || (int) $v['before'] > 30) {
             self::Say('error', 'Reminder days before the due date: 0 (none) to 30.');
             return;
@@ -519,7 +538,7 @@ class module_controller extends ctrl_module
             return '"' . str_replace('"', '""', $v) . '"';
         };
         $d = function ($t) { return (int) $t > 0 ? date('Y-m-d', (int) $t) : ''; };
-        $lines = array(implode(',', array_map($cell, array('Number', 'Test', 'Client', 'Date', 'Due', 'From', 'To', 'Net', 'Tax', 'Total', 'Currency', 'State', 'Paid', 'Paid with', 'Refund', 'Chargeback'))));
+        $lines = array(implode(',', array_map($cell, array('Number', 'Test', 'Client', 'Date', 'Due', 'From', 'To', 'Net', 'Tax', 'Total', 'Currency', 'State', 'Paid', 'Paid with', 'Refund', 'Chargeback', 'Credited', 'Note'))));
         global $zdbh;
         $names = array();
         foreach ($zdbh->query("SELECT ac_id_pk, ac_user_vc FROM x_accounts")->fetchAll(PDO::FETCH_NUM) as $r) {
@@ -530,7 +549,8 @@ class module_controller extends ctrl_module
             $c = (string) $i['in_currency_vc'];
             $lines[] = implode(',', array_map($cell, array($i['in_number_vc'], (int) $i['in_test_in'] ? 'yes' : '', $i['username'] ?? '', $d($i['in_created_in']), $d($i['in_due_in']),
                 $d($i['in_from_in']), $d($i['in_to_in']), pp::Plain((int) $i['in_net_in'], $c), pp::Plain((int) $i['in_tax_in'], $c), pp::Plain((int) $i['in_total_in'], $c), $c,
-                $i['in_status_vc'], $d($i['in_paid_in']), $i['in_method_vc'], $i['in_refund_vc'] ?? '', $i['in_dispute_vc'] ?? '')));
+                $i['in_status_vc'], $d($i['in_paid_in']), $i['in_method_vc'], $i['in_refund_vc'] ?? '', $i['in_dispute_vc'] ?? '',
+                (int) ($i['in_credited_in'] ?? 0) > 0 ? pp::Plain((int) $i['in_credited_in'], $c) : '', $i['in_note_vc'] ?? '')));
         }
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="invoices-' . date('Y-m-d') . '.csv"');
@@ -554,11 +574,16 @@ class module_controller extends ctrl_module
         $company = self::Text(self::Post('inCompany'), 120);
         $address = self::Text(self::Post('inBillAddress'), 400, true);
         $vat = self::Text(self::Post('inVat'), 40);
+        $country = isset($_POST['inCountry']) ? strtoupper(trim(self::Post('inCountry'))) : null;
+        if ($country !== null && !preg_match('/^([A-Z]{2})?$/', $country)) {
+            self::Say('error', 'Your country: its two-letter code (such as GB, DE, US), or empty.');
+            return;
+        }
         if ($company === false || $address === false || $vat === false || ($vat !== '' && !preg_match('/^[A-Za-z0-9 .\-\/]{2,40}$/', $vat))) {
             self::Say('error', 'Your billing details: plain text only (a tax ID: letters, digits, spaces, dots, dashes).');
             return;
         }
-        pp::SaveBillTo($me, $company, $address, $vat);
+        pp::SaveBillTo($me, $company, $address, $vat, $country);
         self::Say('ok', 'Saved: your billing details go on your invoices from the next one on.');
     }
 
@@ -849,6 +874,9 @@ class module_controller extends ctrl_module
         if (isset($_GET['invoice']) && ctype_digit((string) $_GET['invoice'])) {
             return $out . self::InvoiceView((int) $_GET['invoice']);
         }
+        if (isset($_GET['credit']) && ctype_digit((string) $_GET['credit'])) {
+            return $out . self::CreditView((int) $_GET['credit']);
+        }
         $billed = pp::Plan((int) $me['userid']) !== null || count(pp::Invoices('acc', (int) $me['userid'], 1)) > 0;
         $sell = pp::CanSell($me);
         $tab = isset($_GET['tab']) && $_GET['tab'] === 'billing' ? 'billing' : ($sell ? 'selling' : 'billing');
@@ -977,7 +1005,7 @@ class module_controller extends ctrl_module
                     $help = isset($def['help'][$mode]) ? $def['help'][$mode] : '';
                     $rows .= !empty($def['secret'])
                         ? $f($def['label'], '<input class="form-control" type="password" name="' . $n . '" maxlength="260" placeholder="' . (isset($stored[$field]) ? self::t('kept') : '') . '" autocomplete="new-password">', $help)
-                        : $f($def['label'], '<input class="form-control" name="' . $n . '" maxlength="260" value="' . self::h(isset($stored[$field]) ? $stored[$field] : '') . '">', $help);
+                        : $f($def['label'], '<input class="form-control" type="text" name="' . $n . '" maxlength="260" value="' . self::h(isset($stored[$field]) ? $stored[$field] : '') . '">', $help);
                 }
                 $rows .= '</div>' . ($stored ? '<label class="pp-check"><input type="checkbox" name="inKDrop_' . self::h($proc . '_' . $mode) . '" value="1"> ' . self::t('Remove these keys') . '</label>' : '') . '</div>';
             }
@@ -986,21 +1014,28 @@ class module_controller extends ctrl_module
         }
         $settings = '<div class="pp-card" id="pp-settings"><h3>' . self::t('Your details and payments') . '</h3><form method="post" action="./?module=payment_plans&amp;action=Settings" autocomplete="off">' . runtime_csfr::Token()
             . '<div class="pp-grid"><fieldset><legend>' . self::t('On your invoices') . '</legend>'
-            . $f('Business name', '<input class="form-control" name="inName" maxlength="120" required value="' . self::h($s['ps_name_vc']) . '">')
+            . $f('Business name', '<input class="form-control" type="text" name="inName" maxlength="120" required value="' . self::h($s['ps_name_vc']) . '">')
             . $f('Address', '<textarea class="form-control" name="inAddress" rows="3" maxlength="500">' . self::h($s['ps_address_tx']) . '</textarea>', 'Also a tax or VAT number, if you have one.')
             . $f('Billing email', '<input class="form-control" type="email" name="inEmail" maxlength="200" value="' . self::h($s['ps_email_vc']) . '">', 'Clients\' replies to invoice emails go here.')
             . '<div class="pp-row">' . $f('Currency', '<select class="form-control" name="inCurrency">' . $cOpts . '</select>')
-            . $f('Tax name', '<input class="form-control" name="inTaxLabel" maxlength="30" placeholder="VAT" value="' . self::h($s['ps_taxlabel_vc']) . '">')
-            . $f('Tax rate %', '<input class="form-control" name="inTaxRate" maxlength="5" value="' . self::h(rtrim(rtrim(sprintf('%.2f', (int) $s['ps_taxrate_in'] / 100), '0'), '.')) . '">') . '</div>'
-            . '<div class="pp-row">' . $f('Invoice prefix', '<input class="form-control" name="inPrefix" maxlength="20" value="' . self::h($s['ps_prefix_vc']) . '">')
-            . $f('Next number', '<input class="form-control" name="inNext" maxlength="9" value="' . (int) $s['ps_next_in'] . '">') . '</div>'
+            . $f('Tax name', '<input class="form-control" type="text" name="inTaxLabel" maxlength="30" placeholder="VAT" value="' . self::h($s['ps_taxlabel_vc']) . '">')
+            . $f('Tax rate %', '<input class="form-control" type="text" name="inTaxRate" maxlength="5" value="' . self::h(rtrim(rtrim(sprintf('%.2f', (int) $s['ps_taxrate_in'] / 100), '0'), '.')) . '">') . '</div>'
+            . '<input type="hidden" name="inTaxOpts" value="1">'
+            . '<label class="pp-check"><input type="checkbox" name="inTaxIncl" value="1"' . ((int) ($s['ps_taxincl_in'] ?? 0) ? ' checked' : '') . '> <span>' . self::t('My prices include the tax (what the client pays is the price; the invoice shows the tax in it)') . '</span></label>'
+            . '<details class="pp-proc"' . ((int) ($s['ps_reverse_in'] ?? 0) || trim((string) ($s['ps_rates_tx'] ?? '')) !== '' ? ' open' : '') . '><summary><b>' . self::t('Tax for clients abroad') . '</b></summary>'
+            . '<div class="pp-row">' . $f('Your country', '<input class="form-control" type="text" name="inCountry" maxlength="2" placeholder="GB" value="' . self::h((string) ($s['ps_country_vc'] ?? '')) . '">', 'Its two-letter code.') . '</div>'
+            . $f('Rates by country', '<textarea class="form-control" name="inRates" rows="3" maxlength="4000" placeholder="DE 19&#10;FR 20">' . self::h((string) ($s['ps_rates_tx'] ?? '')) . '</textarea>', 'One a line: the client\'s country and its rate (such as the EU\'s one-stop shop rates). Other clients: the rate above.')
+            . '<label class="pp-check"><input type="checkbox" name="inReverse" value="1"' . ((int) ($s['ps_reverse_in'] ?? 0) ? ' checked' : '') . '> <span>' . self::t('Reverse charge: no tax for a business client in another country that gives its VAT or tax ID (the invoice says so). Check their ID first (in the EU: VIES).') . '</span></label>'
+            . '</details>'
+            . '<div class="pp-row">' . $f('Invoice prefix', '<input class="form-control" type="text" name="inPrefix" maxlength="20" value="' . self::h($s['ps_prefix_vc']) . '">')
+            . $f('Next number', '<input class="form-control" type="text" name="inNext" maxlength="9" value="' . (int) $s['ps_next_in'] . '">') . '</div>'
             . '</fieldset><fieldset><legend>' . self::t('Billing') . '</legend>'
             . '<label class="pp-check"><input type="checkbox" name="inAuto" value="1"' . ((int) $s['ps_auto_in'] ? ' checked' : '') . '> <span>' . self::t('Bill new clients automatically: a client you make on a priced package gets its plan by itself, and its first invoice at once (once you are live: never in test mode)') . '</span></label>'
             . '<div class="pp-row">' . $f('Usual period', '<select class="form-control" name="inUsual"><option value="month">' . self::t('Monthly') . '</option><option value="year"' . ((string) $s['ps_period_vc'] === 'year' ? ' selected' : '') . '>' . self::t('Yearly') . '</option></select>', 'When the package has a price for it.')
-            . $f('Invoice days ahead', '<input class="form-control" name="inLead" maxlength="2" value="' . (int) $s['ps_lead_in'] . '">')
-            . $f('Grace days', '<input class="form-control" name="inGrace" maxlength="2" value="' . (int) $s['ps_grace_in'] . '">') . '</div>'
+            . $f('Invoice days ahead', '<input class="form-control" type="text" name="inLead" maxlength="2" value="' . (int) $s['ps_lead_in'] . '">')
+            . $f('Grace days', '<input class="form-control" type="text" name="inGrace" maxlength="2" value="' . (int) $s['ps_grace_in'] . '">') . '</div>'
             . '<label class="pp-check"><input type="checkbox" name="inSuspend" value="1"' . ((int) $s['ps_suspend_in'] ? ' checked' : '') . '> ' . self::t('Switch a client off when an invoice is unpaid past the grace days (paying switches it on again)') . '</label>'
-            . '<div class="pp-row">' . $f('Reminder before due', '<input class="form-control" name="inBefore" maxlength="2" value="' . (int) ($s['ps_before_in'] ?? 0) . '">', 'Days before the due date a reminder goes out (0: none).')
+            . '<div class="pp-row">' . $f('Reminder before due', '<input class="form-control" type="text" name="inBefore" maxlength="2" value="' . (int) ($s['ps_before_in'] ?? 0) . '">', 'Days before the due date a reminder goes out (0: none).')
             . $f('After a switch-off', '<select class="form-control" name="inResume"><option value="today">' . self::t('Bill from the day they pay again') . '</option><option value="owed"' . ((string) ($s['ps_resume_vc'] ?? 'today') === 'owed' ? ' selected' : '') . '>' . self::t('Bill where it stopped (the months off are owed)') . '</option></select>', 'When a switched-off client pays, where their next period starts.') . '</div>'
             . '<legend class="pp-legend2">' . self::t('How your clients pay') . '</legend>'
             . $f('Payment service', '<select class="form-control" name="inProc">' . $pOpts . '</select>', 'The money goes straight into your own account with it. None: you mark invoices paid yourself (bank transfer, cash).')
@@ -1095,7 +1130,7 @@ class module_controller extends ctrl_module
                 $link = pp::PayLink($inv);
                 $act .= ($link !== '' ? '<a class="btn btn-sm btn-default" href="' . self::h($link) . '" target="_blank" rel="noreferrer" title="' . self::t('Its own page, paid without logging in: also in the client\'s invoice emails. Copy it to send it yourself.') . '">' . self::t('Pay link') . '</a>' : '')
                     . '<form class="pp-inline" method="post" action="./?module=payment_plans&amp;action=Invoice">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $inv['in_id_pk'] . '">'
-                    . '<input class="form-control input-sm pp-method" name="inMethod" maxlength="60" placeholder="' . self::t('paid by (bank transfer...)') . '"><button class="btn btn-sm btn-default" type="submit">' . self::t('Mark paid') . '</button></form>'
+                    . '<input class="form-control input-sm pp-method" type="text" name="inMethod" maxlength="60" placeholder="' . self::t('paid by (bank transfer...)') . '"><button class="btn btn-sm btn-default" type="submit">' . self::t('Mark paid') . '</button></form>'
                     . self::Button('Invoice', 'Void', array('inId' => (int) $inv['in_id_pk'], 'inVoid' => '1'), 'btn-default', 'Void this invoice? It stays in the list as void, and its period is not paid.');
                 if ((int) $inv['in_test_in'] && $testing && (string) $inv['in_status_vc'] === 'open') {
                     $act .= self::Button('TestTools', 'Make overdue', array('inWhat' => 'overdue', 'inId' => (int) $inv['in_id_pk']), 'btn-warning');
@@ -1193,7 +1228,7 @@ class module_controller extends ctrl_module
         }
         $tax = (int) $s['ps_taxrate_in'] > 0 ? self::t('before %s (%s%)', array((string) $s['ps_taxlabel_vc'] !== '' ? $s['ps_taxlabel_vc'] : 'tax', rtrim(rtrim(number_format((int) $s['ps_taxrate_in'] / 100, 2, '.', ''), '0'), '.'))) : '';
         $field = function ($n, $label, $v) use ($cur) {
-            return '<label class="pp-field"><span>' . self::t($label) . '</span><div class="pp-money"><input class="form-control" name="' . $n . '" inputmode="decimal" maxlength="12" value="' . ($v > 0 ? self::h(pp::Plain($v, $cur)) : '') . '" placeholder="' . self::t('not offered') . '"><em>' . self::h($cur) . '</em></div></label>';
+            return '<label class="pp-field"><span>' . self::t($label) . '</span><div class="pp-money"><input class="form-control" type="text" name="' . $n . '" inputmode="decimal" maxlength="12" value="' . ($v > 0 ? self::h(pp::Plain($v, $cur)) : '') . '" placeholder="' . self::t('not offered') . '"><em>' . self::h($cur) . '</em></div></label>';
         };
         $out = $back . '<div class="pp-card"><h3>' . self::h($info['name']) . '</h3>'
             . '<div class="pp-limits">' . $limits . '</div>'
@@ -1309,10 +1344,11 @@ class module_controller extends ctrl_module
             $out .= '<div class="pp-card"><h3>' . self::t('Earlier invoices') . '</h3><table class="pp-table">' . $head . '<tbody>' . $rows . '</tbody></table></div>';
         }
         $b = pp::BillTo($uid);
-        $out .= '<div class="pp-card"><h3>' . self::t('Your billing details') . '</h3><p class="pp-muted">' . self::t('On your invoices from the next one on (a company, its address, a VAT or tax ID). Leave them empty for none.') . '</p>'
+        $out .= '<div class="pp-card"><h3>' . self::t('Your billing details') . '</h3><p class="pp-muted">' . self::t('On your invoices from the next one on (a company, its address, a VAT or tax ID, your country: the tax can depend on it). Leave them empty for none.') . '</p>'
             . '<form method="post" action="./?module=payment_plans&amp;action=BillTo&amp;tab=billing">' . runtime_csfr::Token()
             . '<div class="pp-row"><label>' . self::t('Company') . '<input class="form-control" type="text" name="inCompany" maxlength="120" value="' . self::h($b['bt_company_vc']) . '"></label>'
-            . '<label>' . self::t('VAT or tax ID') . '<input class="form-control" type="text" name="inVat" maxlength="40" value="' . self::h($b['bt_vatid_vc']) . '"></label></div>'
+            . '<label>' . self::t('VAT or tax ID') . '<input class="form-control" type="text" name="inVat" maxlength="40" value="' . self::h($b['bt_vatid_vc']) . '"></label>'
+            . '<label>' . self::t('Country (two letters)') . '<input class="form-control" type="text" name="inCountry" maxlength="2" placeholder="GB" value="' . self::h($b['bt_country_vc']) . '"></label></div>'
             . '<label class="pp-block">' . self::t('Address') . '<textarea class="form-control" name="inBillAddress" rows="3" maxlength="400">' . self::h($b['bt_address_tx']) . '</textarea></label>'
             . '<button class="btn btn-primary btn-sm" type="submit">' . self::t('Save') . '</button></form></div>';
         return $out;
@@ -1332,34 +1368,164 @@ class module_controller extends ctrl_module
             return '<div class="pp-card"><p>' . self::t('No such invoice of yours.') . '</p></div>';
         }
         $cur = (string) $inv['in_currency_vc'];
+        $isSeller = (int) $inv['in_seller_fk'] === $me;
         $back = (int) $inv['in_acc_fk'] === $me ? './?module=payment_plans&amp;tab=billing' : './?module=payment_plans';
         $line = function ($a, $b, $strong = false) {
             return '<tr' . ($strong ? ' class="pp-total"' : '') . '><td>' . $a . '</td><td>' . $b . '</td></tr>';
         };
-        // the hosting line (its price: the invoice's net less its other lines), then the other lines
+        // the hosting line (its price: what the lines add up to less its other lines), then the other lines
         $others = pp::Lines((int) $inv['in_id_pk']);
-        $rest = (int) $inv['in_net_in'];
+        $items = pp::Items($inv);
+        $incl = (int) ($inv['in_taxincl_in'] ?? 0) === 1;
+        $rest = $items;
         $more = '';
         foreach ($others as $o) {
             $rest -= (int) $o['li_net_in'];
             $more .= $line(self::h($o['li_text_vc']), self::h(pp::Show((int) $o['li_net_in'], $cur)));
         }
+        $taxName = self::h(($inv['in_taxlabel_vc'] !== '' ? $inv['in_taxlabel_vc'] : ui_language::translate('Tax')) . ' ' . rtrim(rtrim(sprintf('%.2f', (int) $inv['in_taxrate_in'] / 100), '0'), '.') . '%');
         $body = ((string) $inv['in_period_vc'] === 'once' ? '' : $line(self::t('Hosting: %s, %s', array($inv['in_package_vc'], ui_language::translate($inv['in_period_vc'] === 'year' ? 'yearly' : 'monthly')))
             . '<div class="pp-muted">' . self::h(ui_language::Date('j M Y', (int) $inv['in_from_in'])) . ' – ' . self::h(ui_language::Date('j M Y', (int) $inv['in_to_in'])) . '</div>',
-            self::h(pp::Show($others ? $rest : (int) $inv['in_net_in'], $cur)))) . $more
-            . ($others ? $line(self::t('Subtotal'), self::h(pp::Show((int) $inv['in_net_in'], $cur))) : '');
-        $tax = (int) $inv['in_taxrate_in'] > 0 ? $line(self::h(($inv['in_taxlabel_vc'] !== '' ? $inv['in_taxlabel_vc'] : ui_language::translate('Tax')) . ' ' . rtrim(rtrim(sprintf('%.2f', (int) $inv['in_taxrate_in'] / 100), '0'), '.') . '%'),
-            self::h(pp::Show((int) $inv['in_tax_in'], $cur))) : '';
-        return '<div class="pp-head pp-noprint"><a class="btn btn-default btn-sm" href="' . $back . '">' . self::t('Back') . '</a><button class="btn btn-default btn-sm" type="button" onclick="window.print()">' . self::t('Print') . '</button></div>'
+            self::h(pp::Show($rest, $cur)))) . $more;
+        if ($incl) {
+            // (prices with the tax in them: the total, and the tax it holds)
+            $sums = $line(self::t('Total'), self::h(pp::Show((int) $inv['in_total_in'], $cur)), true)
+                . ((int) $inv['in_taxrate_in'] > 0 ? $line(self::t('Includes %s', array($taxName)), self::h(pp::Show((int) $inv['in_tax_in'], $cur))) . $line(self::t('Net'), self::h(pp::Show((int) $inv['in_net_in'], $cur))) : '');
+        } else {
+            $sums = ($others ? $line(self::t('Subtotal'), self::h(pp::Show((int) $inv['in_net_in'], $cur))) : '')
+                . ((int) $inv['in_taxrate_in'] > 0 ? $line($taxName, self::h(pp::Show((int) $inv['in_tax_in'], $cur))) : '')
+                . $line(self::t('Total'), self::h(pp::Show((int) $inv['in_total_in'], $cur)), true);
+        }
+        // credit notes (money given back), and the seller's form for one
+        $credits = '';
+        foreach (pp::Credits((int) $inv['in_id_pk']) as $c) {
+            $credits .= '<tr><td><a href="./?module=payment_plans&amp;credit=' . (int) $c['cn_id_pk'] . ((int) $inv['in_acc_fk'] === $me ? '&amp;tab=billing' : '') . '">' . self::h($c['cn_number_vc']) . '</a>'
+                . ((string) $c['cn_reason_vc'] !== '' ? '<div class="pp-muted">' . self::h($c['cn_reason_vc']) . '</div>' : '') . '</td><td>' . self::h(ui_language::Date('j M Y', (int) $c['cn_created_in'])) . '</td><td>-' . self::h(pp::Show((int) $c['cn_total_in'], $cur)) . '</td>'
+                . '<td class="pp-actions">' . self::Button('Pdf', 'PDF', array('inCredit' => (int) $c['cn_id_pk'])) . '</td></tr>';
+        }
+        $left = (int) $inv['in_total_in'] - (int) ($inv['in_credited_in'] ?? 0);
+        $creditForm = $isSeller && (string) $inv['in_status_vc'] === 'paid' && $left > 0
+            ? '<details class="pp-proc pp-noprint"><summary><b>' . self::t('Credit note (money given back)') . '</b></summary><p class="pp-muted">' . self::t('For money you give back another way (a bank transfer). A refund made at %s gets its credit note by itself, the day after.', array(pp_pay::Name((string) $inv['in_proc_vc']) !== '' ? pp_pay::Name((string) $inv['in_proc_vc']) : ui_language::translate('the payment service'))) . '</p>'
+                . '<form method="post" action="./?module=payment_plans&amp;action=Credit&amp;invoice=' . (int) $inv['in_id_pk'] . '">' . runtime_csfr::Token() . '<input type="hidden" name="inId" value="' . (int) $inv['in_id_pk'] . '">'
+                . '<div class="pp-row"><label>' . self::t('Amount (with tax)') . '<input class="form-control" type="text" name="inAmount" maxlength="14" value="' . self::h(pp::Plain($left, $cur)) . '"></label>'
+                . '<label>' . self::t('Why') . '<input class="form-control" type="text" name="inReason" maxlength="200" placeholder="' . self::t('Refund by bank transfer') . '"></label></div>'
+                . '<button class="btn btn-default btn-sm" type="submit" onclick="return confirm(this.dataset.ask)" data-ask="' . self::t('Make this credit note and send it to the client? It can not be taken back.') . '">' . self::t('Make credit note') . '</button></form></details>' : '';
+        return '<div class="pp-head pp-noprint"><a class="btn btn-default btn-sm" href="' . $back . '">' . self::t('Back') . '</a>' . self::Button('Pdf', 'PDF', array('inId' => (int) $inv['in_id_pk']))
+            . '<button class="btn btn-default btn-sm" type="button" onclick="window.print()">' . self::t('Print') . '</button></div>'
             . '<div class="pp-card pp-invoice">' . ((int) $inv['in_test_in'] ? '<div class="pp-testbanner">' . self::t('Test invoice: made in test mode, paid (if at all) in the payment service\'s test mode. No real money.') . '</div>' : '') . '<div class="pp-inv-top"><div><h2>' . self::t('Invoice') . ' ' . self::h($inv['in_number_vc']) . '</h2>' . self::State($inv) . '</div>'
             . '<div class="pp-addr">' . nl2br(self::h($inv['in_seller_tx'])) . '</div></div>'
             . '<div class="pp-inv-mid"><div><b>' . self::t('To') . '</b><div class="pp-addr">' . nl2br(self::h($inv['in_buyer_tx'])) . '</div></div>'
             . '<div><b>' . self::t('Date') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_created_in'])) . '<br><b>' . self::t('Due') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_due_in']))
             . ((string) $inv['in_status_vc'] === 'paid' ? '<br><b>' . self::t('Paid') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $inv['in_paid_in'])) . ' (' . self::h($inv['in_method_vc']) . ')' : '') . '</div></div>'
-            . '<table class="pp-table pp-lines"><tbody>' . $body
-            . $tax . $line(self::t('Total'), self::h(pp::Show((int) $inv['in_total_in'], $cur)), true) . '</tbody></table>'
-            . self::HistoryHtml((int) $inv['in_id_pk'], (string) $inv['in_currency_vc'], (int) $inv['in_seller_fk'] === $me)
+            . '<table class="pp-table pp-lines"><tbody>' . $body . $sums . '</tbody></table>'
+            . ((string) ($inv['in_note_vc'] ?? '') !== '' ? '<p class="pp-note">' . self::h($inv['in_note_vc']) . '</p>' : '')
+            . ($credits !== '' ? '<div class="pp-history"><h4>' . self::t('Credit notes') . '</h4><table class="pp-table">' . $credits . '</table></div>' : '')
+            . $creditForm
+            . self::HistoryHtml((int) $inv['in_id_pk'], (string) $inv['in_currency_vc'], $isSeller)
             . ((string) $inv['in_capture_vc'] !== '' ? '<p class="pp-muted">' . self::t('%s payment %s', array($inv['in_method_vc'] !== '' ? $inv['in_method_vc'] : pp_pay::Name((string) $inv['in_proc_vc']), $inv['in_capture_vc'])) . '</p>' : '') . '</div>';
+    }
+
+    /**
+     * One credit note, printable (its seller and the invoice's client only).
+     *
+     * @param int $id
+     * @return string
+     */
+    static function CreditView($id)
+    {
+        $me = (int) self::Me()['userid'];
+        $cn = pp::Credit($id);
+        $inv = $cn ? pp::Invoice((int) $cn['cn_inv_fk']) : null;
+        if (!$cn || !$inv || ((int) $cn['cn_acc_fk'] !== $me && (int) $cn['cn_seller_fk'] !== $me)) {
+            return '<div class="pp-card"><p>' . self::t('No such credit note of yours.') . '</p></div>';
+        }
+        $cur = (string) $cn['cn_currency_vc'];
+        $line = function ($a, $b, $strong = false) {
+            return '<tr' . ($strong ? ' class="pp-total"' : '') . '><td>' . $a . '</td><td>' . $b . '</td></tr>';
+        };
+        $taxName = self::h(($inv['in_taxlabel_vc'] !== '' ? $inv['in_taxlabel_vc'] : ui_language::translate('Tax')) . ' ' . rtrim(rtrim(sprintf('%.2f', (int) $inv['in_taxrate_in'] / 100), '0'), '.') . '%');
+        $back = './?module=payment_plans&amp;invoice=' . (int) $inv['in_id_pk'] . ((int) $inv['in_acc_fk'] === $me ? '&amp;tab=billing' : '');
+        return '<div class="pp-head pp-noprint"><a class="btn btn-default btn-sm" href="' . $back . '">' . self::t('Back') . '</a>' . self::Button('Pdf', 'PDF', array('inCredit' => (int) $cn['cn_id_pk']))
+            . '<button class="btn btn-default btn-sm" type="button" onclick="window.print()">' . self::t('Print') . '</button></div>'
+            . '<div class="pp-card pp-invoice">' . ((int) $cn['cn_test_in'] ? '<div class="pp-testbanner">' . self::t('Test: made in test mode. No real money.') . '</div>' : '')
+            . '<div class="pp-inv-top"><div><h2>' . self::t('Credit note') . ' ' . self::h($cn['cn_number_vc']) . '</h2></div><div class="pp-addr">' . nl2br(self::h($inv['in_seller_tx'])) . '</div></div>'
+            . '<div class="pp-inv-mid"><div><b>' . self::t('To') . '</b><div class="pp-addr">' . nl2br(self::h($inv['in_buyer_tx'])) . '</div></div>'
+            . '<div><b>' . self::t('Date') . '</b> ' . self::h(ui_language::Date('j M Y', (int) $cn['cn_created_in'])) . '<br><b>' . self::t('For invoice') . '</b> '
+            . '<a href="' . $back . '">' . self::h($inv['in_number_vc']) . '</a> (' . self::h(ui_language::Date('j M Y', (int) $inv['in_created_in'])) . ')</div></div>'
+            . '<table class="pp-table pp-lines"><tbody>' . $line(self::h((string) $cn['cn_reason_vc'] !== '' ? $cn['cn_reason_vc'] : ui_language::translate('Credit')), '-' . self::h(pp::Show((int) $cn['cn_net_in'], $cur)))
+            . ((int) $inv['in_taxrate_in'] > 0 ? $line($taxName, '-' . self::h(pp::Show((int) $cn['cn_tax_in'], $cur))) : '')
+            . $line(self::t('Total'), '-' . self::h(pp::Show((int) $cn['cn_total_in'], $cur)), true) . '</tbody></table>'
+            . ((string) ($inv['in_note_vc'] ?? '') !== '' ? '<p class="pp-note">' . self::h($inv['in_note_vc']) . '</p>' : '') . '</div>';
+    }
+
+    /**
+     * An invoice or a credit note as a PDF file (its seller, or the client it is for).
+     *
+     * @return void
+     */
+    static function doPdf()
+    {
+        runtime_csfr::Protect();
+        $me = (int) self::Me()['userid'];
+        if (ctype_digit(self::Post('inCredit'))) {
+            $cn = pp::Credit((int) self::Post('inCredit'));
+            $inv = $cn ? pp::Invoice((int) $cn['cn_inv_fk']) : null;
+            if (!$cn || !$inv || ((int) $cn['cn_acc_fk'] !== $me && (int) $cn['cn_seller_fk'] !== $me)) {
+                self::Say('error', 'No such credit note of yours.');
+                return;
+            }
+            $pdf = pp_pdf::CreditNote($cn, $inv);
+            $file = pp::FileName('credit-note', (string) $cn['cn_number_vc']);
+        } else {
+            $inv = ctype_digit(self::Post('inId')) ? pp::Invoice((int) self::Post('inId')) : null;
+            if (!$inv || ((int) $inv['in_acc_fk'] !== $me && (int) $inv['in_seller_fk'] !== $me)) {
+                self::Say('error', 'No such invoice of yours.');
+                return;
+            }
+            $pdf = pp_pdf::Invoice($inv);
+            $file = pp::FileName('invoice', (string) $inv['in_number_vc']);
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . $file . '"');
+        header('Content-Length: ' . strlen($pdf));
+        header('Cache-Control: no-store');
+        header('X-Content-Type-Options: nosniff');
+        echo $pdf;
+        die();
+    }
+
+    /**
+     * The seller writes a credit note for money given back another way (a bank transfer).
+     *
+     * @return void
+     */
+    static function doCredit()
+    {
+        runtime_csfr::Protect();
+        $seller = self::SellerMe();
+        $inv = ctype_digit(self::Post('inId')) ? pp::Invoice((int) self::Post('inId')) : null;
+        if (!$seller || !$inv || (int) $inv['in_seller_fk'] !== $seller) {
+            return;
+        }
+        $amount = pp::Parse(self::Post('inAmount'), (string) $inv['in_currency_vc']);
+        $reason = self::Text(self::Post('inReason'), 200);
+        if ($amount === false || $reason === false) {
+            self::Say('error', 'The amount is a number (such as 12.50), the reason plain text.');
+            return;
+        }
+        $cn = pp::MakeCredit($inv, $amount, $reason !== '' ? $reason : 'Refund', $seller);
+        if (!is_array($cn)) {
+            self::Say('error', $cn);
+            return;
+        }
+        // money given back another way: the invoice says how much (the payment service's own refunds are read from it)
+        if ((string) $inv['in_capture_vc'] === '') {
+            global $zdbh;
+            $f = pp::Invoice((int) $inv['in_id_pk']);
+            $zdbh->prepare("UPDATE x_pp_invoices SET in_refund_vc = :r, in_refunded_in = :a WHERE in_id_pk = :i")
+                ->execute(array(':r' => (int) $f['in_credited_in'] >= (int) $f['in_total_in'] ? 'full' : 'partial', ':a' => (int) $f['in_credited_in'], ':i' => (int) $f['in_id_pk']));
+        }
+        self::Say('ok', 'Credit note %s for %s is made and sent to the client.', array($cn['cn_number_vc'], pp::Show((int) $cn['cn_total_in'], (string) $cn['cn_currency_vc'])));
     }
 
     /**
@@ -1374,7 +1540,7 @@ class module_controller extends ctrl_module
     {
         $words = array('made' => 'Invoice made', 'started' => 'Payment started', 'closed' => 'Payment page closed', 'pending' => 'Payment being checked', 'paid' => 'Paid',
             'failed' => 'Payment not completed', 'mailfail' => 'Mail not sent', 'refused' => 'Payment not counted', 'void' => 'Voided', 'off' => 'Hosting switched off', 'on' => 'Hosting switched on',
-            'refunded' => 'Refunded', 'partrefund' => 'Partly refunded', 'dispute' => 'Chargeback opened', 'disputewon' => 'Chargeback won', 'disputelost' => 'Charged back');
+            'refunded' => 'Refunded', 'partrefund' => 'Partly refunded', 'credit' => 'Credit note', 'dispute' => 'Chargeback opened', 'disputewon' => 'Chargeback won', 'disputelost' => 'Charged back');
         $rows = '';
         foreach (pp::History($id) as $h) {
             $what = isset($words[$h['lg_what_vc']]) ? $words[$h['lg_what_vc']] : $h['lg_what_vc'];
@@ -1382,7 +1548,7 @@ class module_controller extends ctrl_module
             if ((string) $h['lg_note_vc'] !== '') {
                 $detail[] = self::h($h['lg_note_vc']);
             }
-            if ($h['lg_amount_in'] !== null && in_array($h['lg_what_vc'], array('paid', 'pending', 'refused', 'started', 'refunded', 'partrefund'), true)) {
+            if ($h['lg_amount_in'] !== null && in_array($h['lg_what_vc'], array('paid', 'pending', 'refused', 'started', 'refunded', 'partrefund', 'credit'), true)) {
                 $detail[] = self::h(pp::Show((int) $h['lg_amount_in'], (string) $h['lg_currency_vc'] !== '' ? (string) $h['lg_currency_vc'] : $cur));
             }
             if ((string) $h['lg_ref_vc'] !== '') {

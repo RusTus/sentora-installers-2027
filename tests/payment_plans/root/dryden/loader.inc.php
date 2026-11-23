@@ -153,9 +153,20 @@ class sys_email
     {
     }
 
+    public $files = array();
+
+    function addStringAttachment($data, $name, $enc = 'base64', $type = '')
+    {
+        $this->files[$name] = $data;
+        if (getenv('PP_MAILFILES')) {
+            file_put_contents(getenv('PP_MAILFILES') . '/' . basename($name), $data);
+        }
+        return true;
+    }
+
     function SendEmail()
     {
-        test_event('email:' . implode(',', $this->to) . ':' . $this->Subject . ':' . str_replace("\n", ' | ', $this->Body));
+        test_event('email:' . implode(',', $this->to) . ':' . $this->Subject . ':' . str_replace("\n", ' | ', $this->Body) . ($this->files ? ' [attached: ' . implode(', ', array_keys($this->files)) . ']' : ''));
         return true;
     }
 }

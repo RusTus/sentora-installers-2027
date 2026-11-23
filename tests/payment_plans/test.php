@@ -485,12 +485,16 @@ if (is_array($pp) && is_array($sp)) {
     $out = daemon();
     $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']));
     check($a['in_refund_vc'] === 'partial' && $a['in_refunded_in'] === null && strpos($out, 'refunded in part') !== false, 'PayPal: a partial refund is noted (PayPal does not say how much)', $out);
+    check(pp::Credits((int) $pp['in_id_pk']) === array(), 'no credit note while the amount is not known');
     check(count(events('notice:pp-reversal-' . $pp['in_id_pk'] . ':%')) === 1 && count(events('email:%Refund on invoice ' . $pp['in_number_vc'] . '%')) === 1, 'the seller gets a notice and an email');
     fake('capture', array('c' => $pp['in_capture_vc'], 'status' => 'REFUNDED'));
     $recheck();
     daemon();
     $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']));
     check($a['in_refund_vc'] === 'full' && (int) $a['in_refunded_in'] === (int) $pp['in_total_in'] && $a['in_status_vc'] === 'paid', 'then in full: the whole amount is refunded; the invoice stays paid');
+    $cs = pp::Credits((int) $pp['in_id_pk']);
+    check(count($cs) === 1 && (int) $cs[0]['cn_total_in'] === (int) $pp['in_total_in'] && (int) $cs[0]['cn_tax_in'] === (int) $pp['in_tax_in'] && strpos($cs[0]['cn_number_vc'], 'TEST-CN-') === 0
+        && $cs[0]['cn_reason_vc'] === 'Refunded at PayPal', 'a credit note for the refund, made by itself (a test one: TEST-CN-)', json_encode($cs));
     $recheck();
     $n = count(events('email:%Refund on invoice ' . $pp['in_number_vc'] . '%'));
     daemon();
@@ -507,6 +511,7 @@ if (is_array($pp) && is_array($sp)) {
     $zdbh->exec("UPDATE x_pp_invoices SET in_checked_in = 0 WHERE in_id_pk = " . (int) $pp['in_id_pk']);
     daemon();
     check(row("SELECT in_dispute_vc d FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $pp['in_id_pk']))['d'] === 'lost', 'an open chargeback is still looked at after 180 days: lost');
+    check(count(pp::Credits((int) $pp['in_id_pk'])) === 1, 'lost after a full refund: nothing more to credit');
     fake('nodisputes', array('on' => 1));
     $recheck();
     daemon();
@@ -522,6 +527,8 @@ if (is_array($pp) && is_array($sp)) {
     daemon();
     $a = row("SELECT * FROM x_pp_invoices WHERE in_id_pk = :i", array(':i' => $sp['in_id_pk']));
     check($a['in_refund_vc'] === 'partial' && $a['in_refunded_in'] !== null && (int) $a['in_refunded_in'] > 0, 'Stripe: a partial refund is noted with its amount', json_encode($a));
+    $cs = pp::Credits((int) $sp['in_id_pk']);
+    check(count($cs) === 1 && (int) $cs[0]['cn_total_in'] === (int) $a['in_refunded_in'], 'its credit note is for that amount', json_encode($cs));
     fake('charge', array('pi' => $sp['in_capture_vc'], 'dispute' => 'needs_response'));
     $recheck();
     daemon();
@@ -841,6 +848,170 @@ if (getenv('PP_PAGES')) {
     file_put_contents(getenv('PP_PAGES') . '/c16-invoice.html', req(16, '', array(), array('invoice' => (string) $i['in_id_pk'], 'tab' => 'billing'))['html']);
     file_put_contents(getenv('PP_PAGES') . '/s2-late.html', req(2)['html']);
 }
+
+section('Tax options, credit notes and PDF files');
+// a PDF file that hangs together: every object where the table of contents says it is
+function pdf_ok($pdf)
+{
+    if (substr((string) $pdf, 0, 5) !== '%PDF-' || !preg_match('/startxref\s+(\d+)\s+%%EOF\s*$/', $pdf, $m)) {
+        return false;
+    }
+    if (!preg_match('/^xref\s+0 (\d+)\s+((?:\d{10} \d{5} [nf] \s*\n?)+)/', substr($pdf, (int) $m[1]), $x)) {
+        return false;
+    }
+    $n = 0;
+    foreach (preg_split('/\n/', trim($x[2])) as $k => $l) {
+        if ($k === 0) {
+            continue;
+        }
+        $off = (int) substr($l, 0, 10);
+        $n++;
+        if (substr($pdf, $off, strlen($k . ' 0 obj')) !== $k . ' 0 obj') {
+            return false;
+        }
+    }
+    return $n === (int) $x[1] - 1;
+}
+function pdf_text($pdf)
+{
+    global $T;
+    if (trim((string) shell_exec('command -v pdftotext')) === '') {
+        // (no pdftotext: the page's text as written, the PDF is not packed)
+        preg_match_all('/\((.*?)(?<!\\\\)\) Tj/', $pdf, $m);
+        return implode("\n", $m[1]);
+    }
+    $f = tempnam(sys_get_temp_dir(), 'pp') . '.pdf';
+    file_put_contents($f, $pdf);
+    $t = (string) shell_exec('pdftotext -layout ' . escapeshellarg($f) . ' - 2>&1');
+    unlink($f);
+    return $t;
+}
+function download($me, $post)
+{
+    global $T;
+    return (string) shell_exec('PP_REQ=' . escapeshellarg(json_encode(array('me' => $me, 'action' => 'Pdf', 'post' => $post + array('csfr_token' => 'x'), 'get' => array()))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
+}
+$nextInv = function () use (&$zdbh) {
+    $zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . time() . " WHERE pl_acc_fk = 16");
+    daemon();
+    return lastinv(16);
+};
+$r = req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inCountry' => 'gbr'));
+check(strpos($r['text'], 'two-letter code') !== false, 'a country is its two-letter code', $r['text']);
+$r = req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inCountry' => 'GB', 'inRates' => "DE 19\nFrance 20"));
+check(strpos($r['text'], 'line 2') !== false, 'a rate line that is not "XX rate" is refused, naming the line', $r['text']);
+$r = req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inCountry' => '', 'inReverse' => '1'));
+check(strpos($r['text'], 'needs your own country') !== false, 'the reverse charge needs the seller\'s own country', $r['text']);
+$r = req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inCountry' => 'gb', 'inRates' => "de 19\nFR: 20%\n\nIE 23", 'inReverse' => '1'));
+$s2 = pp::Seller(2);
+check($s2['ps_country_vc'] === 'GB' && $s2['ps_rates_tx'] === "DE 19\nFR 20\nIE 23" && (int) $s2['ps_reverse_in'] === 1 && (int) $s2['ps_taxincl_in'] === 0, 'country, rates by country and the reverse charge are saved (written tidy)', json_encode($s2));
+$r = req(2, 'Settings', $live);
+check(pp::Seller(2)['ps_rates_tx'] === "DE 19\nFR 20\nIE 23" && (int) pp::Seller(2)['ps_reverse_in'] === 1, 'a form without them (an older page) keeps them');
+$r = req(16, 'BillTo', array('inCompany' => '', 'inBillAddress' => 'Berlin', 'inVat' => '', 'inCountry' => 'Deutschland'), array('tab' => 'billing'));
+check(strpos($r['text'], 'two-letter') !== false, 'the client\'s country too', $r['text']);
+req(16, 'BillTo', array('inCompany' => '', 'inBillAddress' => 'Berlin', 'inVat' => '', 'inCountry' => 'de'), array('tab' => 'billing'));
+$i = $nextInv();
+check((int) $i['in_taxrate_in'] === 1900 && (int) $i['in_net_in'] === 1000 && (int) $i['in_tax_in'] === 190 && (int) $i['in_total_in'] === 1190 && $i['in_note_vc'] === '',
+    'a private client in Germany: Germany\'s rate (10.00 + 19% = 11.90)', json_encode($i));
+check(strpos($i['in_buyer_tx'], "\nDE") !== false, 'its country is on the invoice', $i['in_buyer_tx']);
+check(count(events('email:era@example.com:%Invoice ' . $i['in_number_vc'] . ':%[attached: invoice-' . $i['in_number_vc'] . '.pdf]')) === 1, 'the invoice email has the PDF with it');
+pp::MarkPaid((int) $i['in_id_pk'], 'Bank transfer');
+req(16, 'BillTo', array('inCompany' => 'Era GmbH', 'inBillAddress' => 'Berlin', 'inVat' => 'DE123456789', 'inCountry' => 'DE'), array('tab' => 'billing'));
+$rc = $nextInv();
+check((int) $rc['in_taxrate_in'] === 0 && (int) $rc['in_tax_in'] === 0 && (int) $rc['in_total_in'] === 1000 && strpos($rc['in_note_vc'], 'Reverse charge') !== false && strpos($rc['in_note_vc'], 'DE123456789') !== false,
+    'a business in Germany with a VAT ID: the reverse charge (no VAT, 10.00, the invoice says why)', json_encode($rc));
+$h = req(16, '', array(), array('invoice' => (string) $rc['in_id_pk'], 'tab' => 'billing'))['html'];
+check(strpos($h, 'Reverse charge: no VAT charged') !== false && strpos($h, 'VAT 0%') === false, 'its page shows the note and no VAT line');
+pp::MarkPaid((int) $rc['in_id_pk'], 'Bank transfer');
+req(16, 'BillTo', array('inCompany' => 'Era Ltd', 'inBillAddress' => 'Leeds', 'inVat' => 'GB123456789', 'inCountry' => 'GB'), array('tab' => 'billing'));
+$g = $nextInv();
+check((int) $g['in_taxrate_in'] === 2000 && (int) $g['in_total_in'] === 1200 && $g['in_note_vc'] === '', 'a business at home (the seller\'s own country): the usual VAT, no reverse charge', json_encode($g));
+pp::MarkPaid((int) $g['in_id_pk'], 'Bank transfer');
+// prices with the tax in them
+req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inTaxIncl' => '1', 'inCountry' => 'GB', 'inRates' => "DE 19\nFR 20\nIE 23", 'inReverse' => '1'));
+check((int) pp::Seller(2)['ps_taxincl_in'] === 1, 'prices that include the tax: saved');
+req(2, 'Charge', array('inClient' => '16', 'inWhen' => 'next', 'inLine1' => 'Setup fee', 'inAmount1' => '12.00'));
+$in = $nextInv();
+check((int) $in['in_total_in'] === 2200 && (int) $in['in_tax_in'] === 367 && (int) $in['in_net_in'] === 1833 && (int) $in['in_items_in'] === 2200 && (int) $in['in_taxincl_in'] === 1,
+    'prices with VAT in them: 10.00 + 12.00 = 22.00 paid, of which 20% VAT 3.67, net 18.33', json_encode($in));
+$h = req(16, '', array(), array('invoice' => (string) $in['in_id_pk'], 'tab' => 'billing'))['html'];
+check(strpos($h, 'Includes VAT 20%') !== false && strpos($h, '3.67 USD') !== false && strpos($h, '18.33 USD') !== false && strpos($h, '>10.00 USD<') !== false && strpos($h, '>12.00 USD<') !== false,
+    'its page: the lines as priced (10.00, 12.00), the total, the VAT in it and the net', $h);
+pp::MarkPaid((int) $in['in_id_pk'], 'Bank transfer');
+req(16, 'BillTo', array('inCompany' => 'Era GmbH', 'inBillAddress' => 'Berlin', 'inVat' => 'DE123456789', 'inCountry' => 'DE'), array('tab' => 'billing'));
+$ri = $nextInv();
+check((int) $ri['in_total_in'] === 840 && (int) $ri['in_tax_in'] === 0 && (int) $ri['in_taxincl_in'] === 0 && strpos($ri['in_note_vc'], 'Reverse charge') !== false,
+    'prices with VAT in them and the reverse charge: the client pays the price without Germany\'s VAT (10.00 / 1.19 = 8.40)', json_encode($ri));
+pp::MarkPaid((int) $ri['in_id_pk'], 'Bank transfer');
+req(2, 'Settings', $live + array('inTaxOpts' => '1', 'inCountry' => 'GB', 'inRates' => '', 'inReverse' => ''));
+req(16, 'BillTo', array('inCompany' => 'Era Ltd', 'inBillAddress' => "2 High Street\nLeeds", 'inVat' => 'GB 123 4567 89', 'inCountry' => 'GB'), array('tab' => 'billing'));
+check(pp::Plain(-184, 'USD') === '-1.84' && pp::Plain(-50, 'USD') === '-0.50' && pp::Plain(123456, 'USD') === '1234.56' && pp::Plain(-7, 'JPY') === '-7', 'amounts below zero are written with one sign in front (-1.84, -0.50)');
+check((float) pp::Without(1000, 2000) === 833.0 && pp::Without(-500, 2000) === -417 && pp::Without(1000, 0) === 1000, 'the price without the tax, rounded to the nearest (a discount too)');
+// credit notes by hand (money given back by bank transfer)
+$paid = pp::Invoice((int) $in['in_id_pk']);
+$r = req(1, 'Credit', array('inId' => (string) $paid['in_id_pk'], 'inAmount' => '5.00', 'inReason' => 'x'));
+check(count(pp::Credits((int) $paid['in_id_pk'])) === 0, 'another seller can not write one');
+$r = req(2, 'Credit', array('inId' => (string) $paid['in_id_pk'], 'inAmount' => '30.00', 'inReason' => 'Too much'));
+check(strpos($r['text'], 'at most 22.00 USD') !== false && count(pp::Credits((int) $paid['in_id_pk'])) === 0, 'never more than the invoice', $r['text']);
+$r = req(2, 'Credit', array('inId' => (string) $paid['in_id_pk'], 'inAmount' => '11.00', 'inReason' => 'Setup not needed'));
+$c1 = pp::Credits((int) $paid['in_id_pk'])[0] ?? array();
+check(strpos($r['text'], 'is made and sent') !== false && (int) $c1['cn_total_in'] === 1100 && (int) $c1['cn_tax_in'] === 184 && (int) $c1['cn_net_in'] === 916 && strpos($c1['cn_number_vc'], 'CN-') === 0,
+    'a credit note for 11.00: half the invoice, so half its VAT (1.84)', $r['text'] . json_encode($c1));
+$p = pp::Invoice((int) $paid['in_id_pk']);
+check($p['in_refund_vc'] === 'partial' && (int) $p['in_refunded_in'] === 1100 && (int) $p['in_credited_in'] === 1100, 'the invoice shows it partly refunded (paid another way: the seller\'s word counts)');
+check(count(events('email:era@example.com:%Credit note ' . $c1['cn_number_vc'] . ': 11.00 USD%[attached: credit-note-' . $c1['cn_number_vc'] . '.pdf]')) === 1, 'the client gets it by email, the PDF with it');
+$r = req(2, 'Credit', array('inId' => (string) $paid['in_id_pk'], 'inAmount' => '11.00', 'inReason' => ''));
+$cs = pp::Credits((int) $paid['in_id_pk']);
+check(count($cs) === 2 && (int) $cs[0]['cn_tax_in'] + (int) $cs[1]['cn_tax_in'] === 367 && $cs[1]['cn_reason_vc'] === 'Refund' && pp::Invoice((int) $paid['in_id_pk'])['in_refund_vc'] === 'full',
+    'the rest: the two credit notes\' VAT adds up to the invoice\'s (3.67), now refunded in full', json_encode($cs));
+check(substr($cs[1]['cn_number_vc'], -5) === str_pad((string) ((int) substr($cs[0]['cn_number_vc'], -5) + 1), 5, '0', STR_PAD_LEFT), 'numbered one after the other');
+$r = req(2, 'Credit', array('inId' => (string) $paid['in_id_pk'], 'inAmount' => '1.00', 'inReason' => ''));
+check(strpos($r['text'], 'credited already') !== false, 'nothing left to credit', $r['text']);
+$open = pp::Invoices('acc', 16, 100);
+$h = req(16, '', array(), array('invoice' => (string) $paid['in_id_pk'], 'tab' => 'billing'))['html'];
+check(strpos($h, 'Credit notes') !== false && strpos($h, $c1['cn_number_vc']) !== false && strpos($h, 'Make credit note') === false, 'the client sees its credit notes on the invoice (and no form)');
+check(strpos(req(2, '', array(), array('invoice' => (string) $g['in_id_pk']))['html'], 'Make credit note') !== false, 'the seller has the form on a paid invoice');
+$h = req(16, '', array(), array('credit' => (string) $c1['cn_id_pk'], 'tab' => 'billing'))['html'];
+check(strpos($h, 'Credit note ' . $c1['cn_number_vc']) !== false && strpos($h, '-11.00 USD') !== false && strpos($h, 'Setup not needed') !== false, 'a credit note has its own page', $h);
+check(strpos(req(3, '', array(), array('credit' => (string) $c1['cn_id_pk']))['html'], 'No such credit note') !== false, 'nobody else sees it');
+// credit notes made by the daily check: every refund noted has its credit note
+$bad = row("SELECT COUNT(*) n FROM x_pp_invoices WHERE in_refunded_in IS NOT NULL AND in_refunded_in > in_credited_in");
+$lost = row("SELECT COUNT(*) n FROM x_pp_invoices WHERE in_dispute_vc = 'lost' AND in_credited_in < in_total_in");
+check((int) $bad['n'] === 0 && (int) $lost['n'] === 0, 'every refund and lost chargeback noted has its credit notes', json_encode(array($bad, $lost)));
+// PDF files
+$pdf = download(16, array('inId' => (string) $paid['in_id_pk']));
+$t = pdf_text($pdf);
+check(pdf_ok($pdf), 'the invoice PDF hangs together (every object where it says)', substr($pdf, 0, 200));
+check(strpos($t, 'INVOICE') !== false && strpos($t, $paid['in_number_vc']) !== false && strpos($t, 'Res One Hosting') !== false && strpos($t, 'Era Ltd') !== false
+    && strpos($t, 'Setup fee') !== false && strpos($t, 'Includes VAT 20%') !== false && strpos($t, '22.00 USD') !== false && strpos($t, 'Paid') !== false, 'it says what the page says', $t);
+$pdf = download(16, array('inId' => (string) $rc['in_id_pk']));
+check(pdf_ok($pdf) && strpos(pdf_text($pdf), 'Reverse charge') !== false, 'a reverse-charge invoice\'s PDF has its note');
+$pdf = download(16, array('inCredit' => (string) $c1['cn_id_pk']));
+$t = pdf_text($pdf);
+check(pdf_ok($pdf) && strpos($t, 'CREDIT NOTE') !== false && strpos($t, $c1['cn_number_vc']) !== false && strpos($t, '-11.00') !== false && strpos($t, $paid['in_number_vc']) !== false, 'a credit note as a PDF', $t);
+$pdf = download(3, array('inId' => (string) $paid['in_id_pk']));
+check(strpos($pdf, '%PDF') === false && strpos($pdf, 'No such invoice') !== false, 'nobody else gets the PDF', substr($pdf, 0, 200));
+$pdf = download(2, array('inId' => (string) $paid['in_id_pk']));
+check(pdf_ok($pdf), 'the seller gets it too');
+// long and odd text: accents, a long buyer, many lines (more pages)
+$zdbh->exec("UPDATE x_pp_invoices SET in_buyer_tx = " . $zdbh->quote("Zoë Ångström (Ünïcode ✓ 漢字)\n" . str_repeat('A very long address line that has to be wrapped ', 6)) . " WHERE in_id_pk = " . (int) $g['in_id_pk']);
+for ($n = 0; $n < 45; $n++) {
+    $zdbh->exec("INSERT INTO x_pp_lines (li_inv_fk, li_text_vc, li_net_in) VALUES (" . (int) $g['in_id_pk'] . ", 'Line " . $n . " (with) a \\\\ backslash', 0)");
+}
+$pdf = download(16, array('inId' => (string) $g['in_id_pk']));
+$t = pdf_text($pdf);
+check(pdf_ok($pdf) && preg_match('/\/Count (\d+)/', $pdf, $m) && (int) $m[1] >= 2 && strpos($t, 'Line 44 (with) a') !== false && strpos($t, 'Zo') !== false, 'many lines go on more pages; brackets and backslashes are written safely', 'pages: ' . ($m[1] ?? '?') . "\n" . substr($t, 0, 600));
+if (getenv('PP_PAGES')) {
+    file_put_contents(getenv('PP_PAGES') . '/inv-incl.pdf', download(16, array('inId' => (string) $paid['in_id_pk'])));
+    file_put_contents(getenv('PP_PAGES') . '/inv-rc.pdf', download(16, array('inId' => (string) $rc['in_id_pk'])));
+    file_put_contents(getenv('PP_PAGES') . '/cn.pdf', download(16, array('inCredit' => (string) $c1['cn_id_pk'])));
+    file_put_contents(getenv('PP_PAGES') . '/c16-incl.html', req(16, '', array(), array('invoice' => (string) $paid['in_id_pk'], 'tab' => 'billing'))['html']);
+    file_put_contents(getenv('PP_PAGES') . '/s2-inv-g.html', req(2, '', array(), array('invoice' => (string) pp::Invoice((int) $ri['in_id_pk'])['in_id_pk']))['html']);
+    file_put_contents(getenv('PP_PAGES') . '/c16-cn.html', req(16, '', array(), array('credit' => (string) $c1['cn_id_pk'], 'tab' => 'billing'))['html']);
+    file_put_contents(getenv('PP_PAGES') . '/s2-settings.html', req(2)['html']);
+}
+$csv = shell_exec('PP_REQ=' . escapeshellarg(json_encode(array('me' => 2, 'action' => 'Export', 'post' => array('csfr_token' => 'x'), 'get' => array()))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
+check(strpos((string) $csv, '"Credited","Note"') !== false && strpos((string) $csv, '"22.00"') !== false, 'Export has what was credited, and the note');
 
 section('Removing the module');
 $out = shell_exec('php -r ' . escapeshellarg('chdir("' . $T . '/root"); require "dryden/loader.inc.php"; include "modules/payment_plans/deploy/remove.run";') . ' 2>&1');

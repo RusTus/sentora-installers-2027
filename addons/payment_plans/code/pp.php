@@ -16,6 +16,8 @@
  *
  * Written by RusTus, 2026-11-09
  */
+require_once dirname(__FILE__) . '/pdf.php';
+
 class pp
 {
     /** What the panel writes as the reason it switched a client off (ws_suspend), so it only lifts its own. */
@@ -122,6 +124,24 @@ class pp
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_extras (
             ex_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, ex_seller_fk INT NOT NULL, ex_acc_fk INT NOT NULL, ex_text_vc VARCHAR(200) NOT NULL,
             ex_net_in BIGINT NOT NULL, ex_created_in INT NOT NULL, ex_inv_fk INT NULL, KEY ex_acc (ex_acc_fk)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        // (112) tax options: prices with the tax in them, reverse charge for a business client abroad with a
+        // tax ID, rates per country; the client's country; credit notes (numbered on their own) for money given back
+        self::AddColumn('x_pp_sellers', 'ps_taxincl_in', 'TINYINT NOT NULL DEFAULT 0');
+        self::AddColumn('x_pp_sellers', 'ps_country_vc', "CHAR(2) NOT NULL DEFAULT ''");
+        self::AddColumn('x_pp_sellers', 'ps_reverse_in', 'TINYINT NOT NULL DEFAULT 0');
+        self::AddColumn('x_pp_sellers', 'ps_rates_tx', 'TEXT NULL');
+        self::AddColumn('x_pp_sellers', 'ps_cnnext_in', 'INT NOT NULL DEFAULT 1');
+        self::AddColumn('x_pp_sellers', 'ps_cntestnext_in', 'INT NOT NULL DEFAULT 1');
+        self::AddColumn('x_pp_billto', 'bt_country_vc', "CHAR(2) NOT NULL DEFAULT ''");
+        self::AddColumn('x_pp_invoices', 'in_items_in', 'BIGINT NULL');
+        self::AddColumn('x_pp_invoices', 'in_taxincl_in', 'TINYINT NOT NULL DEFAULT 0');
+        self::AddColumn('x_pp_invoices', 'in_note_vc', "VARCHAR(255) NOT NULL DEFAULT ''");
+        self::AddColumn('x_pp_invoices', 'in_credited_in', 'BIGINT NOT NULL DEFAULT 0');
+        $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_credits (
+            cn_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, cn_seller_fk INT NOT NULL, cn_acc_fk INT NOT NULL, cn_inv_fk INT NOT NULL, cn_number_vc VARCHAR(40) NOT NULL,
+            cn_net_in BIGINT NOT NULL, cn_tax_in BIGINT NOT NULL, cn_total_in BIGINT NOT NULL, cn_currency_vc CHAR(3) NOT NULL, cn_reason_vc VARCHAR(200) NOT NULL DEFAULT '',
+            cn_created_in INT NOT NULL, cn_test_in TINYINT NOT NULL DEFAULT 0, cn_by_fk INT NOT NULL DEFAULT 0,
+            UNIQUE KEY cn_number (cn_seller_fk, cn_number_vc), KEY cn_inv (cn_inv_fk)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         // version 103: every step of every invoice, kept (made, payment started, paid, refused, voided, switched off...)
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_log (
             lg_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, lg_time_in INT NOT NULL, lg_seller_fk INT NOT NULL, lg_acc_fk INT NOT NULL, lg_inv_fk INT NOT NULL DEFAULT 0,
@@ -259,7 +279,11 @@ class pp
     static function Plain($minor, $currency)
     {
         $d = self::Decimals($currency);
-        return $d === 0 ? (string) (int) $minor : sprintf('%d.%0' . $d . 'd', intdiv((int) $minor, 10 ** $d), (int) $minor % (10 ** $d));
+        // (a negative amount, a discount or a credit: its sign once, in front)
+        $m = (int) $minor;
+        $sign = $m < 0 ? '-' : '';
+        $m = abs($m);
+        return $sign . ($d === 0 ? (string) $m : sprintf('%d.%0' . $d . 'd', intdiv($m, 10 ** $d), $m % (10 ** $d)));
     }
 
     /**
@@ -285,6 +309,93 @@ class pp
     static function Tax($net, $rate)
     {
         return intdiv((int) $net * (int) $rate + 5000, 10000);
+    }
+
+    /**
+     * A price with the tax in it, without it (rounded to the nearest; a negative one, a discount, the same way).
+     *
+     * @param int $gross
+     * @param int $rate In hundredths of a percent.
+     * @return int
+     */
+    static function Without($gross, $rate)
+    {
+        $gross = (int) $gross;
+        $rate = (int) $rate;
+        if ($rate <= 0) {
+            return $gross;
+        }
+        $neg = $gross < 0;
+        $g = abs($gross);
+        $n = intdiv($g * 10000 * 2 + (10000 + $rate), (10000 + $rate) * 2);
+        return $neg ? -$n : $n;
+    }
+
+    /**
+     * A seller's rates for other countries, from its list ("DE 19" a line).
+     *
+     * @param string $text
+     * @return array<string, int>|string Country => rate (hundredths of a percent), or which line is wrong.
+     */
+    static function Rates($text)
+    {
+        $out = array();
+        foreach (preg_split('/\r?\n/', trim((string) $text)) as $n => $l) {
+            $l = trim($l);
+            if ($l === '') {
+                continue;
+            }
+            if (!preg_match('/^([A-Za-z]{2})[\s:=]+(\d{1,2}(?:[.,]\d{1,2})?)\s*%?$/', $l, $m) || (float) str_replace(',', '.', $m[2]) > 50) {
+                return 'line ' . ($n + 1);
+            }
+            $out[strtoupper($m[1])] = (int) round((float) str_replace(',', '.', $m[2]) * 100);
+        }
+        return count($out) > 300 ? 'too many lines' : $out;
+    }
+
+    /**
+     * The rate that would be charged to a client: its country's from the seller's list, else the usual one.
+     *
+     * @param array $s The seller.
+     * @param array $b The client's billing details (BillTo).
+     * @return int
+     */
+    static function RateFor(array $s, array $b)
+    {
+        $rates = self::Rates((string) ($s['ps_rates_tx'] ?? ''));
+        $c = (string) ($b['bt_country_vc'] ?? '');
+        return is_array($rates) && $c !== '' && isset($rates[$c]) ? $rates[$c] : (int) $s['ps_taxrate_in'];
+    }
+
+    /**
+     * The tax on a client's invoice: the rate, and a note for the invoice. Under the reverse charge (the seller
+     * turned it on; the client gave a tax ID and a country other than the seller's) no tax, and the note says why.
+     *
+     * @param array $s
+     * @param array $b
+     * @return array{0:int, 1:string}
+     */
+    static function TaxFor(array $s, array $b)
+    {
+        $c = (string) ($b['bt_country_vc'] ?? '');
+        $home = (string) ($s['ps_country_vc'] ?? '');
+        if ((int) ($s['ps_reverse_in'] ?? 0) && (string) $b['bt_vatid_vc'] !== '' && $c !== '' && $home !== '' && $c !== $home) {
+            $label = trim((string) $s['ps_taxlabel_vc']) !== '' ? trim((string) $s['ps_taxlabel_vc']) : 'tax';
+            return array(0, 'Reverse charge: no ' . $label . ' charged; the customer (' . $b['bt_vatid_vc'] . ', ' . $c . ') accounts for it.');
+        }
+        return array(self::RateFor($s, $b), '');
+    }
+
+    /**
+     * What an invoice's lines add up to as shown: before the tax, or with it when its prices had it in them
+     * (invoices from before 112: before the tax).
+     *
+     * @param array $inv
+     * @return int
+     */
+    static function Items(array $inv)
+    {
+        return isset($inv['in_items_in']) && $inv['in_items_in'] !== null ? (int) $inv['in_items_in'] : (int) $inv['in_net_in'];
     }
 
     // ----- who is who -----
@@ -409,7 +520,8 @@ class pp
         return $r ? $r : array('ps_acc_fk' => (int) $seller, 'ps_name_vc' => '', 'ps_address_tx' => '', 'ps_email_vc' => '', 'ps_currency_vc' => 'USD',
             'ps_taxlabel_vc' => '', 'ps_taxrate_in' => 0, 'ps_prefix_vc' => 'INV-', 'ps_next_in' => 1, 'ps_lead_in' => 7, 'ps_grace_in' => 7,
             'ps_suspend_in' => 1, 'ps_mode_vc' => 'sandbox', 'ps_updated_in' => 0, 'ps_testnext_in' => 1, 'ps_proc_vc' => '',
-            'ps_auto_in' => 1, 'ps_autofrom_in' => 0, 'ps_period_vc' => 'month', 'ps_on_in' => 0, 'ps_resume_vc' => 'today', 'ps_before_in' => 3, 'new' => true);
+            'ps_auto_in' => 1, 'ps_autofrom_in' => 0, 'ps_period_vc' => 'month', 'ps_on_in' => 0, 'ps_resume_vc' => 'today', 'ps_before_in' => 3,
+            'ps_taxincl_in' => 0, 'ps_country_vc' => '', 'ps_reverse_in' => 0, 'ps_rates_tx' => '', 'ps_cnnext_in' => 1, 'ps_cntestnext_in' => 1, 'new' => true);
     }
 
     /**
@@ -469,13 +581,16 @@ class pp
         $from = $auto && (!empty($old['new']) || !(int) $old['ps_auto_in'] || $live) ? time() : (int) $old['ps_autofrom_in'];
         $zdbh->prepare("REPLACE INTO x_pp_sellers (ps_acc_fk, ps_name_vc, ps_address_tx, ps_email_vc, ps_currency_vc, ps_taxlabel_vc, ps_taxrate_in, ps_prefix_vc,
             ps_next_in, ps_lead_in, ps_grace_in, ps_suspend_in, ps_mode_vc, ps_updated_in, ps_testnext_in, ps_proc_vc, ps_auto_in, ps_autofrom_in, ps_period_vc, ps_on_in,
-            ps_resume_vc, ps_before_in)
-            VALUES (:a, :n, :ad, :e, :c, :tl, :tr, :p, :nx, :l, :g, :su, :m, :t, :tn, :pr, :au, :af, :pe, :on, :rs, :bf)")
+            ps_resume_vc, ps_before_in, ps_taxincl_in, ps_country_vc, ps_reverse_in, ps_rates_tx, ps_cnnext_in, ps_cntestnext_in)
+            VALUES (:a, :n, :ad, :e, :c, :tl, :tr, :p, :nx, :l, :g, :su, :m, :t, :tn, :pr, :au, :af, :pe, :on, :rs, :bf, :ti, :co, :rv, :rt, :cn, :ctn)")
             ->execute(array(':a' => (int) $seller, ':n' => $v['name'], ':ad' => $v['address'], ':e' => $v['email'], ':c' => $v['currency'], ':tl' => $v['taxlabel'],
                 ':tr' => (int) $v['taxrate'], ':p' => $v['prefix'], ':nx' => max((int) $old['ps_next_in'], (int) $v['next']), ':l' => (int) $v['lead'],
                 ':g' => (int) $v['grace'], ':su' => $v['suspend'] ? 1 : 0, ':m' => $v['mode'], ':t' => time(), ':tn' => max(1, (int) $old['ps_testnext_in']),
                 ':pr' => (string) $v['proc'], ':au' => $auto ? 1 : 0, ':af' => $from, ':pe' => $v['period'] === 'year' ? 'year' : 'month', ':on' => (int) $old['ps_on_in'] ? 1 : 0,
-                ':rs' => ($v['resume'] ?? (string) $old['ps_resume_vc']) === 'owed' ? 'owed' : 'today', ':bf' => max(0, min(30, (int) ($v['before'] ?? $old['ps_before_in'])))));
+                ':rs' => ($v['resume'] ?? (string) $old['ps_resume_vc']) === 'owed' ? 'owed' : 'today', ':bf' => max(0, min(30, (int) ($v['before'] ?? $old['ps_before_in']))),
+                ':ti' => !empty($v['taxincl'] ?? (int) ($old['ps_taxincl_in'] ?? 0)) ? 1 : 0, ':co' => (string) ($v['country'] ?? ($old['ps_country_vc'] ?? '')),
+                ':rv' => !empty($v['reverse'] ?? (int) ($old['ps_reverse_in'] ?? 0)) ? 1 : 0, ':rt' => (string) ($v['rates'] ?? ($old['ps_rates_tx'] ?? '')),
+                ':cn' => max(1, (int) ($old['ps_cnnext_in'] ?? 1)), ':ctn' => max(1, (int) ($old['ps_cntestnext_in'] ?? 1))));
     }
 
     // ----- prices and plans -----
@@ -763,7 +878,32 @@ class pp
         }
         // (a discount larger than the price: nothing to pay, not less than nothing)
         $all = max(0, $all);
-        $tax = (int) $s['ps_taxrate_in'] > 0 ? self::Tax($all, (int) $s['ps_taxrate_in']) : 0;
+        // the tax for this client: its country's rate or the usual one; none under the reverse charge. With
+        // prices that have the tax in them, the lines are what is paid and the tax is the part of it; under
+        // the reverse charge the client pays the price without it (each line, so they add up)
+        list($rate, $note) = self::TaxFor($s, self::BillTo($uid));
+        $incl = (int) ($s['ps_taxincl_in'] ?? 0) === 1;
+        if ($incl && $rate === 0 && $note !== '') {
+            $strip = self::RateFor($s, self::BillTo($uid));
+            $net = self::Without((int) $net, $strip);
+            foreach ($extras as $k => $e) {
+                $extras[$k]['ex_net_in'] = self::Without((int) $e['ex_net_in'], $strip);
+            }
+            $all = (int) $net;
+            foreach ($extras as $e) {
+                $all += (int) $e['ex_net_in'];
+            }
+            $all = max(0, $all);
+            $incl = false;
+        }
+        if ($incl) {
+            $items = $all;
+            $tax = $rate > 0 ? $all - self::Without($all, $rate) : 0;
+            $all -= $tax;
+        } else {
+            $items = $all;
+            $tax = $rate > 0 ? self::Tax($all, $rate) : 0;
+        }
         $sellerText = trim((string) $s['ps_name_vc'] . "\n" . (string) $s['ps_address_tx'] . ((string) $s['ps_email_vc'] !== '' ? "\n" . $s['ps_email_vc'] : ''));
         $buyerText = self::BuyerText($c);
         $zdbh->beginTransaction();
@@ -788,11 +928,13 @@ class pp
             $number = ($test ? 'TEST-' : ($row ? (string) $row['ps_prefix_vc'] : 'INV-')) . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
             $zdbh->prepare("UPDATE x_pp_sellers SET " . ($test ? 'ps_testnext_in' : 'ps_next_in') . " = :n WHERE ps_acc_fk = :s")->execute(array(':n' => $next + 1, ':s' => $seller));
             $zdbh->prepare("INSERT INTO x_pp_invoices (in_seller_fk, in_acc_fk, in_number_vc, in_package_vc, in_period_vc, in_from_in, in_to_in, in_net_in,
-                in_taxlabel_vc, in_taxrate_in, in_tax_in, in_total_in, in_currency_vc, in_seller_tx, in_buyer_tx, in_status_vc, in_due_in, in_created_in, in_test_in)
-                VALUES (:s, :u, :no, :pk, :pe, :f, :t, :net, :tl, :tr, :tax, :tot, :cur, :st, :bt, 'open', :due, :c, :test)")
+                in_taxlabel_vc, in_taxrate_in, in_tax_in, in_total_in, in_currency_vc, in_seller_tx, in_buyer_tx, in_status_vc, in_due_in, in_created_in, in_test_in,
+                in_items_in, in_taxincl_in, in_note_vc)
+                VALUES (:s, :u, :no, :pk, :pe, :f, :t, :net, :tl, :tr, :tax, :tot, :cur, :st, :bt, 'open', :due, :c, :test, :it, :ti, :nt)")
                 ->execute(array(':s' => $seller, ':u' => $uid, ':no' => $number, ':pk' => mb_substr((string) $what, 0, 120), ':pe' => $period, ':f' => (int) $from, ':t' => (int) $to,
-                    ':net' => $all, ':tl' => (string) $s['ps_taxlabel_vc'], ':tr' => (int) $s['ps_taxrate_in'], ':tax' => $tax, ':tot' => $all + $tax,
-                    ':cur' => (string) $s['ps_currency_vc'], ':st' => $sellerText, ':bt' => $buyerText, ':due' => (int) $due, ':c' => time(), ':test' => $test ? 1 : 0));
+                    ':net' => $all, ':tl' => (string) $s['ps_taxlabel_vc'], ':tr' => $rate, ':tax' => $tax, ':tot' => $all + $tax,
+                    ':cur' => (string) $s['ps_currency_vc'], ':st' => $sellerText, ':bt' => $buyerText, ':due' => (int) $due, ':c' => time(), ':test' => $test ? 1 : 0,
+                    ':it' => $items, ':ti' => $incl ? 1 : 0, ':nt' => mb_substr($note, 0, 255)));
             $id = (int) $zdbh->lastInsertId();
             // its other lines (a hosting invoice's own line is its package and period)
             $li = $zdbh->prepare("INSERT INTO x_pp_lines (li_inv_fk, li_text_vc, li_net_in) VALUES (:i, :t, :n)");
@@ -833,7 +975,7 @@ class pp
     static function BuyerText(array $c)
     {
         $b = self::BillTo((int) $c['id']);
-        $parts = array($c['fullname'], $b['bt_company_vc'], (string) $b['bt_address_tx'], (string) $b['bt_vatid_vc'] !== '' ? 'VAT/tax ID: ' . $b['bt_vatid_vc'] : '', $c['username'], $c['email']);
+        $parts = array($c['fullname'], $b['bt_company_vc'], (string) $b['bt_address_tx'], (string) $b['bt_country_vc'], (string) $b['bt_vatid_vc'] !== '' ? 'VAT/tax ID: ' . $b['bt_vatid_vc'] : '', $c['username'], $c['email']);
         return trim(implode("\n", array_filter(array_map('trim', $parts), function ($x) { return $x !== ''; })));
     }
 
@@ -842,17 +984,17 @@ class pp
      *
      * @global db_driver $zdbh The panel's database connection.
      * @param int $uid
-     * @return array{bt_company_vc: string, bt_address_tx: string, bt_vatid_vc: string}
+     * @return array{bt_company_vc: string, bt_address_tx: string, bt_vatid_vc: string, bt_country_vc: string}
      */
     static function BillTo($uid)
     {
         global $zdbh;
         self::Ensure();
-        $q = $zdbh->prepare("SELECT bt_company_vc, bt_address_tx, bt_vatid_vc FROM x_pp_billto WHERE bt_acc_fk = :u");
+        $q = $zdbh->prepare("SELECT bt_company_vc, bt_address_tx, bt_vatid_vc, bt_country_vc FROM x_pp_billto WHERE bt_acc_fk = :u");
         $q->execute(array(':u' => (int) $uid));
         $r = $q->fetch(PDO::FETCH_ASSOC);
-        return $r ? array('bt_company_vc' => (string) $r['bt_company_vc'], 'bt_address_tx' => (string) $r['bt_address_tx'], 'bt_vatid_vc' => (string) $r['bt_vatid_vc'])
-            : array('bt_company_vc' => '', 'bt_address_tx' => '', 'bt_vatid_vc' => '');
+        return $r ? array('bt_company_vc' => (string) $r['bt_company_vc'], 'bt_address_tx' => (string) $r['bt_address_tx'], 'bt_vatid_vc' => (string) $r['bt_vatid_vc'], 'bt_country_vc' => (string) $r['bt_country_vc'])
+            : array('bt_company_vc' => '', 'bt_address_tx' => '', 'bt_vatid_vc' => '', 'bt_country_vc' => '');
     }
 
     /**
@@ -861,12 +1003,13 @@ class pp
      * @global db_driver $zdbh The panel's database connection.
      * @return void
      */
-    static function SaveBillTo($uid, $company, $address, $vat)
+    static function SaveBillTo($uid, $company, $address, $vat, $country = null)
     {
         global $zdbh;
         self::Ensure();
-        $zdbh->prepare("REPLACE INTO x_pp_billto (bt_acc_fk, bt_company_vc, bt_address_tx, bt_vatid_vc, bt_updated_in) VALUES (:u, :c, :a, :v, :t)")
-            ->execute(array(':u' => (int) $uid, ':c' => (string) $company, ':a' => (string) $address, ':v' => (string) $vat, ':t' => time()));
+        $country = $country === null ? self::BillTo($uid)['bt_country_vc'] : strtoupper((string) $country);
+        $zdbh->prepare("REPLACE INTO x_pp_billto (bt_acc_fk, bt_company_vc, bt_address_tx, bt_vatid_vc, bt_country_vc, bt_updated_in) VALUES (:u, :c, :a, :v, :co, :t)")
+            ->execute(array(':u' => (int) $uid, ':c' => (string) $company, ':a' => (string) $address, ':v' => (string) $vat, ':co' => $country, ':t' => time()));
     }
 
     /**
@@ -897,6 +1040,150 @@ class pp
         $q = $zdbh->prepare("SELECT li_text_vc, li_net_in FROM x_pp_lines WHERE li_inv_fk = :i ORDER BY li_id_pk");
         $q->execute(array(':i' => (int) $inv));
         return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Money given back on a paid invoice: a credit note (numbered on its own, CN-, TEST-CN- in test mode) for
+     * that much, its tax in the same share as on the invoice. Never more than is left on the invoice. The
+     * client gets it by email (the PDF with it) and on its invoice's page.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @param array $inv
+     * @param int $amount With the tax, in the smallest unit.
+     * @param string $reason
+     * @param int $by Who (0: the panel, from the processor's answer).
+     * @return array|string The credit note, or why not.
+     */
+    static function MakeCredit(array $inv, $amount, $reason, $by = 0)
+    {
+        global $zdbh;
+        self::Ensure();
+        $amount = (int) $amount;
+        if ((string) $inv['in_status_vc'] !== 'paid') {
+            return 'Only a paid invoice gets a credit note.';
+        }
+        $zdbh->beginTransaction();
+        try {
+            $n = $zdbh->prepare("SELECT ps_cnnext_in, ps_cntestnext_in FROM x_pp_sellers WHERE ps_acc_fk = :s FOR UPDATE");
+            $n->execute(array(':s' => (int) $inv['in_seller_fk']));
+            $row = $n->fetch(PDO::FETCH_ASSOC);
+            $n->closeCursor();
+            // (read again under the seller's lock: two at once never credit more than the invoice)
+            $q = $zdbh->prepare("SELECT in_credited_in, in_total_in FROM x_pp_invoices WHERE in_id_pk = :i");
+            $q->execute(array(':i' => (int) $inv['in_id_pk']));
+            $now = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            $left = (int) $now['in_total_in'] - (int) $now['in_credited_in'];
+            if ($amount <= 0 || $amount > $left) {
+                $zdbh->rollBack();
+                return $left <= 0 ? 'All of this invoice is credited already.' : 'A credit note is for more than nothing, and at most ' . self::Show($left, (string) $inv['in_currency_vc']) . '.';
+            }
+            $test = (int) $inv['in_test_in'] === 1;
+            $next = $row ? (int) $row[$test ? 'ps_cntestnext_in' : 'ps_cnnext_in'] : 1;
+            $number = ($test ? 'TEST-CN-' : 'CN-') . str_pad((string) $next, 5, '0', STR_PAD_LEFT);
+            $zdbh->prepare("UPDATE x_pp_sellers SET " . ($test ? 'ps_cntestnext_in' : 'ps_cnnext_in') . " = :n WHERE ps_acc_fk = :s")->execute(array(':n' => $next + 1, ':s' => (int) $inv['in_seller_fk']));
+            // (the last credit note of an invoice takes the rest of its tax: they add up to the invoice's)
+            $credTax = $zdbh->prepare("SELECT COALESCE(SUM(cn_tax_in), 0) FROM x_pp_credits WHERE cn_inv_fk = :i");
+            $credTax->execute(array(':i' => (int) $inv['in_id_pk']));
+            $taxDone = (int) $credTax->fetchColumn();
+            $tax = $amount === $left ? (int) $inv['in_tax_in'] - $taxDone
+                : ((int) $inv['in_total_in'] > 0 ? intdiv($amount * (int) $inv['in_tax_in'] * 2 + (int) $inv['in_total_in'], (int) $inv['in_total_in'] * 2) : 0);
+            $zdbh->prepare("INSERT INTO x_pp_credits (cn_seller_fk, cn_acc_fk, cn_inv_fk, cn_number_vc, cn_net_in, cn_tax_in, cn_total_in, cn_currency_vc, cn_reason_vc, cn_created_in, cn_test_in, cn_by_fk)
+                VALUES (:s, :u, :i, :no, :net, :tax, :tot, :cur, :r, :c, :t, :by)")
+                ->execute(array(':s' => (int) $inv['in_seller_fk'], ':u' => (int) $inv['in_acc_fk'], ':i' => (int) $inv['in_id_pk'], ':no' => $number, ':net' => $amount - $tax, ':tax' => $tax,
+                    ':tot' => $amount, ':cur' => (string) $inv['in_currency_vc'], ':r' => mb_substr((string) $reason, 0, 200), ':c' => time(), ':t' => $test ? 1 : 0, ':by' => (int) $by));
+            $id = (int) $zdbh->lastInsertId();
+            $zdbh->prepare("UPDATE x_pp_invoices SET in_credited_in = in_credited_in + :a WHERE in_id_pk = :i")->execute(array(':a' => $amount, ':i' => (int) $inv['in_id_pk']));
+            $zdbh->commit();
+        } catch (Exception $e) {
+            $zdbh->rollBack();
+            return 'The credit note could not be made.';
+        }
+        $cn = self::Credit($id);
+        self::Log($inv, 'credit', $number . ((string) $reason !== '' ? ': ' . mb_substr((string) $reason, 0, 200) : ''), '', $amount, $by);
+        self::TellCredit($cn, self::Invoice((int) $inv['in_id_pk']));
+        return $cn;
+    }
+
+    /**
+     * One credit note.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @param int $id
+     * @return array|null
+     */
+    static function Credit($id)
+    {
+        global $zdbh;
+        self::Ensure();
+        $q = $zdbh->prepare("SELECT * FROM x_pp_credits WHERE cn_id_pk = :i");
+        $q->execute(array(':i' => (int) $id));
+        $r = $q->fetch(PDO::FETCH_ASSOC);
+        return $r ? $r : null;
+    }
+
+    /**
+     * An invoice's credit notes.
+     *
+     * @global db_driver $zdbh The panel's database connection.
+     * @param int $inv
+     * @return array<int, array>
+     */
+    static function Credits($inv)
+    {
+        global $zdbh;
+        self::Ensure();
+        $q = $zdbh->prepare("SELECT * FROM x_pp_credits WHERE cn_inv_fk = :i ORDER BY cn_id_pk");
+        $q->execute(array(':i' => (int) $inv));
+        return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Send the client its credit note (email with the PDF, replies to the seller).
+     *
+     * @param array $cn
+     * @param array $inv
+     * @return void
+     */
+    static function TellCredit(array $cn, array $inv)
+    {
+        $u = ctrl_users::GetUserDetail((int) $inv['in_acc_fk']);
+        if (empty($u['email']) || !filter_var($u['email'], FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+        $s = self::Seller((int) $inv['in_seller_fk']);
+        $total = self::Show((int) $cn['cn_total_in'], (string) $cn['cn_currency_vc']);
+        $title = ((int) $cn['cn_test_in'] ? 'TEST: ' : '') . 'Credit note ' . $cn['cn_number_vc'] . ': ' . $total;
+        try {
+            $m = new sys_email();
+            $m->Subject = ((string) $s['ps_name_vc'] !== '' ? $s['ps_name_vc'] . ': ' : '') . $title;
+            $m->Body = "Hello " . $u['username'] . ",\n\nCredit note " . $cn['cn_number_vc'] . " for " . $total . " on invoice " . $inv['in_number_vc']
+                . ((string) $cn['cn_reason_vc'] !== '' ? " (" . $cn['cn_reason_vc'] . ")" : '') . ". The PDF is attached; it is also on the invoice's page in Billing (Account Information > Payment Plans)."
+                . ((int) $cn['cn_test_in'] ? ' (A test: no real money.)' : '') . "\n\n" . self::PanelUrl((int) $inv['in_acc_fk']) . "\n\n" . (string) $s['ps_name_vc'] . "\n";
+            $m->AddAddress($u['email']);
+            if (filter_var((string) $s['ps_email_vc'], FILTER_VALIDATE_EMAIL)) {
+                $m->AddReplyTo((string) $s['ps_email_vc'], (string) $s['ps_name_vc']);
+            }
+            if (method_exists($m, 'addStringAttachment')) {
+                $m->addStringAttachment(pp_pdf::CreditNote($cn, $inv), self::FileName('credit-note', (string) $cn['cn_number_vc']), 'base64', 'application/pdf');
+            }
+            $sent = $m->SendEmail();
+        } catch (Exception $e) {
+            $sent = false;
+        }
+        if ($sent === false) {
+            self::Log($inv, 'mailfail', 'credit note mail to ' . $u['email']);
+        }
+    }
+
+    /**
+     * A PDF's file name: what it is and its number, nothing a browser or mail program could take another way.
+     *
+     * @return string
+     */
+    static function FileName($kind, $number)
+    {
+        return $kind . '-' . trim(preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $number), '-') . '.pdf';
     }
 
     /**
@@ -1087,6 +1374,10 @@ class pp
                 if (filter_var((string) $s['ps_email_vc'], FILTER_VALIDATE_EMAIL)) {
                     $m->AddReplyTo((string) $s['ps_email_vc'], (string) $s['ps_name_vc']);
                 }
+                // (a new invoice and a paid one: the PDF with it, for the client's accounts)
+                if (in_array($what, array('new', 'paid'), true) && method_exists($m, 'addStringAttachment')) {
+                    $m->addStringAttachment(pp_pdf::Invoice(self::Invoice((int) $inv['in_id_pk'])), self::FileName('invoice', (string) $inv['in_number_vc']), 'base64', 'application/pdf');
+                }
                 $sent = $m->SendEmail();
             } catch (Exception $e) {
                 $sent = false;
@@ -1124,6 +1415,10 @@ class pp
             }
             $zdbh->prepare("DELETE FROM x_pp_invoices WHERE in_id_pk = :i AND in_test_in = 1")->execute(array(':i' => (int) $inv['in_id_pk']));
             $zdbh->prepare("DELETE FROM x_pp_log WHERE lg_inv_fk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
+            $zdbh->prepare("DELETE FROM x_pp_lines WHERE li_inv_fk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
+            // (lines the seller added that went on a test invoice wait for the next one again)
+            $zdbh->prepare("UPDATE x_pp_extras SET ex_inv_fk = NULL WHERE ex_inv_fk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
+            $zdbh->prepare("DELETE FROM x_pp_credits WHERE cn_inv_fk = :i AND cn_test_in = 1")->execute(array(':i' => (int) $inv['in_id_pk']));
             $n++;
         }
         $zdbh->prepare("UPDATE x_pp_sellers SET ps_testnext_in = 1 WHERE ps_acc_fk = :s")->execute(array(':s' => (int) $seller));
