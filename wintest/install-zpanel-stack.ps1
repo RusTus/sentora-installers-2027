@@ -618,15 +618,20 @@ echo 'ok';
             Ok "FTPS certificate for $ServerName (made here, valid 10 years)"
         }
 
+        # (its web pages, their files and the API description: where SFTPGo's own installer puts them)
+        $ftpShare = & $Fwd (Join-Path $env:ProgramData 'SFTPGo')
+        foreach ($d in @('templates', 'static', 'openapi')) { if (-not (Test-Path (Join-Path $env:ProgramData "SFTPGo\$d"))) { Fail "SFTPGo's $d folder is missing in $env:ProgramData\SFTPGo." } }
         $ftpConf = @"
 {
+  "smtp": { "templates_path": "$ftpShare/templates" },
   "data_provider": { "driver": "mysql", "name": "sftpgo", "host": "127.0.0.1", "port": 3306, "username": "sftpgo",
                      "users_base_dir": "$(& $Fwd (Join-Path $Root 'hostdata'))" },
   "ftpd": { "bindings": [ { "port": 21, "address": "", "tls_mode": 1, "min_tls_version": 12,
                             "certificate_file": "$(& $Fwd $crt)", "certificate_key_file": "$(& $Fwd $key)" } ],
             "passive_port_range": { "start": 50000, "end": 50100 } },
   "sftpd": { "bindings": [ { "port": 2022, "address": "" } ] },
-  "httpd": { "bindings": [ { "port": 8080, "address": "127.0.0.1", "enable_web_admin": true, "enable_web_client": true, "enable_rest_api": true } ] }
+  "httpd": { "templates_path": "$ftpShare/templates", "static_files_path": "$ftpShare/static", "openapi_path": "$ftpShare/openapi",
+             "bindings": [ { "port": 8080, "address": "127.0.0.1", "enable_web_admin": true, "enable_web_client": true, "enable_rest_api": true } ] }
 }
 "@
         Write-Utf8NoBom (Join-Path $ftpCfg 'sftpgo.json') $ftpConf
