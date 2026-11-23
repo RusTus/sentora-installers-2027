@@ -26,6 +26,7 @@ jobs:
           $out = & C:\zpanel\bin\mysql\bin\mysql.exe -u root -e "CREATE TABLE s3files.shortage (id INT, assm VARCHAR(20), CONSTRAINT assm FOREIGN KEY (assm) REFERENCES s3files.mabill01 (assm)) ENGINE=InnoDB" 2>&1 | ForEach-Object { "$_" }
           "without the option: $out"
           if (($out -join ' ') -notmatch '6125') { throw 'expected error 6125 before the option' }
+          exit 0
       - name: The new version over it (-RelaxedSqlMode -LegacyForeignKeys)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys
