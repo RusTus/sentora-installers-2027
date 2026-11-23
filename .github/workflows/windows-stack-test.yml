@@ -16,7 +16,7 @@ jobs:
           Get-NetTCPConnection -LocalPort 21, 80 -State Listen -ErrorAction SilentlyContinue | Format-Table -AutoSize
       - name: Install with FTP (-RelaxedSqlMode -LegacyForeignKeys -WithFtp)
         shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys -WithFtp
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -Unattended
       - name: An FTP user, an upload over FTPS, and who can reach what
         shell: powershell
         run: |

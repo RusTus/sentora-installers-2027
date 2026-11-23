@@ -38,13 +38,19 @@
     on 127.0.0.1:8080 only. C:\zpanel\bin\ftpuser.ps1 adds, removes and lists FTP users.
 .PARAMETER NoFirewall
     Do not open Apache's port in Windows Firewall (MySQL is never opened: it listens on 127.0.0.1 only).
+.PARAMETER Unattended
+    Ask nothing: every question takes its default (Yes). Without it the installer asks about each part, Yes by default
+    (press Enter); a switch given on the command line is not asked again.
 .PARAMETER Uninstall
     Stop and remove the two services and the firewall rule. Folders, databases and logs stay.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys -TimeZone "America/New_York"
+    powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1
+    (asks about each part, Yes by default)
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1 -Unattended -TimeZone "America/New_York"
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +63,7 @@ param(
     [switch]$LegacyForeignKeys,
     [switch]$WithFtp,
     [switch]$NoFirewall,
+    [switch]$Unattended,
     [switch]$Uninstall
 )
 
@@ -234,6 +241,32 @@ foreach ($d in @($Root, $Bin, $Cfg, (Join-Path $Cfg 'apache'), (Join-Path $Cfg '
                  (Join-Path $Tmp 'uploads'), (Join-Path $Tmp 'sessions'))) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
 }
+# ------------------------------------------------------------------------------------------------------------------
+# The questions (Yes by default: Enter takes it). A switch on the command line answers its question; -Unattended, or
+# no one at the keyboard, takes every default.
+# ------------------------------------------------------------------------------------------------------------------
+$quiet = $Unattended -or -not [Environment]::UserInteractive -or [Console]::IsInputRedirected
+function Ask($question) {
+    if ($quiet) { return $true }
+    $a = Read-Host "   $question [Y/n]"
+    return ($a -match '^\s*$' -or $a -match '^\s*[yY]')
+}
+if (-not $quiet) {
+    Write-Host ''
+    Write-Host 'A few questions (press Enter for Yes):' -ForegroundColor Cyan
+}
+if (-not $PSBoundParameters.ContainsKey('WithFtp'))           { $WithFtp = [switch](Ask 'Install FTP and SFTP (SFTPGo: FTP with TLS on 21, SFTP on 2022, users in MySQL)?') }
+if (-not $PSBoundParameters.ContainsKey('RelaxedSqlMode'))    { $RelaxedSqlMode = [switch](Ask 'MySQL without strict mode, as MySQL 5 behaved (for an older app)?') }
+if (-not $PSBoundParameters.ContainsKey('LegacyForeignKeys')) { $LegacyForeignKeys = [switch](Ask 'Allow foreign keys to columns that are not unique, as MySQL 5 did (MySQL 8.4 error 6125)?') }
+if (-not $PSBoundParameters.ContainsKey('NoFirewall'))        { $NoFirewall = [switch](-not (Ask 'Open Windows Firewall for the web server (port 80) and FTP?')) }
+if (-not $PSBoundParameters.ContainsKey('TimeZone') -and -not $quiet) {
+    $tz = Read-Host "   PHP time zone [$TimeZone]"
+    if ($tz -match '^[A-Za-z]+(/[A-Za-z0-9_+-]+){0,2}$') { $TimeZone = $tz }
+}
+Write-Host ''
+Write-Host ("   Installing: Apache, PHP, MySQL" + $(if ($WithFtp) { ', FTP (SFTPGo)' }) + "; MySQL " + $(if ($RelaxedSqlMode) { 'lenient (MySQL 5)' } else { 'strict' }) +
+    $(if ($LegacyForeignKeys) { ', old-style foreign keys' }) + "; firewall " + $(if ($NoFirewall) { 'left as it is' } else { 'opened for them' }) + "; time zone $TimeZone")
+
 Start-Transcript -Path (Join-Path $Logs ('install-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')) | Out-Null
 
 try {
