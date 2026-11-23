@@ -389,7 +389,39 @@ $inv = lastinv(11);
 $d = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
 fake('stripe', array('s' => $d, 'pay' => 'paid'));
 $r = req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inVoid' => '1'));
-check(strpos($r['text'], 'was just paid: it is not voided') !== false && lastinv(11)['in_status_vc'] === 'paid', 'voiding an invoice the client just paid: it is kept, paid', $r['text']);
+check(strpos($r['text'], 'was just paid online: it is not voided') !== false && lastinv(11)['in_status_vc'] === 'paid', 'voiding an invoice the client just paid: it is kept, paid', $r['text']);
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$e = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
+$r = req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inMethod' => 'bank transfer'));
+check(lastinv(11)['in_status_vc'] === 'paid' && lastinv(11)['in_method_vc'] === 'bank transfer' && fake('state')['stripe'][$e]['status'] === 'expired',
+    'marked paid by bank transfer: its open checkout page is closed first (the client can not pay a second time by card)', $r['text']);
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$g = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
+fake('stripe', array('s' => $g, 'pay' => 'paid'));
+$r = req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inMethod' => 'cash'));
+check(strpos($r['text'], 'was just paid online: it is not marked paid') !== false && lastinv(11)['in_method_vc'] !== 'cash', 'marking paid an invoice the client just paid by card: the card payment stands', $r['text']);
+// an answer about an older payment page never wipes out a newer one (the daemon and the client at the same time)
+req(2, 'InvoiceNow', array('inClient' => '11'));
+$inv = lastinv(11);
+$h = sid(req(11, 'Pay', array('inId' => (string) $inv['in_id_pk'])));
+$stale = lastinv(11);
+$zdbh->exec("UPDATE x_pp_invoices SET in_order_vc = 'cs_test_newer0000000000000001' WHERE in_id_pk = " . (int) $inv['in_id_pk']);
+pp_pay::Apply($stale, array('ref' => $h, 'state' => 'failed', 'why' => 'expired'), 'Stripe');
+check(lastinv(11)['in_order_vc'] === 'cs_test_newer0000000000000001', 'a late "expired" about an older page leaves the newer payment in place', (string) lastinv(11)['in_order_vc']);
+$zdbh->exec("UPDATE x_pp_invoices SET in_order_vc = " . $zdbh->quote($h) . " WHERE in_id_pk = " . (int) $inv['in_id_pk']);
+req(2, 'Invoice', array('inId' => (string) $inv['in_id_pk'], 'inVoid' => '1'));
+
+section('Billing days: a plan keeps its own day of the month');
+$d = function ($s) { return (int) strtotime($s . ' 12:00:00'); };
+$ymd = function ($t) { return date('Y-m-d', $t); };
+check($ymd(pp::PeriodEnd($d('2027-01-31'), 'month', 31)) === '2027-02-28' && $ymd(pp::PeriodEnd($d('2027-02-28'), 'month', 31)) === '2027-03-31'
+    && $ymd(pp::PeriodEnd($d('2027-03-31'), 'month', 31)) === '2027-04-30' && $ymd(pp::PeriodEnd($d('2027-04-30'), 'month', 31)) === '2027-05-31',
+    'from the 31st: the end of every month (Feb 28, Mar 31, Apr 30, May 31), not the 28th for good');
+check($ymd(pp::PeriodEnd($d('2028-02-29'), 'year', 29)) === '2029-02-28' && $ymd(pp::PeriodEnd($d('2029-02-28'), 'year', 29)) === '2030-02-28'
+    && $ymd(pp::PeriodEnd($d('2031-02-28'), 'year', 29)) === '2032-02-29', 'yearly from Feb 29: Feb 28 in other years, Feb 29 again in a leap year');
+check($ymd(pp::PeriodEnd($d('2027-01-15'), 'month')) === '2027-02-15', 'a plan from before (no billing day kept): as before');
 
 section('Stripe: a payment that takes time, and one that expires');
 req(2, 'InvoiceNow', array('inClient' => '11'));
@@ -600,10 +632,14 @@ check(strpos($r['html'], 'Pay as your provider tells you') !== false, 'res1 sees
 check(pp_proc_stripe::Factor('HUF') === 100 && pp_proc_stripe::Factor('JPY') === 1 && pp_proc_stripe::Factor('USD') === 1, 'Stripe amounts: HUF in hundredths, JPY in yen, USD in cents');
 
 section('Pages draw without PHP problems');
-foreach (array(array(2, array()), array(2, array('tab' => 'billing')), array(11, array()), array(15, array()), array(2, array('invoice' => (string) $i15['in_id_pk'])),
+foreach (array(array(2, array()), array(2, array('package' => '2')), array(2, array('tab' => 'billing')), array(11, array()), array(15, array()), array(2, array('invoice' => (string) $i15['in_id_pk'])),
     array(15, array('invoice' => (string) $i15['in_id_pk'])), array(10, array('invoice' => (string) $i15['in_id_pk']))) as $p) {
     $r = req($p[0], '', array(), $p[1]);
     check($r['html'] !== '', 'account ' . $p[0] . ' ' . json_encode($p[1]));
+    if (getenv('PP_PAGES')) {
+        @mkdir(getenv('PP_PAGES'), 0755, true);
+        file_put_contents(getenv('PP_PAGES') . '/acc' . $p[0] . ($p[1] ? '-' . implode('-', array_map(function ($k, $v) { return $k . $v; }, array_keys($p[1]), $p[1])) : '') . '.html', $r['html']);
+    }
 }
 check(strpos(req(10, '', array(), array('invoice' => (string) $i15['in_id_pk']))['html'], 'No such invoice of yours') !== false, 'another client\'s invoice is not shown');
 
@@ -630,7 +666,7 @@ $h12 = pp::History($manual12);
 check(end($h12)['lg_what_vc'] === 'paid' && end($h12)['lg_note_vc'] === 'Bank transfer' && (int) end($h12)['lg_by_fk'] === 2, 'marked paid by hand: noted with who did it');
 $off = row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_acc_fk = 11 AND lg_what_vc IN ('off', 'on')");
 check((int) $off['n'] === 2, 'switching off and on again is noted');
-check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 5, 'voided invoices are noted');
+check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 6, 'voided invoices are noted');
 $r = req(12, '', array(), array('invoice' => (string) $manual12));
 $r2 = req(2, '', array(), array('invoice' => (string) $manual12));
 check(strpos($r['html'], 'Bank transfer') !== false && strpos($r['html'], 'by res1') === false && strpos($r2['html'], 'by res1') !== false,

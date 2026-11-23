@@ -47,7 +47,12 @@
 .pp-addr { white-space: normal; line-height: 1.5; font-size: 13px; }
 .pp-lines td:last-child { text-align: right; white-space: nowrap; }
 .pp-total td { font-weight: 700; font-size: 15px; border-bottom: 0; }
-@media (max-width: 600px) { .pp { padding: 10px; } .pp-card { padding: 12px; } .pp-invoice { padding: 16px; } }
+@media (max-width: 600px) { .pp { padding: 10px; } .pp-card { padding: 12px; } .pp-invoice { padding: 16px; }
+    /* tables become small cards: every row its own, its cells one under the other (nothing off the side of a phone) */
+    .pp-table:not(.pp-lines) thead { display: none; } .pp-table:not(.pp-lines), .pp-table:not(.pp-lines) tbody, .pp-table:not(.pp-lines) tr, .pp-table:not(.pp-lines) td { display: block; width: 100%; }
+    .pp-table:not(.pp-lines) tr { border: 1px solid var(--pp-line); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+    .pp-table:not(.pp-lines) td { border: 0; padding: 3px 0; overflow-wrap: anywhere; } .pp-table:not(.pp-lines) td:first-child { font-weight: 600; }
+    .pp-table .form-control { max-width: none; } }
 @media print { body * { visibility: hidden; } .pp-invoice, .pp-invoice * { visibility: visible; } .pp-invoice { position: absolute; left: 0; top: 0; box-shadow: none; } .pp-noprint { display: none; } }
 .pp-planform select { min-width: 190px; }
 .pp-testbanner { margin: 0 0 14px; padding: 10px 12px; border-radius: 6px; background: repeating-linear-gradient(45deg, var(--pp-warn-soft), var(--pp-warn-soft) 12px, transparent 12px, transparent 24px), var(--pp-warn-soft); color: var(--pp-warn); border: 1px dashed var(--pp-warn); font-size: 13px; }

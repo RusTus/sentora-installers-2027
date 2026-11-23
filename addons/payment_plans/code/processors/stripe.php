@@ -35,9 +35,19 @@ class pp_proc_stripe implements pp_processor
         );
     }
 
+    /**
+     * A Checkout page left open takes the money by itself (no capture by the panel).
+     *
+     * @return bool
+     */
+    static function TakesMoneyAlone()
+    {
+        return true;
+    }
+
     static function Help()
     {
-        return 'Your secret key, from dashboard.stripe.com > Developers > API keys: the test key (sk_test_) for test mode, the live key (sk_live_) for real payments. A restricted key needs Checkout Sessions and PaymentIntents (read and write).';
+        return 'Your secret key, from dashboard.stripe.com > Developers > API keys: the test key (sk_test_) for test mode, the live key (sk_live_) for real payments. A restricted key needs Checkout Sessions and PaymentIntents (read and write), and Charges, Refunds and Disputes (read) to see refunds and chargebacks.';
     }
 
     static function Hosts()
@@ -111,7 +121,7 @@ class pp_proc_stripe implements pp_processor
         if ($email !== '') {
             $form['customer_email'] = $email;
         }
-        list($code, $j, $why) = self::Api($keys, 'POST', '/v1/checkout/sessions', $form, 'pp-session-' . $id . '-' . bin2hex(random_bytes(6)));
+        list($code, $j, $why) = self::Api($keys, 'POST', '/v1/checkout/sessions', $form, 'pp-session-' . $id . '-' . (int) ($inv['in_order_in'] ?? 0) . '-' . ($mode === 'live' ? 'l' : 't'));
         if ($code !== 200 || !isset($j['id'], $j['url']) || !preg_match('/^cs_(test|live)_[A-Za-z0-9]{10,250}$/', (string) $j['id'])) {
             return $code === 200 ? 'Stripe gave no page to pay on.' : $why;
         }

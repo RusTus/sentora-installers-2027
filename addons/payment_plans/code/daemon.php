@@ -72,6 +72,7 @@ class pp_daemon
         // 3. reminders on the due date, then switched off past the grace days
         // (a TEST invoice only while its seller is testing: after going live it reminds and switches off nobody)
         foreach ($zdbh->query("SELECT i.*, s.ps_grace_in, s.ps_suspend_in FROM x_pp_invoices i JOIN x_pp_sellers s ON s.ps_acc_fk = i.in_seller_fk
+            JOIN x_accounts a ON a.ac_id_pk = i.in_acc_fk AND a.ac_deleted_ts IS NULL
             WHERE i.in_status_vc = 'open' AND s.ps_on_in = 1 AND (i.in_test_in = 0 OR s.ps_mode_vc <> 'live') AND i.in_due_in <= " . (int) $now . ($only ? " AND i.in_seller_fk = " . $only : ''))->fetchAll(PDO::FETCH_ASSOC) as $inv) {
             if ((int) $inv['in_reminded_in'] < 1) {
                 pp::Tell($inv, 'due');
@@ -84,11 +85,14 @@ class pp_daemon
                 && $now >= (int) $inv['in_created_in'] + 86400) {
                 $plan = pp::Plan((int) $inv['in_acc_fk']);
                 // only while the client is still the seller's, on an active plan
-                if ($plan && (int) $plan['pl_active_in'] && (int) $plan['pl_seller_fk'] === (int) $inv['in_seller_fk'] && pp::SellerOf((int) $inv['in_acc_fk']) === (int) $inv['in_seller_fk'] && pp::SwitchOff($inv)) {
-                    pp::Tell($inv, 'suspended');
-                    $log[] = 'Payment Plans: account ' . (int) $inv['in_acc_fk'] . ' switched off (invoice ' . $inv['in_number_vc'] . ' unpaid)';
+                // (a stopped plan switches nobody off, but the invoice stays waiting: started again, it does)
+                if ($plan && (int) $plan['pl_active_in'] && (int) $plan['pl_seller_fk'] === (int) $inv['in_seller_fk'] && pp::SellerOf((int) $inv['in_acc_fk']) === (int) $inv['in_seller_fk']) {
+                    if (pp::SwitchOff($inv)) {
+                        pp::Tell($inv, 'suspended');
+                        $log[] = 'Payment Plans: account ' . (int) $inv['in_acc_fk'] . ' switched off (invoice ' . $inv['in_number_vc'] . ' unpaid)';
+                    }
+                    $zdbh->prepare("UPDATE x_pp_invoices SET in_reminded_in = 2 WHERE in_id_pk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
                 }
-                $zdbh->prepare("UPDATE x_pp_invoices SET in_reminded_in = 2 WHERE in_id_pk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
             }
         }
         // 4. refunds and chargebacks: each paid invoice looked at once a day for 180 days after it was

@@ -99,6 +99,9 @@ class pp
         if (self::AddColumn('x_pp_plans', 'pl_realuntil_in', 'INT NOT NULL DEFAULT 0')) {
             $zdbh->exec("UPDATE x_pp_plans SET pl_realuntil_in = pl_paiduntil_in");
         }
+        // (109) the day of the month a plan is billed on (so the 31st stays the month's end after a short
+        // month); 0 for plans from before: the day of their paid-until date, as before
+        self::AddColumn('x_pp_plans', 'pl_anchor_in', 'TINYINT NOT NULL DEFAULT 0');
         // version 103: every step of every invoice, kept (made, payment started, paid, refused, voided, switched off...)
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_log (
             lg_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, lg_time_in INT NOT NULL, lg_seller_fk INT NOT NULL, lg_acc_fk INT NOT NULL, lg_inv_fk INT NOT NULL DEFAULT 0,
@@ -527,12 +530,12 @@ class pp
         self::Ensure();
         $plan = self::Plan($uid);
         if ($plan && (int) $plan['pl_seller_fk'] === (int) $seller) {
-            $zdbh->prepare("UPDATE x_pp_plans SET pl_period_vc = :p, pl_paiduntil_in = :d, pl_realuntil_in = :d2, pl_active_in = 1 WHERE pl_acc_fk = :u")
-                ->execute(array(':p' => $period, ':d' => (int) $paidUntil, ':d2' => (int) $paidUntil, ':u' => (int) $uid));
+            $zdbh->prepare("UPDATE x_pp_plans SET pl_period_vc = :p, pl_paiduntil_in = :d, pl_realuntil_in = :d2, pl_active_in = 1, pl_anchor_in = :a WHERE pl_acc_fk = :u")
+                ->execute(array(':p' => $period, ':d' => (int) $paidUntil, ':d2' => (int) $paidUntil, ':a' => (int) date('j', (int) $paidUntil), ':u' => (int) $uid));
             return;
         }
-        $zdbh->prepare("REPLACE INTO x_pp_plans (pl_acc_fk, pl_seller_fk, pl_period_vc, pl_paiduntil_in, pl_realuntil_in, pl_active_in, pl_suspended_in, pl_created_in) VALUES (:u, :s, :p, :d, :d2, 1, 0, :t)")
-            ->execute(array(':u' => (int) $uid, ':s' => (int) $seller, ':p' => $period, ':d' => (int) $paidUntil, ':d2' => (int) $paidUntil, ':t' => time()));
+        $zdbh->prepare("REPLACE INTO x_pp_plans (pl_acc_fk, pl_seller_fk, pl_period_vc, pl_paiduntil_in, pl_realuntil_in, pl_active_in, pl_suspended_in, pl_created_in, pl_anchor_in) VALUES (:u, :s, :p, :d, :d2, 1, 0, :t, :a)")
+            ->execute(array(':u' => (int) $uid, ':s' => (int) $seller, ':p' => $period, ':d' => (int) $paidUntil, ':d2' => (int) $paidUntil, ':t' => time(), ':a' => (int) date('j', (int) $paidUntil)));
     }
 
     /**
@@ -600,13 +603,15 @@ class pp
      *
      * @param int $from
      * @param string $period month or year
+     * @param int $anchor The plan's billing day (1-31; 0: the day of $from).
      * @return int
      */
-    static function PeriodEnd($from, $period)
+    static function PeriodEnd($from, $period, $anchor = 0)
     {
         $d = new DateTime('@' . (int) $from);
         $d->setTimezone(new DateTimeZone(date_default_timezone_get()));
-        $day = (int) $d->format('j');
+        // (the plan's own billing day when it has one: a plan from the 31st is billed at each month's end)
+        $day = (int) $anchor >= 1 && (int) $anchor <= 31 ? (int) $anchor : (int) $d->format('j');
         $d->modify('first day of this month');
         $d->modify($period === 'year' ? '+1 year' : '+1 month');
         // the same day of the month (the 31st becomes the month's last day)
@@ -685,7 +690,7 @@ class pp
         }
         $s = self::Seller($seller);
         $from = (int) $plan['pl_paiduntil_in'];
-        $to = self::PeriodEnd($from, $period);
+        $to = self::PeriodEnd($from, $period, (int) ($plan['pl_anchor_in'] ?? 0));
         $tax = (int) $s['ps_taxrate_in'] > 0 ? self::Tax($net, (int) $s['ps_taxrate_in']) : 0;
         $sellerText = trim((string) $s['ps_name_vc'] . "\n" . (string) $s['ps_address_tx'] . ((string) $s['ps_email_vc'] !== '' ? "\n" . $s['ps_email_vc'] : ''));
         $buyerText = trim(($c['fullname'] !== '' ? $c['fullname'] . "\n" : '') . $c['username'] . ($c['email'] !== '' ? "\n" . $c['email'] : ''));
@@ -900,8 +905,13 @@ class pp
                 if (filter_var((string) $s['ps_email_vc'], FILTER_VALIDATE_EMAIL)) {
                     $m->AddReplyTo((string) $s['ps_email_vc'], (string) $s['ps_name_vc']);
                 }
-                $m->SendEmail();
+                $sent = $m->SendEmail();
             } catch (Exception $e) {
+                $sent = false;
+            }
+            // (a mail the server could not send is on the invoice's history, for the seller to see)
+            if ($sent === false) {
+                self::Log($inv, 'mailfail', $what . ' mail to ' . $u['email']);
             }
         }
     }

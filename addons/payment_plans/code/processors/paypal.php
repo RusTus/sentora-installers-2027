@@ -35,6 +35,16 @@ class pp_proc_paypal implements pp_processor
         );
     }
 
+    /**
+     * An approved PayPal order takes no money until the panel captures it.
+     *
+     * @return bool
+     */
+    static function TakesMoneyAlone()
+    {
+        return false;
+    }
+
     static function Help()
     {
         return 'Your app\'s Client ID and Secret, from developer.paypal.com > Apps & Credentials: one app for the sandbox (test mode), one for live.';
@@ -259,7 +269,8 @@ class pp_proc_paypal implements pp_processor
                     list($c2, $one) = self::Api($keys, $mode, 'GET', '/v1/customer/disputes/' . $it['dispute_id']);
                     $out = $c2 === 200 && is_array($one) ? (string) ($one['dispute_outcome']['outcome_code'] ?? '') : '';
                 }
-                $dispute = $out === 'RESOLVED_SELLER_FAVOUR' || $out === 'CANCELED_BY_BUYER' ? 'won' : ($out !== '' ? 'lost' : ((string) $dispute !== '' ? $dispute : 'open'));
+                // (lost: the money went back to the buyer; any other outcome kept it with the seller)
+                $dispute = in_array($out, array('RESOLVED_BUYER_FAVOUR', 'RESOLVED_WITH_PAYOUT', 'ACCEPTED'), true) ? 'lost' : ($out !== '' ? 'won' : ((string) $dispute !== '' ? $dispute : 'open'));
             }
         }
         return array('refund' => $refund, 'refunded' => $refunded, 'dispute' => $dispute);

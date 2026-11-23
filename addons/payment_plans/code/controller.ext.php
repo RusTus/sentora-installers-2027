@@ -451,6 +451,41 @@ class module_controller extends ctrl_module
     }
 
     /**
+     * Close an invoice's online payment that is still open, before the seller voids it or marks it
+     * paid another way: one that went through after all keeps the invoice as paid (said here).
+     *
+     * @param array $inv
+     * @param string $what English: voided or marked paid.
+     * @return bool Closed (or there was none).
+     */
+    static function CloseOnline(array $inv, $what)
+    {
+        if ((string) $inv['in_order_vc'] === '') {
+            return true;
+        }
+        $said = function ($r) use ($inv, $what) {
+            self::Say('error', $r === 'paid' ? 'Invoice %s was just paid online: it is not ' . $what . '.' : 'An online payment of invoice %s is being checked: wait until it is settled.', array($inv['in_number_vc']));
+        };
+        $r = pp_pay::Settle($inv);
+        if ($r === 'paid' || $r === 'pending') {
+            $said($r);
+            return false;
+        }
+        $inv = pp::Invoice((int) $inv['in_id_pk']);
+        if (!pp_pay::Abandon($inv)) {
+            self::Say('error', 'The online payment page of invoice %s could not be closed (with its keys gone, a Stripe page closes by itself within a day): try again later.', array($inv['in_number_vc']));
+            return false;
+        }
+        // (paid at the very moment it was closed?)
+        $r = pp_pay::Settle($inv);
+        if ($r === 'paid' || $r === 'pending') {
+            $said($r);
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * Make a client's next invoice now.
      *
      * @return void
@@ -494,23 +529,8 @@ class module_controller extends ctrl_module
         if (self::Post('inVoid') === '1') {
             // a payment of it still open is closed first (it must not take money for a void invoice);
             // one that went through after all keeps the invoice
-            if ((string) $inv['in_order_vc'] !== '') {
-                $r = pp_pay::Settle($inv);
-                if ($r === 'paid' || $r === 'pending') {
-                    self::Say('error', $r === 'paid' ? 'Invoice %s was just paid: it is not voided.' : 'A payment of invoice %s is being checked: void it once it is settled.', array($inv['in_number_vc']));
-                    return;
-                }
-                $inv = pp::Invoice((int) $inv['in_id_pk']);
-                if (!pp_pay::Abandon($inv)) {
-                    self::Say('error', 'The payment page of invoice %s could not be closed: try again in a minute.', array($inv['in_number_vc']));
-                    return;
-                }
-                // (paid at the very moment it was closed?)
-                $r = pp_pay::Settle($inv);
-                if ($r === 'paid' || $r === 'pending') {
-                    self::Say('error', $r === 'paid' ? 'Invoice %s was just paid: it is not voided.' : 'A payment of invoice %s is being checked: void it once it is settled.', array($inv['in_number_vc']));
-                    return;
-                }
+            if (!self::CloseOnline($inv, 'voided')) {
+                return;
             }
             $zdbh->prepare("UPDATE x_pp_invoices SET in_status_vc = 'void' WHERE in_id_pk = :i AND in_status_vc IN ('open', 'pending')")->execute(array(':i' => (int) $inv['in_id_pk']));
             try {
@@ -529,6 +549,10 @@ class module_controller extends ctrl_module
         $method = self::Text(self::Post('inMethod'), 60);
         if ($method === false || $method === '') {
             self::Say('error', 'Say how it was paid (such as bank transfer).');
+            return;
+        }
+        // (the same for paid another way: an online payment page left open must not take the money too)
+        if (!self::CloseOnline($inv, 'marked paid')) {
             return;
         }
         if (pp::MarkPaid((int) $inv['in_id_pk'], $method, '', '', $seller)) {
@@ -1159,7 +1183,7 @@ class module_controller extends ctrl_module
     static function HistoryHtml($id, $cur, $seller)
     {
         $words = array('made' => 'Invoice made', 'started' => 'Payment started', 'closed' => 'Payment page closed', 'pending' => 'Payment being checked', 'paid' => 'Paid',
-            'failed' => 'Payment not completed', 'refused' => 'Payment not counted', 'void' => 'Voided', 'off' => 'Hosting switched off', 'on' => 'Hosting switched on',
+            'failed' => 'Payment not completed', 'mailfail' => 'Mail not sent', 'refused' => 'Payment not counted', 'void' => 'Voided', 'off' => 'Hosting switched off', 'on' => 'Hosting switched on',
             'refunded' => 'Refunded', 'partrefund' => 'Partly refunded', 'dispute' => 'Chargeback opened', 'disputewon' => 'Chargeback won', 'disputelost' => 'Charged back');
         $rows = '';
         foreach (pp::History($id) as $h) {

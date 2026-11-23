@@ -239,13 +239,20 @@ class pp_pay
     {
         global $zdbh;
         self::$found = '';
+        // One payment start at a time for an invoice (two clicks, two tabs): the invoice is claimed
+        // first, in one step the database does alone; a start that finds it claimed moments ago waits
+        $claim = time();
+        $q = $zdbh->prepare("UPDATE x_pp_invoices SET in_order_in = :c WHERE in_id_pk = :i AND in_status_vc = 'open' AND (in_order_in IS NULL OR in_order_in <= :old)");
+        $q->execute(array(':c' => $claim, ':i' => (int) $inv['in_id_pk'], ':old' => $claim - 10));
+        if ($q->rowCount() !== 1) {
+            $now = pp::Invoice((int) $inv['in_id_pk']);
+            return $now && (string) $now['in_status_vc'] === 'open' ? 'A payment was started a moment ago: wait a few seconds, then try again.' : 'That invoice is not open any more.';
+        }
+        $inv = pp::Invoice((int) $inv['in_id_pk']);
         // The invoice's last payment first: paid after all (the client paid and did not come back)?
         // Then it is closed before a new one is made, so the client can never pay twice (a Stripe
         // checkout page left open in another tab takes money by itself).
         if (preg_match(self::REF, (string) $inv['in_order_vc'])) {
-            if ((int) $inv['in_order_in'] > time() - 10) {
-                return 'A payment was started a moment ago: wait a few seconds, then try again.';
-            }
             $r = self::Settle($inv);
             if ($r === 'paid' || $r === 'pending') {
                 self::$found = $r;
@@ -280,15 +287,20 @@ class pp_pay
         }
         $u = ctrl_users::GetUserDetail((int) $inv['in_acc_fk']);
         $email = isset($u['email']) && filter_var((string) $u['email'], FILTER_VALIDATE_EMAIL) ? (string) $u['email'] : '';
-        $r = $c::Create($inv, $k, $mode, (string) $s['ps_name_vc'], $return, $cancel, $email);
+        $r = $c::Create(array('in_order_in' => $claim) + $inv, $k, $mode, (string) $s['ps_name_vc'], $return, $cancel, $email);
         if (!is_array($r)) {
             return (string) $r;
         }
         if (!preg_match(self::REF, (string) $r[0]) || !self::Allowed((string) $r[1], $c)) {
             return $c::Name() . ' gave no page to pay on.';
         }
-        $zdbh->prepare("UPDATE x_pp_invoices SET in_order_vc = :o, in_ordermode_vc = :m, in_order_in = :t, in_proc_vc = :p WHERE in_id_pk = :i AND in_status_vc = 'open'")
-            ->execute(array(':o' => $r[0], ':m' => $mode, ':t' => time(), ':p' => $proc, ':i' => (int) $inv['in_id_pk']));
+        // (still this start's claim: a later start took over meanwhile, so this payment page is closed again)
+        $q = $zdbh->prepare("UPDATE x_pp_invoices SET in_order_vc = :o, in_ordermode_vc = :m, in_order_in = :t, in_proc_vc = :p WHERE in_id_pk = :i AND in_status_vc = 'open' AND in_order_in = :c");
+        $q->execute(array(':o' => $r[0], ':m' => $mode, ':t' => time(), ':p' => $proc, ':i' => (int) $inv['in_id_pk'], ':c' => $claim));
+        if ($q->rowCount() !== 1) {
+            $c::Abandon(array('in_order_vc' => $r[0]) + $inv, $k, $mode);
+            return 'A payment was started a moment ago: wait a few seconds, then try again.';
+        }
         pp::Log(array('in_proc_vc' => $proc) + $inv, 'started', $c::Name() . ($mode === 'live' ? '' : ', test mode'), (string) $r[0], (int) $inv['in_total_in']);
         return (string) $r[1];
     }
@@ -308,8 +320,17 @@ class pp_pay
         }
         $mode = pp::InvoiceMode($inv);
         $k = self::Keys((int) $inv['in_seller_fk'], (string) $inv['in_proc_vc'] !== '' ? (string) $inv['in_proc_vc'] : 'paypal', $mode);
-        // (without the keys nothing can be asked: the seller took them away)
-        if ($k === null || $c::Abandon($inv, $k, $mode)) {
+        // without the keys nothing can be asked: a processor whose open payment page takes money by
+        // itself (Stripe Checkout, for up to a day) is not called closed until that page has run out
+        if ($k === null) {
+            $alone = !method_exists($c, 'TakesMoneyAlone') || $c::TakesMoneyAlone();
+            if ($alone && (int) $inv['in_order_in'] > time() - 86400) {
+                return false;
+            }
+            pp::Log($inv, 'closed', 'its keys are gone', $ref);
+            return true;
+        }
+        if ($c::Abandon($inv, $k, $mode)) {
             pp::Log($inv, 'closed', '', $ref);
             return true;
         }
@@ -397,8 +418,9 @@ class pp_pay
         }
         if ($state === 'failed') {
             // declined, expired, cancelled, refunded...: the invoice is open to be paid again
-            $zdbh->prepare("UPDATE x_pp_invoices SET in_status_vc = 'open', in_order_vc = NULL, in_capture_vc = NULL WHERE in_id_pk = :i AND in_status_vc IN ('open', 'pending')")
-                ->execute(array(':i' => (int) $inv['in_id_pk']));
+            // (only while the invoice still has the payment this answer is about: a newer one is never wiped out)
+            $zdbh->prepare("UPDATE x_pp_invoices SET in_status_vc = 'open', in_order_vc = NULL, in_capture_vc = NULL WHERE in_id_pk = :i AND in_status_vc IN ('open', 'pending') AND in_order_vc = :o")
+                ->execute(array(':i' => (int) $inv['in_id_pk'], ':o' => (string) $inv['in_order_vc']));
             pp::Log($inv, 'failed', (string) ($r['why'] ?? ''), (string) $inv['in_order_vc']);
             return $name . ' did not complete the payment' . (!empty($r['why']) ? ' (' . $r['why'] . ')' : '') . '.';
         }
@@ -423,8 +445,8 @@ class pp_pay
             return pp::MarkPaid((int) $inv['in_id_pk'], $name, $pay, (string) ($r['payer'] ?? '')) ? 'paid' : 'This payment is recorded already.';
         }
         try {
-            $zdbh->prepare("UPDATE x_pp_invoices SET in_status_vc = 'pending', in_capture_vc = :c WHERE in_id_pk = :i AND in_status_vc IN ('open', 'pending')")
-                ->execute(array(':c' => $pay, ':i' => (int) $inv['in_id_pk']));
+            $zdbh->prepare("UPDATE x_pp_invoices SET in_status_vc = 'pending', in_capture_vc = :c WHERE in_id_pk = :i AND in_status_vc IN ('open', 'pending') AND in_order_vc = :o")
+                ->execute(array(':c' => $pay, ':i' => (int) $inv['in_id_pk'], ':o' => (string) $inv['in_order_vc']));
         } catch (PDOException $e) {
             return 'This payment is recorded already.';
         }
