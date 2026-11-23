@@ -9,54 +9,63 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Free port 80
+      - name: Free port 80 and 21
         shell: powershell
-        run: Get-Service W3SVC -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
-      - name: The first version (services ZPanelApache, ZPanelMySQL), with a database in it
+        run: |
+          Get-Service W3SVC, FTPSVC -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+          Get-NetTCPConnection -LocalPort 21, 80 -State Listen -ErrorAction SilentlyContinue | Format-Table -AutoSize
+      - name: Install with FTP (-RelaxedSqlMode -LegacyForeignKeys -WithFtp)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys -WithFtp
+      - name: An FTP user, an upload over FTPS, and who can reach what
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          powershell -NoProfile -ExecutionPolicy Bypass -File wintest\old.ps1 -RelaxedSqlMode
-          if (-not (Get-Service ZPanelApache, ZPanelMySQL -ErrorAction SilentlyContinue)) { throw 'the old services are not there' }
+          Get-Service Apache2, MySQL, SFTPGo | Format-Table Name, Status, StartType -AutoSize
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 add webuser Upl0ad-Test-9x
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 list
+          # FTPS (explicit TLS) upload, accepting the certificate made at install time
+          [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/hello.txt')
+          $req.Method = [Net.WebRequestMethods+Ftp]::UploadFile; $req.EnableSsl = $true; $req.UsePassive = $true
+          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'Upl0ad-Test-9x')
+          $b = [Text.Encoding]::ASCII.GetBytes('hello over FTPS'); $s = $req.GetRequestStream(); $s.Write($b, 0, $b.Length); $s.Close(); $req.GetResponse().Close()
+          $f = 'C:\zpanel\hostdata\webuser\public_html\hello.txt'
+          if ((Get-Content $f -Raw) -ne 'hello over FTPS') { throw 'the uploaded file is not there' }
+          'ok   FTPS upload landed in C:\zpanel\hostdata\webuser\public_html'
+          # plain FTP without TLS must be refused (TLS required)
+          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/'); $req.Method = [Net.WebRequestMethods+Ftp]::ListDirectory; $req.EnableSsl = $false
+          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'Upl0ad-Test-9x')
+          try { $req.GetResponse().Close(); throw 'plain FTP was accepted' } catch { if ($_.Exception.Message -eq 'plain FTP was accepted') { throw }; "ok   plain FTP refused: $($_.Exception.Message)" }
+          # wrong password refused
+          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/'); $req.Method = [Net.WebRequestMethods+Ftp]::ListDirectory; $req.EnableSsl = $true
+          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'wrong')
+          try { $req.GetResponse().Close(); throw 'a wrong password was accepted' } catch { if ($_.Exception.Message -eq 'a wrong password was accepted') { throw }; 'ok   a wrong password is refused' }
+          Get-NetTCPConnection -State Listen -LocalPort 21, 2022, 8080, 3306 | Sort-Object LocalPort | Format-Table LocalAddress, LocalPort -AutoSize
+          $admin = Get-NetTCPConnection -State Listen -LocalPort 8080
+          if ($admin | Where-Object { $_.LocalAddress -ne '127.0.0.1' }) { throw 'the admin port listens beyond this server' }
+          'ok   SFTPGo admin and API on 127.0.0.1 only'
           $env:MYSQL_PWD = (Get-Content C:\zpanel\configs\mysql\root-password.txt -Raw).Trim()
-          $ErrorActionPreference = 'Continue'
-          & C:\zpanel\bin\mysql\bin\mysql.exe -u root -e "CREATE DATABASE s3files; CREATE TABLE s3files.mabill01 (assm VARCHAR(20), comp VARCHAR(20), KEY (assm)) ENGINE=InnoDB; INSERT INTO s3files.mabill01 VALUES ('A1','C1'),('A1','C2');"
-          if ($LASTEXITCODE -ne 0) { throw 'database setup failed' }
-          # (MySQL 8.4 refuses a foreign key to a column that is not unique: the owner's error 6125)
-          $out = & C:\zpanel\bin\mysql\bin\mysql.exe -u root -e "CREATE TABLE s3files.shortage (id INT, assm VARCHAR(20), CONSTRAINT assm FOREIGN KEY (assm) REFERENCES s3files.mabill01 (assm)) ENGINE=InnoDB" 2>&1 | ForEach-Object { "$_" }
-          "without the option: $out"
-          if (($out -join ' ') -notmatch '6125') { throw 'expected error 6125 before the option' }
-          exit 0
-      - name: The new version over it (-RelaxedSqlMode -LegacyForeignKeys)
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys
-      - name: Check
+          & C:\zpanel\bin\mysql\bin\mysql.exe -u root -N -e "SELECT username, home_dir FROM sftpgo.users"
+          (icacls C:\zpanel\configs\sftpgo) -join ' '
+          Get-NetFirewallRule -DisplayName 'SFTPGo*' | Format-Table DisplayName, Enabled -AutoSize
+      - name: Run again (repair keeps the FTP users and passwords)
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Get-Service Apache2, MySQL | Format-Table Name, Status, StartType -AutoSize
-          if ((Get-Service Apache2).Status -ne 'Running' -or (Get-Service MySQL).Status -ne 'Running') { throw 'new services not running' }
-          if (Get-Service ZPanelApache, ZPanelMySQL -ErrorAction SilentlyContinue) { throw 'old services still there' }
-          if (Get-NetFirewallRule -DisplayName 'ZPanel Apache (HTTP)' -ErrorAction SilentlyContinue) { throw 'old firewall rule still there' }
-          Get-NetFirewallRule -DisplayName 'Apache HTTP Server (port 80)' | Format-Table DisplayName, Enabled -AutoSize
-          (Get-Service Apache2).ServicesDependedOn | Format-Table Name -AutoSize
-          $env:MYSQL_PWD = (Get-Content C:\zpanel\configs\mysql\root-password.txt -Raw).Trim()
-          $ErrorActionPreference = 'Continue'
-          $v = (& C:\zpanel\bin\mysql\bin\mysql.exe -u root -N -e "SELECT @@GLOBAL.restrict_fk_on_non_standard_key, @@GLOBAL.sql_mode, (SELECT COUNT(*) FROM s3files.mabill01)" 2>$null) -join ' '
-          "restrict_fk, sql_mode, rows kept: $v"
-          if ("$v" -notmatch '^0\s+NO_ENGINE_SUBSTITUTION\s+2$') { throw "settings or data: $v" }
-          & C:\zpanel\bin\mysql\bin\mysql.exe -u root -e "CREATE TABLE s3files.shortage (id INT, assm VARCHAR(20), CONSTRAINT assm FOREIGN KEY (assm) REFERENCES s3files.mabill01 (assm)) ENGINE=InnoDB; INSERT INTO s3files.shortage VALUES (1,'A1');"
-          if ($LASTEXITCODE -ne 0) { throw 'the foreign key to a column that is not unique was still refused' }
-          'ok   the foreign key of error 6125 is accepted now'
-          (Invoke-WebRequest http://127.0.0.1/ -UseBasicParsing).Content
-          Select-String -Path C:\zpanel\configs\mysql\my.ini -Pattern 'restrict_fk|sql_mode'
+          $e1 = Get-Content C:\zpanel\configs\sftpgo\env.d\sftpgo.env -Raw
+          powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys -WithFtp
+          if ((Get-Content C:\zpanel\configs\sftpgo\env.d\sftpgo.env -Raw) -ne $e1) { throw 'the FTP passwords changed' }
+          $l = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 list | Out-String; $l
+          if ($l -notmatch 'webuser') { throw 'the FTP user is gone' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 remove webuser
+          'ok   repair kept the users; remove works'
       - name: Uninstall
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File wintest\install-zpanel-stack.ps1 -Uninstall
-          if (Get-Service Apache2, MySQL, ZPanelApache, ZPanelMySQL -ErrorAction SilentlyContinue) { throw 'services still there' }
-          if (-not (Test-Path C:\zpanel\data\mysql\mysql.ibd)) { throw 'data gone' }
-          'ok   services removed, data kept'
+          if (Get-Service Apache2, MySQL, SFTPGo -ErrorAction SilentlyContinue) { throw 'services still there' }
+          'ok   services removed'
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,4 +73,4 @@ jobs:
           name: zpanel-logs
           path: |
             C:\zpanel\logs
-            C:\zpanel\configs\mysql\my.ini
+            C:\zpanel\configs\sftpgo\sftpgo.json

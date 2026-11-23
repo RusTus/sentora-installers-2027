@@ -32,6 +32,10 @@
 .PARAMETER LegacyForeignKeys
     Let a foreign key point at a column that is not unique (MySQL 5 allowed it; MySQL 8.4 refuses it with error 6125
     unless restrict_fk_on_non_standard_key is OFF). For an old app's database; written into my.ini on every run.
+.PARAMETER WithFtp
+    FTP and SFTP with SFTPGo (C:\zpanel\bin\sftpgo, service SFTPGo): users kept in MySQL (database and user sftpgo),
+    FTP on 21 with TLS required (FTPS), SFTP on 2022, homes under C:\zpanel\hostdata, its admin pages and REST API
+    on 127.0.0.1:8080 only. C:\zpanel\bin\ftpuser.ps1 adds, removes and lists FTP users.
 .PARAMETER NoFirewall
     Do not open Apache's port in Windows Firewall (MySQL is never opened: it listens on 127.0.0.1 only).
 .PARAMETER Uninstall
@@ -40,7 +44,7 @@
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1 -RelaxedSqlMode -TimeZone "America/New_York"
+    powershell -ExecutionPolicy Bypass -File .\install-zpanel-stack.ps1 -RelaxedSqlMode -LegacyForeignKeys -TimeZone "America/New_York"
 #>
 [CmdletBinding()]
 param(
@@ -51,6 +55,7 @@ param(
     [SecureString]$MySQLRootPassword,
     [switch]$RelaxedSqlMode,
     [switch]$LegacyForeignKeys,
+    [switch]$WithFtp,
     [switch]$NoFirewall,
     [switch]$Uninstall
 )
@@ -74,6 +79,10 @@ $Pkg = @{
                 # (once a newer 8.4 is out, this one moves to MySQL's archive)
                 More = @('https://cdn.mysql.com/archives/mysql-8.4/mysql-8.4.13-winx64.zip', 'https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip')
                 Sha  = 'E9CD98B1D23F122987B1AFCA26AD942EFEC5891481103D48AE3CDE237FA3EA54'; Top = 'mysql-8.4.13-winx64' }
+    # (-WithFtp only; SFTPGo publishes no checksum file: this is the SHA-256 of its official 2.7.6 installer)
+    Sftpgo = @{ Name = 'SFTPGo 2.7.6 (FTP, FTPS, SFTP)'
+                Url  = 'https://github.com/drakkan/sftpgo/releases/download/v2.7.6/sftpgo_v2.7.6_windows_x86_64.exe'
+                Sha  = '63D29355DBCB7690BA1A2F58A4F8E6DB4320275C056E9D48141D258204BEC31B'; Top = '' }
 }
 # (these two change with each release: the runtime is checked by Microsoft's signature, the CA list by curl's checksum)
 $VcRedistUrl = 'https://aka.ms/vc14/vc_redist.x64.exe'
@@ -85,6 +94,8 @@ $FirewallRule  = 'Apache HTTP Server (port 80)'
 # (the names the first version of this installer used: removed when found, the data and settings stay)
 $OldServices   = @('ZPanelApache', 'ZPanelMySQL')
 $OldFirewall   = 'ZPanel Apache (HTTP)'
+$FtpService    = 'SFTPGo'
+$FtpFirewall   = 'SFTPGo FTP and SFTP (21, 2022, 50000-50100)'
 
 $Bin  = Join-Path $Root 'bin'
 $Cfg  = Join-Path $Root 'configs'
@@ -192,6 +203,12 @@ function Protect-File($path) {
     Set-Acl -Path $path -AclObject $acl
 }
 
+function Protect-Folder($path) {
+    # only Administrators and SYSTEM, for everything inside too (the services run as SYSTEM)
+    Invoke-Native 'icacls.exe' @($path, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "Could not lock $path to Administrators." }
+}
+
 # ------------------------------------------------------------------------------------------------------------------
 # Checks
 # ------------------------------------------------------------------------------------------------------------------
@@ -205,7 +222,8 @@ if ($Uninstall) {
     Say 'Removing the services (folders, databases and logs stay)'
     foreach ($n in @($ApacheService, $MySQLService) + $OldServices) { Stop-AndRemoveService $n }
     Ok "services $ApacheService and $MySQLService removed"
-    foreach ($n in @($FirewallRule, $OldFirewall)) { Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
+    Stop-AndRemoveService $FtpService
+    foreach ($n in @($FirewallRule, $OldFirewall, $FtpFirewall)) { Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
     Ok 'firewall rule removed'
     Note "The folders under $Root are still there; delete them yourself once you no longer need the databases."
     return
@@ -543,6 +561,134 @@ Include "`${ZROOT}/configs/apache/httpd-vhosts.conf"
     }
 
     # --------------------------------------------------------------------------------------------------------------
+    if ($WithFtp) {
+        Say 'FTP and SFTP (SFTPGo): its users in MySQL, TLS required on FTP'
+        if (-not $RootPw) { Fail "The MySQL root password is needed for the FTP database: it is not in $pwFile." }
+        $ftpDir = Join-Path $Bin 'sftpgo'
+        $ftpCfg = Join-Path $Cfg 'sftpgo'
+        $ftpExe = Join-Path $ftpDir 'sftpgo.exe'
+        foreach ($d in @($ftpCfg, (Join-Path $ftpCfg 'env.d'), (Join-Path $ftpCfg 'certs'), (Join-Path $Logs 'sftpgo'))) {
+            if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
+        }
+        # (its passwords live here: Administrators and SYSTEM only)
+        Protect-Folder $ftpCfg
+        $setup = Get-Verified $Pkg.Sftpgo
+        Stop-AndRemoveService $FtpService
+        $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $ftpDir + '"') -Wait -PassThru
+        if ($p.ExitCode -ne 0) { Fail "SFTPGo's installer ended with code $($p.ExitCode)." }
+        if (-not (Test-Path $ftpExe)) { Fail "SFTPGo is not in $ftpDir after its installer." }
+        # (its installer starts a service of its own and opens every port for it: replaced below by ours)
+        Stop-AndRemoveService $FtpService
+        Get-NetFirewallRule -DisplayName 'SFTPGo Service' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+        Ok "SFTPGo -> $ftpDir"
+
+        # its database and MySQL user (only its own database), passwords kept from an earlier run
+        $envFile = Join-Path $ftpCfg 'env.d\sftpgo.env'
+        $old = @{}
+        if (Test-Path $envFile) { foreach ($l in Get-Content $envFile) { if ($l -match '^([A-Z_]+)=(.*)$') { $old[$Matches[1]] = $Matches[2] } } }
+        $dbPw = if ($old['SFTPGO_DATA_PROVIDER__PASSWORD']) { $old['SFTPGO_DATA_PROVIDER__PASSWORD'] } else { New-Password }
+        $adminPw = if ($old['SFTPGO_DEFAULT_ADMIN_PASSWORD']) { $old['SFTPGO_DEFAULT_ADMIN_PASSWORD'] } else { New-Password }
+        $q = "CREATE DATABASE IF NOT EXISTS sftpgo CHARACTER SET utf8mb4;"
+        foreach ($h in @('localhost', '127.0.0.1')) {
+            $q += " CREATE USER IF NOT EXISTS 'sftpgo'@'$h' IDENTIFIED BY '$dbPw'; ALTER USER 'sftpgo'@'$h' IDENTIFIED BY '$dbPw'; GRANT ALL PRIVILEGES ON sftpgo.* TO 'sftpgo'@'$h';"
+        }
+        $env:MYSQL_PWD = $RootPw
+        $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', $q)
+        Remove-Item Env:\MYSQL_PWD
+        if ($LASTEXITCODE -ne 0) { Fail "Could not make the FTP database: $($out -join ' ')" }
+        Write-Utf8NoBom $envFile ("# Made by install-zpanel-stack.ps1: SFTPGo reads these at start. Administrators only.`r`n" +
+            "SFTPGO_DATA_PROVIDER__PASSWORD=$dbPw`r`nSFTPGO_DATA_PROVIDER__CREATE_DEFAULT_ADMIN=true`r`n" +
+            "SFTPGO_DEFAULT_ADMIN_USERNAME=admin`r`nSFTPGO_DEFAULT_ADMIN_PASSWORD=$adminPw`r`n")
+        Ok 'database sftpgo and its own MySQL user (only that database)'
+
+        # a certificate for FTPS (made once; the server's name, valid 10 years)
+        $crt = Join-Path $ftpCfg 'certs\ftp.crt'; $key = Join-Path $ftpCfg 'certs\ftp.key'
+        if (-not (Test-Path $crt) -or -not (Test-Path $key)) {
+            $code = @'
+$o = ['config' => getenv('ZCNF'), 'digest_alg' => 'sha256', 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA];
+$k = openssl_pkey_new($o); $r = openssl_csr_new(['commonName' => $argv[3]], $k, $o);
+$x = openssl_csr_sign($r, null, $k, 3650, $o, random_int(1, PHP_INT_MAX));
+if (!$x || !openssl_x509_export_to_file($x, $argv[1]) || !openssl_pkey_export_to_file($k, $argv[2], null, $o)) { fwrite(STDERR, (string) openssl_error_string()); exit(1); }
+echo 'ok';
+'@
+            $env:ZCNF = Join-Path $PhpDir 'extras\ssl\openssl.cnf'
+            $out = Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-r', $code, '--', $crt, $key, $ServerName)
+            Remove-Item Env:\ZCNF
+            if (($out -join '') -notmatch 'ok' -or -not (Test-Path $crt)) { Fail "Could not make the FTPS certificate: $($out -join ' ')" }
+            Ok "FTPS certificate for $ServerName (made here, valid 10 years)"
+        }
+
+        $ftpConf = @"
+{
+  "data_provider": { "driver": "mysql", "name": "sftpgo", "host": "127.0.0.1", "port": 3306, "username": "sftpgo",
+                     "users_base_dir": "$(& $Fwd (Join-Path $Root 'hostdata'))" },
+  "ftpd": { "bindings": [ { "port": 21, "address": "", "tls_mode": 1, "min_tls_version": 12,
+                            "certificate_file": "$(& $Fwd $crt)", "certificate_key_file": "$(& $Fwd $key)" } ],
+            "passive_port_range": { "start": 50000, "end": 50100 } },
+  "sftpd": { "bindings": [ { "port": 2022, "address": "" } ] },
+  "httpd": { "bindings": [ { "port": 8080, "address": "127.0.0.1", "enable_web_admin": true, "enable_web_client": true, "enable_rest_api": true } ] }
+}
+"@
+        Write-Utf8NoBom (Join-Path $ftpCfg 'sftpgo.json') $ftpConf
+        $out = Invoke-Native $ftpExe @('service', 'install', '-c', $ftpCfg, '-l', (Join-Path $Logs 'sftpgo\sftpgo.log'))
+        if (-not (Get-Service $FtpService -ErrorAction SilentlyContinue)) { Fail "SFTPGo could not be installed as a service: $($out -join ' ')" }
+        Set-Service -Name $FtpService -StartupType Automatic
+        Invoke-Native 'sc.exe' @('config', $FtpService, 'depend=', $MySQLService) | Out-Null
+        Start-Service $FtpService
+        (Get-Service $FtpService).WaitForStatus('Running', '00:01:00')
+        $up = $false
+        for ($i = 0; $i -lt 45 -and -not $up; $i++) {
+            try { $up = (Invoke-WebRequest 'http://127.0.0.1:8080/healthz' -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch { Start-Sleep 1 }
+        }
+        if (-not $up) { Fail "SFTPGo does not answer: see $(Join-Path $Logs 'sftpgo\sftpgo.log')" }
+        $auth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:$adminPw"))
+        try { $null = Invoke-RestMethod 'http://127.0.0.1:8080/api/v2/token' -Headers @{ Authorization = $auth } -TimeoutSec 15 }
+        catch { Fail "SFTPGo runs but its admin login does not work: $($_.Exception.Message)" }
+        Ok "service $FtpService runs (starts with Windows, after MySQL): FTP 21 with TLS required, SFTP 2022"
+        Ok 'its admin pages: http://127.0.0.1:8080/web/admin on this server only (user admin, password in its env.d file)'
+
+        # the panel's way in: add, remove and list FTP users through SFTPGo's REST API
+        Write-Utf8NoBom (Join-Path $Bin 'ftpuser.ps1') @'
+<#
+  FTP users of SFTPGo (made by install-zpanel-stack.ps1). As Administrator:
+    ftpuser.ps1 add USER PASSWORD [FOLDER]   FOLDER: under C:\zpanel\hostdata (default: USER\public_html)
+    ftpuser.ps1 remove USER                  the user goes; the files stay
+    ftpuser.ps1 list
+#>
+param([Parameter(Mandatory = $true)][ValidateSet('add', 'remove', 'list')][string]$Do, [string]$User, [string]$Password, [string]$Folder)
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$envFile = Join-Path $root 'configs\sftpgo\env.d\sftpgo.env'
+$pw = ((Get-Content $envFile) | Where-Object { $_ -like 'SFTPGO_DEFAULT_ADMIN_PASSWORD=*' }) -replace '^[^=]*=', ''
+$basic = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:$pw"))
+$token = (Invoke-RestMethod 'http://127.0.0.1:8080/api/v2/token' -Headers @{ Authorization = $basic }).access_token
+$h = @{ Authorization = "Bearer $token" }
+$api = 'http://127.0.0.1:8080/api/v2/users'
+switch ($Do) {
+    'add' {
+        if ($User -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$' -or -not $Password) { throw 'ftpuser.ps1 add USER PASSWORD [FOLDER]' }
+        if (-not $Folder) { $Folder = "$User\public_html" }
+        if ($Folder -match '\.\.|^[\\/]|:') { throw 'FOLDER is a folder under C:\zpanel\hostdata' }
+        $home = Join-Path (Join-Path $root 'hostdata') $Folder
+        if (-not (Test-Path $home)) { New-Item -ItemType Directory -Path $home | Out-Null }
+        $body = @{ username = $User; password = $Password; status = 1; home_dir = $home; permissions = @{ '/' = @('*') } } | ConvertTo-Json -Depth 4
+        Invoke-RestMethod $api -Method Post -Headers $h -ContentType 'application/json' -Body $body | Out-Null
+        "FTP user $User added: $home"
+    }
+    'remove' { Invoke-RestMethod "$api/$User" -Method Delete -Headers $h | Out-Null; "FTP user $User removed (the files stay)" }
+    'list' { (Invoke-RestMethod "$api?limit=500" -Headers $h) | Select-Object username, home_dir, status | Format-Table -AutoSize }
+}
+'@
+        Ok "C:\zpanel\bin\ftpuser.ps1: add, remove and list FTP users"
+
+        if (-not $NoFirewall) {
+            Get-NetFirewallRule -DisplayName $FtpFirewall -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+            New-NetFirewallRule -DisplayName $FtpFirewall -Direction Inbound -Action Allow -Protocol TCP -LocalPort @('21', '2022', '50000-50100') -Program $ftpExe | Out-Null
+            Ok 'Windows Firewall: 21, 2022 and the passive ports 50000-50100 open for SFTPGo only (its admin port stays closed)'
+        }
+    }
+
+    # --------------------------------------------------------------------------------------------------------------
     Say 'Checking it all'
     $r = $null
     for ($i = 0; $i -lt 20 -and -not $r; $i++) {
@@ -572,7 +718,8 @@ echo PHP_VERSION, '|', PHP_SAPI, '|', (extension_loaded('mysqli') ? 'mysqli' : '
     Write-Host "  Apache settings: $conf  (your own sites: $vhosts)"
     Write-Host "  PHP settings:    $(Join-Path $PhpDir 'php.ini')"
     Write-Host "  MySQL:           127.0.0.1:3306, user root, password in $pwFile"
-    Write-Host "  Services:        $ApacheService, $MySQLService  (restart one: Restart-Service $ApacheService)"
+    Write-Host "  Services:        $ApacheService, $MySQLService$(if ($WithFtp) { ", $FtpService" })  (restart one: Restart-Service $ApacheService)"
+    if ($WithFtp) { Write-Host "  FTP:             FTPS on 21 (TLS required), SFTP on 2022; users: C:\zpanel\bin\ftpuser.ps1 add USER PASSWORD" }
 } finally {
     Stop-Transcript | Out-Null
 }
