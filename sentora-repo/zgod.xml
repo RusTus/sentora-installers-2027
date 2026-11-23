@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Shown by Repo Browser before the module is installed (the same tags as module.xml). -->
 <updateserver>
-    <latestversion>100</latestversion>
+    <latestversion>101</latestversion>
     <downloadurl>https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo/zgod.zpp</downloadurl>
     <name>zGod</name>
     <desc>Everything on the panel in one place, across every reseller: each account's package, reseller, disk and bandwidth against its quotas, websites, databases, mailboxes, FTP and cron jobs; the server's totals; suspend an account or switch a mailbox off; a daily report by email. For administrators. (The ZPanel classic, written again for Sentora-2027.)</desc>

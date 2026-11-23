@@ -71,6 +71,12 @@ docker logs "$PNAME" 2>&1 | grep -q '^sentora: Sentora is installed' && ok "the 
 PIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$PNAME")
 docker cp "$REPO/sentora-repo/log_forwarder.zpp" "$PNAME:/root/log_forwarder.zpp"; docker cp "$REPO/tests/elk/localinstall.php" "$PNAME:/root/localinstall.php"
 in_panel 'php /root/localinstall.php log_forwarder /root/log_forwarder.zpp' > "$OUT/addon-install.txt" 2>&1 && grep -q installed "$OUT/addon-install.txt" && ok "Log Forwarder installed (as zppy does)" || bad "add-on install: $(tail -3 "$OUT/addon-install.txt")"
+# zGod too: its lines (zgod.log in the panel's log folder) go to the node with the panel's logs
+docker cp "$REPO/sentora-repo/zgod.zpp" "$PNAME:/root/zgod.zpp"
+in_panel 'php /root/localinstall.php zgod /root/zgod.zpp' > "$OUT/zgod-install.txt" 2>&1 && grep -q installed "$OUT/zgod-install.txt" && ok "zGod installed" || bad "zGod install: $(tail -3 "$OUT/zgod-install.txt")"
+zgphp() { docker exec "$PNAME" php -r "chdir('/etc/sentora/panel'); require 'dryden/loader.inc.php'; require 'cnf/db.php'; require 'inc/dbc.inc.php'; require 'modules/zgod/code/zgod.php'; \$f = rtrim(ctrl_options::GetSystemOption('log_dir'), '/') . '/zgod.log'; $1"; }
+zgphp 'echo zgod::ElkRun($f), "\n"; echo substr(sprintf("%o", fileperms($f)), -3), "\n";' > "$OUT/zgod-run.txt" 2>&1
+grep -q "lines for the Elk node" "$OUT/zgod-run.txt" && grep -qx 640 "$OUT/zgod-run.txt" && ok "zGod wrote its lines (zgod.log, 640)" || bad "zGod's lines: $(cat "$OUT/zgod-run.txt")"
 pphp 'foreach (elk::Prepare() as $l) echo $l, "\n";' > "$OUT/prepare.txt" 2>&1
 in_panel 'test "$(stat -c %a /etc/sentora/elk)" = 750 && test "$(stat -c %a /etc/sentora/elk/panel.key)" = 640 && test "$(stat -c %U /etc/sentora/elk/panel.key)" = root' && ok "the panel's key is root's" || bad "the panel's key is open: $(in_panel 'ls -la /etc/sentora/elk')"
 curl -sk "https://$PIP/modules/log_forwarder/code/node.php?cert=1" -o "$W/panel-served.crt"
@@ -127,7 +133,7 @@ for _ in $(seq 1 40); do curl -sk -o /dev/null -w '%{http_code}' "https://$IP/lo
 echo | openssl s_client -connect "$IP:443" -CAfile "$W/node-ca.crt" -verify_return_error > /dev/null 2>&1 && ok "Kibana's certificate is signed by the node's own authority" || bad "Kibana's certificate is not the node's"
 KB() { local p=$1; shift; curl -sk -u "sentora-admin:$ADMINPW" -H 'elastic-api-version: 2023-10-31' "$@" "https://$IP$p"; }
 D=$(KB '/api/dashboards?per_page=50')
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere sentora-zgod; do echo "$D" | grep -q "\"id\":\"$d\"" && ok "dashboard $d" || bad "dashboard $d missing"; done
 KB '/api/saved_objects/dashboard/sentora-worldmap' | grep -q 'sentora-world-map' && ok "the world map is on its dashboard" || bad "the world map is not on the World map dashboard"
 [ "$(KB '/api/saved_objects/dashboard/sentora-flows' | grep -o '"id":"sentora-flow-[a-z]*"' | sort -u | wc -l)" = 4 ] && ok "the four flow charts are on the Flows dashboard" || bad "the flow charts are not on the Flows dashboard"
 KB '/api/saved_objects/visualization/sentora-flow-attacks' | grep -q 'vega.github.io/schema' && ok "the flow charts are Vega charts" || bad "the attacks flow chart is not a Vega chart"
@@ -173,6 +179,17 @@ sleep 3; in_box 'p=$(systemctl show -p MainPID --value heartbeat-elastic); grep 
 n=0; for _ in $(seq 1 40); do n=$(es "'https://127.0.0.1:9200/heartbeat-*/_count?q=monitor.name:panel.elktest.example'" 2> /dev/null | sed -n 's/.*"count":\([0-9]*\).*/\1/p'); [ "${n:-0}" -gt 0 ] && break; sleep 5; done
 [ "${n:-0}" -gt 0 ] && ok "Heartbeat checked the panel's website ($n)" || bad "Heartbeat stored no check of the panel's website"
 es "'https://127.0.0.1:9200/logs-sentora-*/_count?q=sentora.log:sites'" | grep -q '"count":0' && ok "the list of websites is not stored among the logs" || bad "the list of websites was stored among the logs"
+# zGod: a new hour's figures and an action, sent by the panel's rsyslog with its other logs
+zgphp 'global $zdbh; $id = (int) $zdbh->query("SELECT ac_id_pk FROM x_accounts WHERE ac_group_fk = 1 ORDER BY ac_id_pk LIMIT 1")->fetchColumn(); zgod::Log($id, "Account suspended: elkdemo (did not pay)"); zgod::Set("elk_hour", ""); echo zgod::ElkRun($f), "\n";' > "$OUT/zgod-run2.txt" 2>&1
+grep -q "lines for the Elk node" "$OUT/zgod-run2.txt" && ok "zGod wrote a new hour and the action" || bad "zGod's second run: $(cat "$OUT/zgod-run2.txt")"
+zg() { es "'https://127.0.0.1:9200/logs-sentora-*/_count' -d '{\"query\":{\"bool\":{\"filter\":[{\"term\":{\"sentora.log\":\"zgod\"}},$1]}}}'" | sed -n 's/.*"count":\([0-9]*\).*/\1/p'; }
+n=0; for _ in $(seq 1 30); do es -X POST https://127.0.0.1:9200/logs-sentora-*/_refresh > /dev/null 2>&1; n=$(zg '{"term":{"sentora.zgod.action":"suspend"}}'); [ "${n:-0}" -gt 0 ] && break; sleep 3; done
+[ "${n:-0}" -gt 0 ] && ok "zGod's action arrived on the node" || bad "no zGod lines on the node: $(es "'https://127.0.0.1:9200/logs-sentora-*/_search?q=sentora.log:zgod&size=2'" | head -c 600)"
+[ "$(zg '{"term":{"sentora.zgod.type":"account"}},{"exists":{"field":"sentora.zgod.disk"}},{"exists":{"field":"sentora.zgod.user"}}')" -gt 0 ] && ok "each account's figures arrived" || bad "no zGod account figures"
+[ "$(zg '{"term":{"sentora.zgod.type":"server"}},{"range":{"sentora.zgod.accounts":{"gte":1}}}')" -gt 0 ] && ok "the server's figures arrived" || bad "no zGod server figures"
+[ "$(zg '{"term":{"sentora.zgod.reason":"did not pay"}},{"term":{"sentora.zgod.user":"elkdemo"}},{"term":{"event.action":"zgod-suspend"}}')" -gt 0 ] && ok "the action: who and why" || bad "the zGod action lost its account or reason"
+es "'https://127.0.0.1:9200/logs-sentora-*/_mapping/field/sentora.zgod.disk'" | grep -q '"type":"double"' && ok "zGod's figures are numbers (double)" || bad "sentora.zgod.disk is not a double"
+[ "$(zg '{"exists":{"field":"tags"}}')" = 0 ] && ok "every zGod line was understood" || bad "zGod lines not understood: $(zg '{"exists":{"field":"tags"}}')"
 # server health: two runs (the second has the rates: CPU, network, queries); then the figures on the node
 pphp 'require_once "modules/log_forwarder/code/health.php"; @unlink(elk::STATE_DIR . "/health-last.json"); echo elk_health::Run(), "\n"; $f = elk::STATE_DIR . "/health-last.json"; $j = json_decode(file_get_contents($f), true); $j["t"] -= 300; file_put_contents($f, json_encode($j)); echo elk_health::Run(), "\n";' > "$OUT/health.txt" 2>&1
 [ "$(grep -c 'server health sent' "$OUT/health.txt")" = 2 ] && ok "the panel sent its health twice" || bad "server health: $(cat "$OUT/health.txt")"

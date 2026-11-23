@@ -257,6 +257,46 @@ page(array('tab' => 'report'), array('csfr_token' => 'session-key', 'inTo' => ''
 check(zgod::Get('report') === 'off' && zgod::DailyReport(function () { return true; }) === '', 'switched off again: nothing sent');
 
 // ---------------------------------------------------------------------------------------------
+section('Lines for the Elk node (zgod.log)');
+$elkFile = sys_get_temp_dir() . '/zgod-elk-' . getmypid() . '/zgod.log';
+@mkdir(dirname($elkFile), 0700, true);
+@unlink($elkFile);
+$t0 = 1795000000;
+$said = zgod::ElkRun($elkFile, $t0);
+$lines = array_map(function ($l) { return json_decode($l, true); }, file($elkFile, FILE_IGNORE_NEW_LINES));
+$byType = array();
+foreach ($lines as $l) { $byType[$l['type']][] = $l; }
+check(strpos($said, 'lines for the Elk node') !== false && count($byType['account']) === 6 && count($byType['server']) === 1, 'the first run: one line per account and the server\'s', $said);
+check(!isset($byType['action']), 'the first run starts from now (the past actions are not sent again)');
+check(substr(sprintf('%o', fileperms($elkFile)), -3) === '640', 'the file is not for everyone (640)');
+$alice = array_values(array_filter($byType['account'], function ($l) { return $l['user'] === 'alice'; }))[0];
+check(is_int($alice['disk']) && is_int($alice['bandwidth']) && $alice['reseller'] !== '' && array_key_exists('disk_pct', $alice), 'an account\'s figures, numbers as numbers', json_encode($alice));
+check(strpos(file_get_contents($elkFile), '@') === strpos(file_get_contents($elkFile), '@timestamp') && strpos(file_get_contents($elkFile), 'example.') === false, 'no email address in the lines');
+$server = $byType['server'][0];
+check($server['accounts'] === 6 && $server['suspended'] >= 1, 'the server\'s line: accounts and suspended', json_encode($server));
+$size = filesize($elkFile);
+check(zgod::ElkRun($elkFile, $t0 + 300) === '' && filesize($elkFile) === $size, 'the same hour, nothing done: nothing written');
+$victim = (int) $db->query("SELECT ac_id_pk FROM x_accounts WHERE ac_user_vc = 'carol'")->fetchColumn();
+zgod::SetAccount($victim, false, $admin, 'did not pay');
+zgod::SetAccount($victim, true, $admin);
+zgod::SetMailbox($mb, false, $admin);
+zgod::SetMailbox($mb, true, $admin);
+zgod::ElkRun($elkFile, $t0 + 600);
+$acts = array_values(array_filter(array_map(function ($l) { return json_decode($l, true); }, file($elkFile, FILE_IGNORE_NEW_LINES)), function ($l) { return $l['type'] === 'action'; }));
+check(array_map(function ($l) { return $l['action']; }, $acts) === array('suspend', 'unsuspend', 'mailbox-off', 'mailbox-on'), 'what zGod did, in order', json_encode($acts));
+check($acts[0]['user'] === 'carol' && $acts[0]['reason'] === 'did not pay' && $acts[0]['by'] !== '' && $acts[2]['user'] !== '' && strpos(str_replace('"@timestamp"', '', json_encode($acts[2])), '@') === false, 'who, by whom, why; a mailbox by its account, not its address', json_encode($acts));
+zgod::ElkRun($elkFile, $t0 + 900);
+check(count(file($elkFile)) === count($lines) + 4, 'an action is sent once');
+zgod::ElkRun($elkFile, $t0 + 3600);
+check(count(file($elkFile)) === count($lines) * 2 + 4, 'the next hour: the figures again');
+@unlink($elkFile);
+@symlink('/etc/passwd', $elkFile);
+zgod::Set('elk_hour', '');
+check(strpos(zgod::ElkRun($elkFile, $t0 + 7200), 'no log folder') !== false && strpos(file_get_contents('/etc/passwd'), 'zgod') === false, 'a link in its place is not written through');
+@unlink($elkFile);
+@rmdir(dirname($elkFile));
+
+// ---------------------------------------------------------------------------------------------
 section('The install step: administrators only');
 $db->exec("INSERT INTO x_modules (mo_name_vc, mo_folder_vc, mo_enabled_en) VALUES ('zgod', 'zgod', 'true')");
 $modId = (int) $db->lastInsertId();

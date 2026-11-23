@@ -1,0 +1,978 @@
+{
+ "description": "Made by the Sentora Elk node installer; a copy with another name keeps your own changes (an update replaces this one).",
+ "panels": [
+  {
+   "config": {
+    "layout": "horizontal",
+    "links": [
+     {
+      "destination": "sentora-today",
+      "label": "Today",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-serverwall",
+      "label": "Server wall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-overview",
+      "label": "Overview",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-worldmap",
+      "label": "World map",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-uptime",
+      "label": "Uptime",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-websites",
+      "label": "Websites",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-mail",
+      "label": "Mail",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-delivery",
+      "label": "Mail delivery",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-security",
+      "label": "Security",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-attackers",
+      "label": "Attackers",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-firewall",
+      "label": "Web firewall",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-panel",
+      "label": "Panel and server",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-zgod",
+      "label": "zGod",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-health",
+      "label": "Server health",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
+      "destination": "sentora-speed",
+      "label": "Website speed",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     }
+    ]
+   },
+   "grid": {
+    "h": 2,
+    "w": 48,
+    "x": 0,
+    "y": 0
+   },
+   "type": "links"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.zgod.accounts",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "Accounts",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 0,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 1
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 1
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "sentora.zgod.suspended",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "Suspended",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 8,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.zgod.resellers",
+      "format": {
+       "decimals": 0,
+       "type": "number"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "Resellers",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 16,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.zgod.disk",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "Disk used",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 24,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "background_chart": {
+       "type": "trend"
+      },
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "field": "sentora.zgod.bandwidth",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "",
+      "operation": "last_value",
+      "time_field": "@timestamp",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "Bandwidth this month",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 32,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "color": "#4FA3F7",
+       "type": "static"
+      },
+      "label": "",
+      "operation": "count",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"action\"",
+     "language": "kql"
+    },
+    "title": "zGod actions",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 6,
+    "w": 8,
+    "x": 40,
+    "y": 2
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "sentora.zgod.user"
+     ],
+     "label": "Account",
+     "limit": 12,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "desc",
+      "metric_index": 0,
+      "type": "metric"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 70
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 70,
+         "lt": 90
+        },
+        {
+         "color": "#EB5757",
+         "gte": 90
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "sentora.zgod.disk_pct",
+      "format": {
+       "decimals": 0,
+       "suffix": "%",
+       "type": "number"
+      },
+      "label": "of the quota",
+      "operation": "max",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and sentora.zgod.disk_quota > 0 and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Disk against the quota (the fullest)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 15,
+    "w": 24,
+    "x": 0,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "breakdown_by": {
+     "columns": 4,
+     "fields": [
+      "sentora.zgod.user"
+     ],
+     "label": "Account",
+     "limit": 12,
+     "operation": "terms",
+     "rank_by": {
+      "direction": "desc",
+      "metric_index": 0,
+      "type": "metric"
+     }
+    },
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "color": {
+       "range": "absolute",
+       "steps": [
+        {
+         "color": "#24C28A",
+         "lt": 70
+        },
+        {
+         "color": "#F2C94C",
+         "gte": 70,
+         "lt": 90
+        },
+        {
+         "color": "#EB5757",
+         "gte": 90
+        }
+       ],
+       "type": "dynamic"
+      },
+      "field": "sentora.zgod.bandwidth_pct",
+      "format": {
+       "decimals": 0,
+       "suffix": "%",
+       "type": "number"
+      },
+      "label": "of the quota",
+      "operation": "max",
+      "type": "primary"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and sentora.zgod.bandwidth_quota > 0 and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "title": "Bandwidth against the quota this month (the fullest)",
+    "type": "metric"
+   },
+   "grid": {
+    "h": 15,
+    "w": 24,
+    "x": 24,
+    "y": 8
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.zgod.disk",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Disk",
+      "operation": "max"
+     },
+     {
+      "field": "sentora.zgod.reseller",
+      "label": "Reseller",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "sentora.zgod.package",
+      "label": "Package",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.zgod.user"
+      ],
+      "label": "Account",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Most disk",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 24,
+    "x": 0,
+    "y": 23
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "field": "sentora.zgod.bandwidth",
+      "format": {
+       "type": "bytes"
+      },
+      "label": "Bandwidth",
+      "operation": "max"
+     },
+     {
+      "field": "sentora.zgod.reseller",
+      "label": "Reseller",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     },
+     {
+      "field": "sentora.zgod.package",
+      "label": "Package",
+      "operation": "last_value",
+      "time_field": "@timestamp"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.zgod.user"
+      ],
+      "label": "Account",
+      "limit": 15,
+      "operation": "terms",
+      "rank_by": {
+       "direction": "desc",
+       "metric_index": 0,
+       "type": "metric"
+      }
+     }
+    ],
+    "title": "Most bandwidth this month",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 13,
+    "w": 24,
+    "x": 24,
+    "y": 23
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.zgod.user"
+       ],
+       "label": "Account",
+       "limit": 8,
+       "operation": "terms",
+       "rank_by": {
+        "direction": "desc",
+        "metric_index": 0,
+        "type": "metric"
+       }
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.zgod.disk",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Disk",
+        "operation": "max"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\"",
+     "language": "kql"
+    },
+    "title": "Disk used by the biggest accounts",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 0,
+    "y": 36
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "line",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "field": "sentora.zgod.bandwidth",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Bandwidth this month",
+        "operation": "max"
+       },
+       {
+        "field": "sentora.zgod.disk",
+        "format": {
+         "type": "bytes"
+        },
+        "label": "Disk",
+        "operation": "max"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"server\"",
+     "language": "kql"
+    },
+    "title": "The server's disk and bandwidth",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 12,
+    "w": 24,
+    "x": 24,
+    "y": 36
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.zgod.reseller"
+      ],
+      "label": "Reseller",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "sentora.zgod.user",
+      "label": "Accounts",
+      "operation": "unique_count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Accounts by reseller",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 0,
+    "y": 48
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "group_by": [
+     {
+      "fields": [
+       "sentora.zgod.package"
+      ],
+      "label": "Package",
+      "limit": 8,
+      "operation": "terms"
+     }
+    ],
+    "metrics": [
+     {
+      "field": "sentora.zgod.user",
+      "label": "Accounts",
+      "operation": "unique_count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"account\" and @timestamp >= \"now-2h\"",
+     "language": "kql"
+    },
+    "styling": {
+     "donut_hole": "m"
+    },
+    "title": "Accounts by package",
+    "type": "pie"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 16,
+    "y": 48
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"action\"",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.zgod.action"
+      ],
+      "label": "What",
+      "limit": 20,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.zgod.user"
+      ],
+      "label": "Account",
+      "limit": 20,
+      "operation": "terms"
+     },
+     {
+      "fields": [
+       "sentora.zgod.by"
+      ],
+      "label": "By",
+      "limit": 20,
+      "operation": "terms"
+     }
+    ],
+    "title": "What zGod did",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 12,
+    "w": 16,
+    "x": 32,
+    "y": 48
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "layers": [
+     {
+      "breakdown_by": {
+       "fields": [
+        "sentora.zgod.action"
+       ],
+       "label": "What",
+       "limit": 4,
+       "operation": "terms"
+      },
+      "data_source": {
+       "ref_id": "sentora-logs",
+       "type": "data_view_reference"
+      },
+      "type": "bar_stacked",
+      "x": {
+       "field": "@timestamp",
+       "operation": "date_histogram"
+      },
+      "y": [
+       {
+        "label": "Actions",
+        "operation": "count"
+       }
+      ]
+     }
+    ],
+    "legend": {
+     "position": "right",
+     "visibility": "visible"
+    },
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"action\"",
+     "language": "kql"
+    },
+    "title": "zGod's actions over time",
+    "type": "xy"
+   },
+   "grid": {
+    "h": 10,
+    "w": 32,
+    "x": 0,
+    "y": 60
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "data_source": {
+     "ref_id": "sentora-logs",
+     "type": "data_view_reference"
+    },
+    "metrics": [
+     {
+      "label": "Times",
+      "operation": "count"
+     }
+    ],
+    "query": {
+     "expression": "sentora.log : \"zgod\" and sentora.zgod.type : \"action\" and sentora.zgod.action : \"suspend\" and sentora.zgod.reason : *",
+     "language": "kql"
+    },
+    "rows": [
+     {
+      "fields": [
+       "sentora.zgod.reason"
+      ],
+      "label": "Why",
+      "limit": 15,
+      "operation": "terms"
+     }
+    ],
+    "title": "Why accounts were suspended",
+    "type": "data_table"
+   },
+   "grid": {
+    "h": 10,
+    "w": 16,
+    "x": 32,
+    "y": 60
+   },
+   "type": "vis"
+  },
+  {
+   "config": {
+    "content": "From **zGod** on the panel (Server Admin > zGod): each account's figures once an hour, and every suspend and mailbox switch, sent by Log Forwarder with the panel's logs (tick **The panel** on its page). No email addresses are sent."
+   },
+   "grid": {
+    "h": 3,
+    "w": 48,
+    "x": 0,
+    "y": 70
+   },
+   "type": "markdown"
+  }
+ ],
+ "refresh_interval": {
+  "pause": false,
+  "value": 60000
+ },
+ "time_range": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "title": "Sentora: zGod"
+}

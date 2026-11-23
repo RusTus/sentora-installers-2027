@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <module>
     <name>zGod</name>
-    <version>100</version>
+    <version>101</version>
     <defaultcat>Server Admin</defaultcat>
     <desc>Everything on the panel in one place, across every reseller: each account's package, reseller, disk and bandwidth against its quotas, websites, databases, mailboxes, FTP and cron jobs; the server's totals; suspend an account or switch a mailbox off; a daily report by email. For administrators. (The ZPanel classic, written again for Sentora-2027.)</desc>
     <authorname>RusTus</authorname>

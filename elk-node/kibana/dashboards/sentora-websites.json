@@ -102,6 +102,14 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-zgod",
+      "label": "zGod",
+      "options": {
+       "use_time_range": false
+      },
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-health",
       "label": "Server health",
       "options": {

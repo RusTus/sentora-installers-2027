@@ -502,4 +502,109 @@ class zgod
         self::Set('report_last', (string) time() . ($ok ? '' : ' failed'));
         return $ok ? 'zGod: daily report sent to ' . implode(', ', $to) : 'zGod: the daily report could not be sent (see the panel\'s mail settings)';
     }
+    /**
+     * zGod's lines for the Elk node (Log Forwarder sends the panel's zgod.log there, kind "zgod"; the node's zGod
+     * dashboard reads them): each account's figures once an hour, the server's, and what was done since the last run
+     * (from the panel's log). One JSON object per line; never an email address, a password or a mailbox's address.
+     *
+     * @param int $now
+     * @param bool $hourly The figures too (once an hour), not only what was done.
+     * @return string[]
+     */
+    static function ElkLines($now, $hourly)
+    {
+        $out = array();
+        $ts = gmdate('Y-m-d\TH:i:s\Z', $now);
+        $users = array();
+        $accounts = self::Accounts();
+        foreach ($accounts as $a) {
+            $users[$a['id']] = $a['username'];
+        }
+        if ($hourly) {
+            $n = $off = $disk = $bw = 0;
+            foreach ($accounts as $a) {
+                $pct = function ($u, $q) { return $q > 0 ? round(min(999, $u * 100 / $q), 1) : null; };
+                $out[] = array('@timestamp' => $ts, 'type' => 'account', 'user' => $a['username'], 'reseller' => (string) $a['resellername'],
+                    'package' => (string) $a['package'], 'group' => (string) $a['groupname'], 'enabled' => (bool) $a['enabled'],
+                    'disk' => $a['disk'], 'disk_quota' => $a['diskq'], 'disk_pct' => $pct($a['disk'], $a['diskq']),
+                    'bandwidth' => $a['bw'], 'bandwidth_quota' => $a['bwq'], 'bandwidth_pct' => $pct($a['bw'], $a['bwq']),
+                    'domains' => $a['domains'], 'mailboxes' => $a['mailboxes'], 'databases' => $a['databases'], 'ftp' => $a['ftp'],
+                    'clients' => $a['clients'], 'last_login' => $a['lastlogon'] > 0 ? gmdate('Y-m-d\TH:i:s\Z', $a['lastlogon']) : null);
+                $n++;
+                $off += $a['enabled'] ? 0 : 1;
+                $disk += $a['disk'];
+                $bw += $a['bw'];
+            }
+            $out[] = array('@timestamp' => $ts, 'type' => 'server', 'accounts' => $n, 'suspended' => $off, 'disk' => $disk, 'bandwidth' => $bw,
+                'resellers' => count(array_filter($accounts, function ($a) { return $a['clients'] > 0; })));
+        }
+        $last = (int) self::Get('elk_log_id', '-1');
+        if ($last < 0) {
+            // (the first run: from now on, not the whole past)
+            $last = (int) self::One("SELECT COALESCE(MAX(lg_id_pk), 0) FROM x_logs");
+        }
+        $what = array('Account suspended: ' => 'suspend', 'Account switched on: ' => 'unsuspend',
+            'Mailbox switched off: ' => 'mailbox-off', 'Mailbox switched on: ' => 'mailbox-on');
+        foreach (self::Rows("SELECT lg_id_pk, lg_user_fk, lg_detail_tx, lg_when_ts FROM x_logs WHERE lg_module_vc = 'zgod' AND lg_id_pk > :l ORDER BY lg_id_pk LIMIT 500", array(':l' => $last)) as $r) {
+            $last = max($last, (int) $r['lg_id_pk']);
+            foreach ($what as $pre => $act) {
+                if (strpos((string) $r['lg_detail_tx'], $pre) !== 0) {
+                    continue;
+                }
+                $rest = substr((string) $r['lg_detail_tx'], strlen($pre));
+                $line = array('@timestamp' => gmdate('Y-m-d\TH:i:s\Z', (int) $r['lg_when_ts']), 'type' => 'action', 'action' => $act,
+                    'by' => isset($users[(int) $r['lg_user_fk']]) ? $users[(int) $r['lg_user_fk']] : '');
+                if ($act === 'suspend' || $act === 'unsuspend') {
+                    $m = array();
+                    preg_match('/^(\S+)(?: \((.*)\))?$/s', $rest, $m);
+                    $line['user'] = isset($m[1]) ? $m[1] : '';
+                    if (!empty($m[2])) {
+                        $line['reason'] = function_exists('mb_substr') ? mb_substr($m[2], 0, 200) : substr($m[2], 0, 200);
+                    }
+                } else {
+                    // (the mailbox's account, not its address)
+                    $line['user'] = (string) self::One("SELECT a.ac_user_vc FROM x_mailboxes m JOIN x_accounts a ON a.ac_id_pk = m.mb_acc_fk WHERE m.mb_address_vc = :m", array(':m' => $rest));
+                }
+                $out[] = $line;
+            }
+        }
+        self::Set('elk_log_id', (string) $last);
+        return array_map(function ($l) { return json_encode($l, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR); }, $out);
+    }
+
+    /**
+     * The daemon's run (every few minutes): zGod's lines into the panel's zgod.log (root's, 640; kept under 5 MB,
+     * the older half in zgod.log.1), the figures once an hour.
+     *
+     * @param string $file The log file (the panel's log folder + zgod.log).
+     * @param int|null $now
+     * @return string What happened, for the daemon's log ('' when nothing).
+     */
+    static function ElkRun($file, $now = null)
+    {
+        $now = $now === null ? time() : (int) $now;
+        $hour = gmdate('YmdH', $now);
+        $hourly = self::Get('elk_hour') !== $hour;
+        $lines = self::ElkLines($now, $hourly);
+        if ($hourly) {
+            self::Set('elk_hour', $hour);
+        }
+        if (!$lines) {
+            return '';
+        }
+        $dir = dirname($file);
+        if (!is_dir($dir) || is_link($file)) {
+            return 'zGod: no log folder for its lines (' . $dir . ')';
+        }
+        clearstatcache();
+        if (is_file($file) && filesize($file) > 5 * 1024 * 1024) {
+            @rename($file, $file . '.1');
+        }
+        $new = !is_file($file);
+        $ok = @file_put_contents($file, implode("\n", $lines) . "\n", FILE_APPEND | LOCK_EX) !== false;
+        if ($new && $ok) {
+            @chmod($file, 0640);
+        }
+        return $ok ? ($hourly ? 'zGod: ' . count($lines) . ' lines for the Elk node' : '') : 'zGod: could not write ' . $file;
+    }
 }

@@ -66,6 +66,11 @@
       "type": "dashboardLink"
      },
      {
+      "destination": "sentora-zgod",
+      "label": "zGod",
+      "type": "dashboardLink"
+     },
+     {
       "destination": "sentora-health",
       "label": "Server health",
       "type": "dashboardLink"

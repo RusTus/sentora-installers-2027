@@ -448,6 +448,12 @@ DAYS=$(cat "$CONF/retention")
 sed "s/RETENTION_DAYS/$DAYS/g" "$CONF/files/ilm-policy.json" > "$CONF/files/ilm.json"
 esapi PUT /_ilm/policy/sentora-logs "$CONF/files/ilm.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the keeping time (see $LOG)."
 esapi PUT /_index_template/logs-sentora "$CONF/files/index-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused Sentora's template (see $LOG)."
+# (a node from before a field was in the template: the logs move on to a new part with the template's fields at the next
+# line; the older part stays, kept as long as the logs are)
+if esapi GET /_data_stream/logs-sentora-default 2> /dev/null | grep -q '"name":"logs-sentora-default"' \
+    && ! esapi GET '/logs-sentora-default/_mapping/field/sentora.zgod.disk' 2> /dev/null | grep -q '"type":"double"'; then
+    esapi POST '/logs-sentora-default/_rollover?lazy=true' > /dev/null 2>&1 || true
+fi
 # (other sources: a FortiGate, Veeam, Microsoft 365; each its own data stream, used once it is switched on)
 for t in fortigate veeam m365 windows vsphere; do
     esapi PUT "/_index_template/logs-$t" "$CONF/files/$t-template.json" | grep -q '"acknowledged":true' || die "Elasticsearch refused the $t template (see $LOG)."
@@ -699,7 +705,7 @@ out=$(curl -sS --cacert "$CONF/ca.crt" --resolve "$NODE_CN:443:127.0.0.1" -u "el
     -X POST "https://$NODE_CN/api/kibana/settings" --data-binary "@$CONF/files/ui.json")
 printf '%s' "$out" | grep -q '"defaultRoute"' || echo "WARNING: Kibana did not take its start page and theme: ${out:0:200}"
 n=0
-for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere; do
+for d in sentora-overview sentora-worldmap sentora-uptime sentora-websites sentora-mail sentora-delivery sentora-security sentora-firewall sentora-panel sentora-health sentora-speed sentora-fortigate sentora-vpn sentora-threats sentora-veeam sentora-m365 sentora-shop sentora-today sentora-funnel sentora-attackers sentora-internet sentora-coverage sentora-backupwall sentora-serverwall sentora-netwall sentora-m365wall sentora-secwall sentora-saleswall sentora-week sentora-flows sentora-adwall sentora-ad sentora-vswall sentora-vsphere sentora-zgod; do
     get "kibana/dashboards/$d.json" "$CONF/files/$d.json" || die "Could not get the dashboard $d."
     out=$(kbapi PUT "/api/dashboards/$d" "$CONF/files/$d.json")
     if printf '%s' "$out" | grep -q "\"id\":\"$d\""; then n=$((n + 1)); else echo "WARNING: Kibana refused the dashboard $d: ${out:0:300}"; fi
@@ -723,7 +729,7 @@ kbapi GET /api/saved_objects/dashboard/sentora-flows > "$CONF/files/fl.json" \
         visualization:sentora-flow-visits:0:24:24:22 visualization:sentora-flow-internet:24:24:24:22 > "$CONF/files/fl-new.json" \
     && kbapi PUT /api/saved_objects/dashboard/sentora-flows "$CONF/files/fl-new.json" | grep -q '"id":"sentora-flows"' || echo "WARNING: the flow charts are not on the Flows dashboard"
 rm -f "$CONF/files/fl.json" "$CONF/files/fl-new.json"
-note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage; the walls: Server, Backup, Network, Security, Microsoft 365, Sales; Week in review, Flows with $fl flow charts; Active Directory, vSphere and their walls)."
+note "$n dashboards (Sentora: Overview, World map, Uptime, Websites, Mail, Mail delivery, Security, Web firewall, Panel and server, Server health, Website speed; and for other sources: FortiGate web, VPN and threats, Veeam backups, Microsoft 365, Online store; and Today, Store funnel, Attackers, Internet use, Backup coverage; the walls: Server, Backup, Network, Security, Microsoft 365, Sales; Week in review, Flows with $fl flow charts; Active Directory, vSphere and their walls; zGod)."
 
 cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #!/bin/bash

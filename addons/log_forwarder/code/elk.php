@@ -93,7 +93,7 @@ class elk
             'mail' => array('Mail', 'Postfix (sent, bounced, refused), spam scores (SpamAssassin), Dovecot (mailbox logins), webmail logins.'),
             'logins' => array('Server logins', 'SSH logins and sudo, FTP logins.'),
             'bans' => array('Bans', 'fail2ban: addresses found and banned, by jail.'),
-            'panel' => array('The panel', 'Panel pages and errors, failed panel logins, what root did for the panel, the daemon, the problems log.'),
+            'panel' => array('The panel', 'Panel pages and errors, failed panel logins, what root did for the panel, the daemon, the problems log, zGod\'s figures.'),
             'ftp' => array('FTP', 'Uploads and other file changes over FTP.'),
             'dns' => array('DNS', 'BIND\'s log.'),
             'health' => array('Server health', 'CPU, memory, disk, network, Apache, MySQL and the mail queue, every 5 minutes.'),
@@ -666,6 +666,8 @@ class elk
             $add($logs . '/zsudo.log', 'zsudo');
             $add($logs . '/sentora.log', 'daemon');
             $add($logs . '/problems.log', 'problems');
+            // (zGod's figures and actions, when zGod is installed: the node's zGod dashboard)
+            $add($logs . '/zgod.log', 'zgod');
         }
         if (in_array('mail', $groups, true)) {
             foreach (array('/var/log/dovecot-info.log', '/var/log/dovecot.log') as $p) {

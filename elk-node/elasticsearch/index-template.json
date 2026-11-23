@@ -136,6 +136,83 @@
                   "type": "keyword"
                 }
               }
+            },
+            "zgod": {
+              "properties": {
+                "type": {
+                  "type": "keyword"
+                },
+                "user": {
+                  "type": "keyword"
+                },
+                "reseller": {
+                  "type": "keyword"
+                },
+                "package": {
+                  "type": "keyword"
+                },
+                "group": {
+                  "type": "keyword"
+                },
+                "by": {
+                  "type": "keyword"
+                },
+                "action": {
+                  "type": "keyword"
+                },
+                "reason": {
+                  "type": "keyword",
+                  "ignore_above": 256
+                },
+                "disk": {
+                  "type": "double"
+                },
+                "disk_quota": {
+                  "type": "double"
+                },
+                "disk_pct": {
+                  "type": "double"
+                },
+                "bandwidth": {
+                  "type": "double"
+                },
+                "bandwidth_quota": {
+                  "type": "double"
+                },
+                "bandwidth_pct": {
+                  "type": "double"
+                },
+                "domains": {
+                  "type": "double"
+                },
+                "mailboxes": {
+                  "type": "double"
+                },
+                "databases": {
+                  "type": "double"
+                },
+                "ftp": {
+                  "type": "double"
+                },
+                "clients": {
+                  "type": "double"
+                },
+                "accounts": {
+                  "type": "double"
+                },
+                "suspended": {
+                  "type": "double"
+                },
+                "resellers": {
+                  "type": "double"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "last_login": {
+                  "type": "date"
+                }
+              }
             }
           }
         },

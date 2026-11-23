@@ -14,6 +14,8 @@ on:
       - elk-node/**
       - addons/log_forwarder/**
       - sentora-repo/log_forwarder.zpp
+      - addons/zgod/**
+      - sentora-repo/zgod.zpp
       - tests/elk/**
       - .github/scripts/elk-node-test.sh
       - .github/workflows/elk-node-test.yml

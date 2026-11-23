@@ -25,6 +25,7 @@ DASHBOARDS = [
     ("sentora-attackers", "Attackers"),
     ("sentora-firewall", "Web firewall"),
     ("sentora-panel", "Panel and server"),
+    ("sentora-zgod", "zGod"),
     ("sentora-health", "Server health"),
     ("sentora-speed", "Website speed"),
 ]
@@ -1154,6 +1155,70 @@ BOARDS["sentora-vsphere"] = build_src("sentora-vsphere", "vSphere", [
     [(48, 3, note("Read from vCenter every minute by Metricbeat on the Elk node with a read-only user (sentora-elk-node vsphere VCENTER USER). "
                   "Alerts in the panel: a datastore filling up, a host in red or too busy, a red alarm, a snapshot older than a week, vCenter gone quiet."))],
 ])
+
+# ---- zGod (the add-on, Log Forwarder 214+): every account's figures once an hour, the server's, what zGod did
+ZG = 'sentora.log : "zgod"'
+ZACC = ZG + ' and sentora.zgod.type : "account"'
+ZSRV = ZG + ' and sentora.zgod.type : "server"'
+ZACT = ZG + ' and sentora.zgod.type : "action"'
+LATEST = ' and @timestamp >= "now-2h"'
+ZPCT = {"type": "number", "decimals": 0, "suffix": "%"}
+NAMES.update({"sentora.zgod.user": "Account", "sentora.zgod.reseller": "Reseller", "sentora.zgod.package": "Package",
+              "sentora.zgod.action": "What", "sentora.zgod.by": "By", "sentora.zgod.reason": "Why"})
+
+
+def by_top(cfg, field, limit, columns):
+    """A tile per account, the highest first."""
+    return cfg | {"breakdown_by": {"operation": "terms", "fields": [field], "limit": limit, "columns": columns, "label": NAMES.get(field, field),
+                                   "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}}
+
+
+def zsum(title, kql, field, label, by, limit=8):
+    """Over time: the highest figure of each hour, one line per value of by (or one line in all)."""
+    layer = {"type": "line", "data_source": DV, "x": {"operation": "date_histogram", "field": "@timestamp"},
+             "y": [{"operation": "max", "field": field, "label": label, "format": BYTES}]}
+    if by:
+        layer["breakdown_by"] = {"operation": "terms", "fields": [by], "limit": limit, "label": NAMES.get(by, by),
+                                 "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}
+    return {"type": "xy", "title": title, "query": q(kql), "layers": [layer], "legend": {"visibility": "visible", "position": "right"}}
+
+
+def zbig(title, field, label, fmt):
+    """The accounts using most (their newest figures), with their reseller and package."""
+    return {"type": "data_table", "title": title, "data_source": DV, "query": q(ZACC + LATEST),
+            "metrics": [{"operation": "max", "field": field, "label": label, "format": fmt},
+                        dict(last("sentora.zgod.reseller"), label="Reseller"), dict(last("sentora.zgod.package"), label="Package")],
+            "rows": [{"operation": "terms", "fields": ["sentora.zgod.user"], "limit": 15, "label": "Account",
+                      "rank_by": {"type": "metric", "metric_index": 0, "direction": "desc"}}]}
+
+
+BOARDS["sentora-zgod"] = build("sentora-zgod", "zGod", [
+    [(8, 6, tile("Accounts", DV, ZSRV, last("sentora.zgod.accounts"), {"type": "static", "color": BLUE}, fmt={"type": "number", "decimals": 0}, trend=True)),
+     (8, 6, tile("Suspended", DV, ZSRV, last("sentora.zgod.suspended"), bands((None, 1, GREEN), (1, None, YELLOW)), fmt={"type": "number", "decimals": 0})),
+     (8, 6, tile("Resellers", DV, ZSRV, last("sentora.zgod.resellers"), {"type": "static", "color": BLUE}, fmt={"type": "number", "decimals": 0})),
+     (8, 6, tile("Disk used", DV, ZSRV, last("sentora.zgod.disk"), {"type": "static", "color": BLUE}, fmt=BYTES, trend=True)),
+     (8, 6, tile("Bandwidth this month", DV, ZSRV, last("sentora.zgod.bandwidth"), {"type": "static", "color": BLUE}, fmt=BYTES, trend=True)),
+     (8, 6, tile("zGod actions", DV, ZACT, {"operation": "count"}, {"type": "static", "color": BLUE}))],
+    [(24, 15, by_top(tile("Disk against the quota (the fullest)", DV, ZACC + " and sentora.zgod.disk_quota > 0" + LATEST,
+                          {"operation": "max", "field": "sentora.zgod.disk_pct"}, BUSY, "of the quota", ZPCT), "sentora.zgod.user", 12, 4)),
+     (24, 15, by_top(tile("Bandwidth against the quota this month (the fullest)", DV, ZACC + " and sentora.zgod.bandwidth_quota > 0" + LATEST,
+                          {"operation": "max", "field": "sentora.zgod.bandwidth_pct"}, BUSY, "of the quota", ZPCT), "sentora.zgod.user", 12, 4))],
+    [(24, 13, zbig("Most disk", "sentora.zgod.disk", "Disk", BYTES)),
+     (24, 13, zbig("Most bandwidth this month", "sentora.zgod.bandwidth", "Bandwidth", BYTES))],
+    [(24, 12, zsum("Disk used by the biggest accounts", ZACC, "sentora.zgod.disk", "Disk", "sentora.zgod.user", 8)),
+     (24, 12, zsum("The server's disk and bandwidth", ZSRV, "sentora.zgod.bandwidth", "Bandwidth this month", None) | {
+         "layers": [zsum("", ZSRV, "sentora.zgod.bandwidth", "Bandwidth this month", None)["layers"][0] | {
+             "y": [{"operation": "max", "field": "sentora.zgod.bandwidth", "label": "Bandwidth this month", "format": BYTES},
+                   {"operation": "max", "field": "sentora.zgod.disk", "label": "Disk", "format": BYTES}]}]})],
+    [(16, 12, ring("Accounts by reseller", DV, ZACC + LATEST, "sentora.zgod.reseller", {"operation": "unique_count", "field": "sentora.zgod.user", "label": "Accounts"}, 8)),
+     (16, 12, ring("Accounts by package", DV, ZACC + LATEST, "sentora.zgod.package", {"operation": "unique_count", "field": "sentora.zgod.user", "label": "Accounts"}, 8)),
+     (16, 12, table("What zGod did", ZACT, ["sentora.zgod.action", "sentora.zgod.user", "sentora.zgod.by"], 20, "Times"))],
+    [(32, 10, bars("zGod's actions over time", ZACT, "sentora.zgod.action", 4, "Actions")),
+     (16, 10, table("Why accounts were suspended", ZACT + ' and sentora.zgod.action : "suspend" and sentora.zgod.reason : *', ["sentora.zgod.reason"], 15, "Times"))],
+    [(48, 3, note("From **zGod** on the panel (Server Admin > zGod): each account's figures once an hour, and every suspend and mailbox "
+                  "switch, sent by Log Forwarder with the panel's logs (tick **The panel** on its page). No email addresses are sent."))],
+])
+BOARDS["sentora-zgod"]["time_range"] = {"from": "now-7d", "to": "now"}
 
 # ---- Flows (Sankey): where things come from, where they go, how they end. Vega (Kibana's custom charts), saved as
 # visualizations and put on the Flows board by addvis.py (the dashboards API takes no Vega panel).
