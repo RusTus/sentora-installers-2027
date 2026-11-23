@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        addon: [docker_hosting, payment_plans, php_hardening]
+        addon: [docker_hosting, payment_plans, php_hardening, zgod]
     steps:
       - uses: actions/checkout@v5
         with:

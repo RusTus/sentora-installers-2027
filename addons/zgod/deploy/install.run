@@ -1,0 +1,36 @@
+<?php
+/**
+ * zGod install step (run as root from the panel's folder, by zppy; upgrade.run is the same): administrators
+ * only; its settings table; its name and description in the panel. The daily report starts off.
+ *
+ * Written by RusTus, 2026-11-23
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$zgInstall = function () {
+    global $zdbh;
+    $folder = basename(dirname(dirname(__FILE__)));
+    $q = $zdbh->prepare("SELECT mo_id_pk FROM x_modules WHERE mo_folder_vc = :f");
+    $q->execute(array(':f' => $folder));
+    $id = (int) $q->fetchColumn();
+    if ($id > 0) {
+        // administrators only (group 1): it shows every account on the panel; taken away from any other group
+        $zdbh->prepare("DELETE FROM x_permissions WHERE pe_module_fk = :m AND pe_group_fk <> 1")->execute(array(':m' => $id));
+        $has = $zdbh->prepare("SELECT COUNT(*) FROM x_permissions WHERE pe_group_fk = 1 AND pe_module_fk = :m");
+        $has->execute(array(':m' => $id));
+        if ((int) $has->fetchColumn() === 0) {
+            $zdbh->prepare("INSERT INTO x_permissions (pe_group_fk, pe_module_fk) VALUES (1, :m)")->execute(array(':m' => $id));
+        }
+        $xml = @simplexml_load_file(dirname(dirname(__FILE__)) . '/module.xml');
+        if ($xml && (string) $xml->name !== '') {
+            $zdbh->prepare("UPDATE x_modules SET mo_name_vc = :n, mo_desc_tx = :d WHERE mo_id_pk = :m")
+                ->execute(array(':n' => (string) $xml->name, ':d' => (string) $xml->desc, ':m' => $id));
+        }
+    }
+    require_once dirname(__FILE__) . '/../code/zgod.php';
+    zgod::Ensure();
+    echo "zGod: for administrators (Server Admin > zGod); the daily report is off until you switch it on.\n";
+};
+$zgInstall();

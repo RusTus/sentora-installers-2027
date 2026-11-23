@@ -1,0 +1,13 @@
+<?php
+/**
+ * zGod remove step (run as root from the panel's folder, by zppy): its settings table goes. The panel's own
+ * data (accounts, mailboxes, the log) is never touched: zGod only read it.
+ *
+ * Written by RusTus, 2026-11-23
+ */
+require_once 'dryden/loader.inc.php';
+require_once 'cnf/db.php';
+require_once 'inc/dbc.inc.php';
+
+$GLOBALS['zdbh']->exec("DROP TABLE IF EXISTS x_zgod");
+echo "zGod removed (its daily report setting with it).\n";
