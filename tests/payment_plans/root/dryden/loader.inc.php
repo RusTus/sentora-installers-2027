@@ -2,6 +2,19 @@
 // Stand-in panel for testing Payment Plans: SQLite in place of MySQL (or a real MySQL/MariaDB: env PP_MYSQL), small stand-ins for the core classes.
 // Database file: env PP_DB. Logged-in account: env PP_ME or $GLOBALS['PP_ME'].
 
+class TestStmt extends PDOStatement
+{
+    protected function __construct()
+    {
+    }
+
+    #[\ReturnTypeWillChange]
+    function execute($params = null)
+    {
+        return TestPDO::Retry(function () use ($params) { return parent::execute($params); });
+    }
+}
+
 class TestPDO extends PDO
 {
     static $log = array();
@@ -36,7 +49,25 @@ class TestPDO extends PDO
     #[\ReturnTypeWillChange]
     function exec($q)
     {
-        return parent::exec(self::rw($q));
+        return self::Retry(function () use ($q) { return parent::exec(self::rw($q)); });
+    }
+
+    /**
+     * SQLite only: a write that meets another process's (the web server's, a page request's) is tried again
+     * for a while, as MySQL waits for a lock; SQLite in WAL mode can say "locked" at once instead of waiting.
+     */
+    static function Retry(callable $f)
+    {
+        for ($n = 0; ; $n++) {
+            try {
+                return $f();
+            } catch (PDOException $e) {
+                if ($n >= 50 || strpos($e->getMessage(), 'database is locked') === false) {
+                    throw $e;
+                }
+                usleep(100000);
+            }
+        }
     }
 
     #[\ReturnTypeWillChange]
@@ -66,6 +97,7 @@ $zdbh = new TestPDO('sqlite:' . getenv('PP_DB'));
 $zdbh->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $zdbh->exec('PRAGMA journal_mode=WAL');
 $zdbh->exec('PRAGMA busy_timeout=5000');
+$zdbh->setAttribute(PDO::ATTR_STATEMENT_CLASS, array('TestStmt'));
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_accounts (ac_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, ac_user_vc TEXT, ac_email_vc TEXT, ac_reseller_fk INT, ac_package_fk INT,
     ac_group_fk INT, ac_enabled_in INT DEFAULT 1, ac_created_ts INT, ac_deleted_ts INT)");
 $zdbh->exec("CREATE TABLE IF NOT EXISTS x_packages (pk_id_pk INTEGER PRIMARY KEY AUTOINCREMENT, pk_name_vc TEXT, pk_reseller_fk INT, pk_deleted_ts INT)");
