@@ -29,6 +29,9 @@
     Administrators and SYSTEM can read it). On a repair the saved one is kept.
 .PARAMETER RelaxedSqlMode
     MySQL without strict mode (as MySQL 5 behaved by default): for an old app while it is being updated.
+.PARAMETER LegacyForeignKeys
+    Let a foreign key point at a column that is not unique (MySQL 5 allowed it; MySQL 8.4 refuses it with error 6125
+    unless restrict_fk_on_non_standard_key is OFF). For an old app's database; written into my.ini on every run.
 .PARAMETER NoFirewall
     Do not open Apache's port in Windows Firewall (MySQL is never opened: it listens on 127.0.0.1 only).
 .PARAMETER Uninstall
@@ -47,6 +50,7 @@ param(
     [string]$TimeZone = 'America/Chicago',
     [SecureString]$MySQLRootPassword,
     [switch]$RelaxedSqlMode,
+    [switch]$LegacyForeignKeys,
     [switch]$NoFirewall,
     [switch]$Uninstall
 )
@@ -75,9 +79,12 @@ $Pkg = @{
 $VcRedistUrl = 'https://aka.ms/vc14/vc_redist.x64.exe'
 $CaBundleUrl = 'https://curl.se/ca/cacert.pem'
 
-$ApacheService = 'ZPanelApache'
-$MySQLService  = 'ZPanelMySQL'
-$FirewallRule  = 'ZPanel Apache (HTTP)'
+$ApacheService = 'Apache2'
+$MySQLService  = 'MySQL'
+$FirewallRule  = 'Apache HTTP Server (port 80)'
+# (the names the first version of this installer used: removed when found, the data and settings stay)
+$OldServices   = @('ZPanelApache', 'ZPanelMySQL')
+$OldFirewall   = 'ZPanel Apache (HTTP)'
 
 $Bin  = Join-Path $Root 'bin'
 $Cfg  = Join-Path $Root 'configs'
@@ -196,9 +203,9 @@ if ($PSVersionTable.PSVersion.Major -lt 5) { Fail 'This needs PowerShell 5.1 or 
 
 if ($Uninstall) {
     Say 'Removing the services (folders, databases and logs stay)'
-    Stop-AndRemoveService $ApacheService; Ok "$ApacheService removed"
-    Stop-AndRemoveService $MySQLService;  Ok "$MySQLService removed"
-    Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    foreach ($n in @($ApacheService, $MySQLService) + $OldServices) { Stop-AndRemoveService $n }
+    Ok "services $ApacheService and $MySQLService removed"
+    foreach ($n in @($FirewallRule, $OldFirewall)) { Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
     Ok 'firewall rule removed'
     Note "The folders under $Root are still there; delete them yourself once you no longer need the databases."
     return
@@ -247,6 +254,10 @@ try {
 
     # --------------------------------------------------------------------------------------------------------------
     Say 'Unpacking into the ZPanel folders'
+    foreach ($n in $OldServices) {
+        if (Get-Service -Name $n -ErrorAction SilentlyContinue) { Stop-AndRemoveService $n; Ok "old service $n removed (now $ApacheService and $MySQLService)" }
+    }
+    Get-NetFirewallRule -DisplayName $OldFirewall -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     Stop-AndRemoveService $ApacheService
     Stop-AndRemoveService $MySQLService
     Expand-Into $zips.Apache $Pkg.Apache.Top $ApacheDir; Ok "Apache  -> $ApacheDir"
@@ -323,6 +334,7 @@ mysqlx=OFF
 character-set-server=utf8mb4
 collation-server=utf8mb4_0900_ai_ci
 sql_mode=$mode
+$(if ($LegacyForeignKeys) { "# (-LegacyForeignKeys: foreign keys may point at columns that are not unique, as in MySQL 5)`r`nrestrict_fk_on_non_standard_key=OFF" })
 max_connections=200
 innodb_buffer_pool_size=512M
 log-error=$(& $Fwd (Join-Path $Logs 'mysql\mysql_error.log'))
