@@ -89,7 +89,10 @@ ip link set vflood1 netns sflood; ip addr add 10.199.0.1/30 dev vflood0; ip link
 ip netns exec sflood ip addr add 10.199.0.2/30 dev vflood1; ip netns exec sflood ip link set vflood1 up; ip netns exec sflood ip link set lo up
 # (firewalld, on the Red Hat family: the new cable joins the zone the server's other connections are in, for this test only)
 if command -v firewall-cmd > /dev/null && firewall-cmd --state > /dev/null 2>&1; then
-    firewall-cmd -q --zone="$(firewall-cmd --get-default-zone)" --change-interface=vflood0 2> /dev/null || true
+    FWZ=$(firewall-cmd --get-default-zone)
+    firewall-cmd -q --zone="$FWZ" --change-interface=vflood0 2> /dev/null || true
+    # (the test box's firewall is the system's stock one: Sentora's own opens the web ports on a real server, not in a container)
+    firewall-cmd --zone="$FWZ" --query-service=http > /dev/null 2>&1 || { firewall-cmd -q --zone="$FWZ" --add-service=http; FWOPENED=1; }
 fi
 FC() { ip netns exec sflood curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$H:80:10.199.0.1" "http://$H$1" 2> /dev/null || true; }
 c=$(FC /); echo "        from 10.199.0.2 the site answers $c before the flood"
@@ -106,6 +109,7 @@ c=$(FC /); [ "$c" = 000 ] && ok "the banned address gets no answer at all (the f
 c=$(code "$H" '/'); [ "$c" != 000 ] && ok "everyone else still gets the site ($c)" || bad "the site does not answer others"
 "$F2B" unban 10.199.0.2 > /dev/null 2>&1
 c=$(FC /); [ "$c" != 000 ] && ok "unbanned: it gets the site again ($c)" || bad "unbanned, but still no answer"
+[ -n "${FWOPENED:-}" ] && firewall-cmd -q --zone="$FWZ" --remove-service=http
 ip link del vflood0 2> /dev/null; ip netns del sflood 2> /dev/null
 ph 'ph::Set("flood_on", "0");'
 daemon
