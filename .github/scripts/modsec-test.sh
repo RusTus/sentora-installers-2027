@@ -87,8 +87,16 @@ daemon
 ip netns add sflood 2> /dev/null; ip link add vflood0 type veth peer name vflood1 2> /dev/null
 ip link set vflood1 netns sflood; ip addr add 10.199.0.1/30 dev vflood0; ip link set vflood0 up
 ip netns exec sflood ip addr add 10.199.0.2/30 dev vflood1; ip netns exec sflood ip link set vflood1 up; ip netns exec sflood ip link set lo up
+# (firewalld, on the Red Hat family: the new cable joins the zone the server's other connections are in, for this test only)
+if command -v firewall-cmd > /dev/null && firewall-cmd --state > /dev/null 2>&1; then
+    firewall-cmd -q --zone="$(firewall-cmd --get-default-zone)" --change-interface=vflood0 2> /dev/null || true
+fi
 FC() { ip netns exec sflood curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$H:80:10.199.0.1" "http://$H$1" 2> /dev/null || true; }
 c=$(FC /); echo "        from 10.199.0.2 the site answers $c before the flood"
+if [ "$c" = 000 ]; then
+    bad "the test's outside address can not reach the site before the flood"
+    { command -v firewall-cmd > /dev/null && firewall-cmd --list-all; command -v ufw > /dev/null && ufw status; ss -ltnp 2> /dev/null | grep -E ':80 '; ip -br addr; } 2>&1 | sed 's/^/        /' | head -40
+fi
 for i in $(seq 1 45); do FC "/?flood=$i" > /dev/null; done
 for i in $(seq 1 5); do FC "/style-$i.css" > /dev/null; done
 banned=0
