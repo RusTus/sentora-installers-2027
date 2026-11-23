@@ -24,23 +24,26 @@ jobs:
           Get-Service Apache2, MySQL, SFTPGo | Format-Table Name, Status, StartType -AutoSize
           powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 add webuser Upl0ad-Test-9x
           powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 list
-          # FTPS (explicit TLS) upload, accepting the certificate made at install time
-          [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/hello.txt')
-          $req.Method = [Net.WebRequestMethods+Ftp]::UploadFile; $req.EnableSsl = $true; $req.UsePassive = $true
-          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'Upl0ad-Test-9x')
-          $b = [Text.Encoding]::ASCII.GetBytes('hello over FTPS'); $s = $req.GetRequestStream(); $s.Write($b, 0, $b.Length); $s.Close(); $req.GetResponse().Close()
+          # FTPS (explicit TLS required) with curl.exe, which ships with Windows Server 2025; -k: the certificate made at install time
+          Set-Content $env:TEMP\hello.txt 'hello over FTPS' -NoNewline -Encoding ascii
+          $ErrorActionPreference = 'Continue'
+          curl.exe -sS --ssl-reqd -k --ftp-pasv -T $env:TEMP\hello.txt ftp://127.0.0.1/ -u webuser:Upl0ad-Test-9x
+          if ($LASTEXITCODE -ne 0) { throw "FTPS upload failed ($LASTEXITCODE)" }
           $f = 'C:\zpanel\hostdata\webuser\public_html\hello.txt'
           if ((Get-Content $f -Raw) -ne 'hello over FTPS') { throw 'the uploaded file is not there' }
           'ok   FTPS upload landed in C:\zpanel\hostdata\webuser\public_html'
+          $back = curl.exe -sS --ssl-reqd -k ftp://127.0.0.1/hello.txt -u webuser:Upl0ad-Test-9x
+          if ($back -ne 'hello over FTPS') { throw "FTPS download: $back" }
+          'ok   FTPS download gives the same file back'
           # plain FTP without TLS must be refused (TLS required)
-          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/'); $req.Method = [Net.WebRequestMethods+Ftp]::ListDirectory; $req.EnableSsl = $false
-          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'Upl0ad-Test-9x')
-          try { $req.GetResponse().Close(); throw 'plain FTP was accepted' } catch { if ($_.Exception.Message -eq 'plain FTP was accepted') { throw }; "ok   plain FTP refused: $($_.Exception.Message)" }
+          $plain = curl.exe -sS ftp://127.0.0.1/ -u webuser:Upl0ad-Test-9x 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw "plain FTP was accepted: $plain" }
+          "ok   plain FTP refused: $($plain.Trim())"
           # wrong password refused
-          $req = [Net.FtpWebRequest]::Create('ftp://127.0.0.1/'); $req.Method = [Net.WebRequestMethods+Ftp]::ListDirectory; $req.EnableSsl = $true
-          $req.Credentials = New-Object Net.NetworkCredential('webuser', 'wrong')
-          try { $req.GetResponse().Close(); throw 'a wrong password was accepted' } catch { if ($_.Exception.Message -eq 'a wrong password was accepted') { throw }; 'ok   a wrong password is refused' }
+          $bad = curl.exe -sS --ssl-reqd -k ftp://127.0.0.1/ -u webuser:wrong 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw 'a wrong password was accepted' }
+          "ok   a wrong password is refused: $($bad.Trim())"
+          $ErrorActionPreference = 'Stop'
           Get-NetTCPConnection -State Listen -LocalPort 21, 2022, 8080, 3306 | Sort-Object LocalPort | Format-Table LocalAddress, LocalPort -AutoSize
           $admin = Get-NetTCPConnection -State Listen -LocalPort 8080
           if ($admin | Where-Object { $_.LocalAddress -ne '127.0.0.1' }) { throw 'the admin port listens beyond this server' }
