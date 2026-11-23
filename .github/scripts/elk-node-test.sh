@@ -453,6 +453,32 @@ in_box 'sentora-elk-node dashboard install /root/junk.ndjson' > "$OUT/dashboard-
 in_box 'sentora-elk-node dashboard install http://example.com/a.ndjson' > "$OUT/dashboard-http.txt" 2>&1; grep -q "Only a file here or an https" "$OUT/dashboard-http.txt" && ok "plain http addresses are refused" || bad "http: $(cat "$OUT/dashboard-http.txt")"
 in_box 'sentora-elk-node dashboard remove "../x"' > /dev/null 2>&1 && bad "dashboard remove took a path" || ok "dashboard remove takes names only"
 
+say "View-only logins (sentora-elk-node viewer)"
+in_box 'sentora-elk-node viewer add kiosk1' > "$OUT/viewer-add.txt" 2>&1
+VPW=$(sed -n 's/.*login: kiosk1   password: \([A-Za-z0-9]*\).*/\1/p' "$OUT/viewer-add.txt")
+VK() { local p=$1 pw=$2; shift 2; curl -sk -u "kiosk1:$pw" -H 'elastic-api-version: 2023-10-31' -H 'kbn-xsrf: x' -H 'Content-Type: application/json' -o /dev/null -w '%{http_code}' "$@" "https://$IP$p"; }
+[ -n "$VPW" ] && [ "$(VK /api/spaces/space "$VPW")" = 200 ] && ok "viewer add: kiosk1 can log in to Kibana" || bad "viewer add: $(cat "$OUT/viewer-add.txt")"
+[ "$(VK /api/dashboards/sentora-overview "$VPW")" = 200 ] && ok "a viewer opens the dashboards" || bad "a viewer can not open a dashboard ($(VK /api/dashboards/sentora-overview "$VPW"))"
+c=$(curl -sk -u "kiosk1:$VPW" -H 'Content-Type: application/json' -o /dev/null -w '%{http_code}' "https://$IP/api/console/proxy?path=/logs-sentora-*/_count&method=GET" -X POST -H 'kbn-xsrf: x')
+[ "$c" = 200 ] && ok "a viewer reads the logs" || echo "        (the logs through Kibana's console answered $c for a viewer)"
+c=$(VK /api/saved_objects/dashboard/sentora-overview "$VPW" -X PUT -d '{"attributes":{"title":"changed by a viewer"}}')
+[ "$c" = 403 ] && ok "a viewer can not change a dashboard ($c)" || bad "a viewer changed a dashboard ($c)"
+c=$(VK /api/saved_objects/dashboard/viewer-made "$VPW" -X POST -d '{"attributes":{"title":"made by a viewer"}}')
+[ "$c" = 403 ] && ok "a viewer can not make a dashboard ($c)" || bad "a viewer made a dashboard ($c)"
+c=$(VK '/api/console/proxy?path=/_data_stream/logs-sentora-default&method=DELETE' "$VPW" -X POST)
+[ "$c" != 200 ] && ok "a viewer can not delete the logs ($c)" || bad "a viewer could delete the logs"
+in_box 'sentora-elk-node viewer list' | grep -qx kiosk1 && ok "viewer list shows it" || bad "viewer list: $(in_box 'sentora-elk-node viewer list')"
+for n in sentora-admin elastic 'Kiosk' 'a;b' ab; do
+    in_box "sentora-elk-node viewer add '$n'" > /dev/null 2>&1 && bad "viewer add took '$n'" || true
+done
+ok "names refused: sentora-admin, elastic, capitals, other characters, too short"
+in_box 'sentora-elk-node viewer remove sentora-admin' > "$OUT/viewer-notviewer.txt" 2>&1; grep -q 'not a viewer' "$OUT/viewer-notviewer.txt" && ok "viewer remove leaves logins that are not viewers alone (sentora-admin)" || bad "viewer remove sentora-admin: $(cat "$OUT/viewer-notviewer.txt")"
+in_box 'sentora-elk-node viewer password kiosk1' > "$OUT/viewer-pw.txt" 2>&1
+VPW2=$(sed -n 's/.*login: kiosk1   password: \([A-Za-z0-9]*\).*/\1/p' "$OUT/viewer-pw.txt")
+[ -n "$VPW2" ] && [ "$(VK /api/spaces/space "$VPW2")" = 200 ] && [ "$(VK /api/spaces/space "$VPW")" = 401 ] && ok "viewer password: the new one works, the old one no more" || bad "viewer password: $(cat "$OUT/viewer-pw.txt")"
+in_box 'sentora-elk-node viewer remove kiosk1' > "$OUT/viewer-rm.txt" 2>&1
+[ "$(VK /api/spaces/space "$VPW2")" = 401 ] && ok "viewer remove: the login works no more" || bad "viewer remove: $(cat "$OUT/viewer-rm.txt")"
+
 say "Settings and update"
 in_box 'sentora-elk-node retention 7' > /dev/null && es https://127.0.0.1:9200/_ilm/policy/sentora-logs | grep -q '"min_age":"7d"' && ok "retention 7: logs kept 7 days" || bad "retention did not change"
 in_box 'sentora-elk-node status' > "$OUT/status.txt" 2>&1; grep -q "Logs kept: *7 days" "$OUT/status.txt" && ok "status shows it" || bad "status: $(cat "$OUT/status.txt")"

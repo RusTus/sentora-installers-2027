@@ -750,6 +750,8 @@ cat > /usr/local/sbin/sentora-elk-node <<'TOOL_EOF'
 #   sentora-elk-node fortigate ADDRESS | veeam ADDRESS | veeam-api ADDRESS USER | m365 TENANT APP | windows DC-ADDRESS | vsphere VCENTER USER | sources   other sources (also: SOURCE off)
 #   sentora-elk-node dashboard install FILE.ndjson|https://.. [NAME] | list | remove NAME   a Kibana export someone made
 #                                      (dashboards and what they show only; never alerts or connectors)
+#   sentora-elk-node viewer add NAME | password NAME | remove NAME | list   view-only Kibana logins (a kiosk, a
+#                                      colleague): every dashboard and log, nothing changed, made or deleted
 #   sentora-elk-node update            the newest Sentora rules and dashboards, Elastic's updates
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "Run this as root."; exit 1; }
@@ -846,6 +848,52 @@ except Exception: print("Stored:        nothing yet")'
         # the panel's list of websites (kept by Logstash) -> Heartbeat's checks, its DNS and hosts (see monitors.py)
         python3 -I /usr/local/lib/sentora-elk/monitors.py ;;
     fortigate|veeam|veeam-api|m365|windows|vsphere|sources) exec bash /usr/local/lib/sentora-elk/sources.sh "$@" ;;
+    viewer)
+        # view-only Kibana logins: Kibana's own read privilege on everything (dashboards, Discover, maps) and
+        # Elasticsearch's read on the logs; nothing can be changed, made or deleted with them
+        n=${3:-}
+        kb() { curl -sS --cacert $C/ca.crt --resolve sentora-elk-node:443:127.0.0.1 -u "elastic:$(cat $C/elastic.pw)" -H 'kbn-xsrf: sentora' -H 'Content-Type: application/json' "$@"; }
+        case "${2:-}" in
+            add|password|remove)
+                if ! [[ "$n" =~ ^[a-z][a-z0-9_-]{2,30}$ ]] || [[ "$n" =~ ^(sentora|elastic|kibana|logstash|beats|apm|remote|anonymous) ]]; then
+                    echo "NAME: 3 to 31 small letters, digits, - or _, starting with a letter (not sentora..., elastic, kibana...)"; exit 2
+                fi ;;
+            list) ;;
+            *) echo "sentora-elk-node viewer add NAME | password NAME | remove NAME | list"; exit 2 ;;
+        esac
+        printf '%s' '{"elasticsearch":{"cluster":[],"indices":[{"names":["logs-sentora-*","heartbeat-*","logs-fortigate-*","logs-veeam-*","logs-m365-*","logs-windows-*","logs-vsphere-*","sentora-shop"],"privileges":["read","view_index_metadata"]}]},"kibana":[{"base":["read"],"feature":{},"spaces":["*"]}]}' > $C/files/role-viewer.json
+        code=$(kb -o /dev/null -w '%{http_code}' -X PUT https://sentora-elk-node/api/security/role/sentora_viewer --data-binary @$C/files/role-viewer.json)
+        [ "$code" = 204 ] || [ "$code" = 200 ] || { echo "Kibana refused the viewers' role (HTTP $code): is Kibana running?"; exit 1; }
+        isviewer() { es "https://127.0.0.1:9200/_security/user/$1" 2> /dev/null | python3 -I -c 'import json,sys
+try:
+    d = json.load(sys.stdin); u = d.get(sys.argv[1], {}); sys.exit(0 if u.get("roles") == ["sentora_viewer"] else 1)
+except Exception: sys.exit(1)' "$1"; }
+        newpw() { openssl rand -base64 33 | tr -dc 'A-Za-z0-9' | cut -c1-24; }
+        url="https://$(hostname -I | awk '{print $1}')/"
+        case "$2" in
+            add)
+                if es "https://127.0.0.1:9200/_security/user/$n" 2> /dev/null | grep -q "\"$n\""; then
+                    echo "There is a login named $n already (a new password for a viewer: sentora-elk-node viewer password $n)."; exit 1
+                fi
+                p=$(newpw)
+                es -X PUT "https://127.0.0.1:9200/_security/user/$n" -d "{\"password\":\"$p\",\"roles\":[\"sentora_viewer\"],\"full_name\":\"Viewer (dashboards only)\"}" | grep -q '"created":true' || { echo "Elasticsearch refused it."; exit 1; }
+                echo "Kibana: $url   login: $n   password: $p   (view only)"
+                echo "A kiosk: log in once with this, open a dashboard (the walls refresh by themselves) and use Full screen;"
+                echo "Kibana asks to log in again after 30 days. Take it away again: sentora-elk-node viewer remove $n" ;;
+            password)
+                isviewer "$n" || { echo "$n is not a viewer login (sentora-elk-node viewer list)."; exit 1; }
+                p=$(newpw)
+                es -X POST "https://127.0.0.1:9200/_security/user/$n/_password" -d "{\"password\":\"$p\"}" | grep -q '{}' || { echo "Elasticsearch refused it."; exit 1; }
+                echo "Kibana: $url   login: $n   password: $p   (view only; the old password works no more)" ;;
+            remove)
+                isviewer "$n" || { echo "$n is not a viewer login (sentora-elk-node viewer list)."; exit 1; }
+                es -X DELETE "https://127.0.0.1:9200/_security/user/$n" | grep -q '"found":true' || { echo "Elasticsearch did not remove it."; exit 1; }
+                echo "$n removed: that login works no more (a browser still logged in with it is sent to the login page)." ;;
+            list)
+                es "https://127.0.0.1:9200/_security/user" | python3 -I -c 'import json,sys
+d = json.load(sys.stdin); v = sorted(k for k, u in d.items() if u.get("roles") == ["sentora_viewer"])
+print("\n".join(v) if v else "No viewer logins. Add one: sentora-elk-node viewer add NAME")' ;;
+        esac ;;
     dashboard)
         # a Kibana export (.ndjson) checked, imported through Kibana's API and remembered (see dashboards.py)
         python3 -I /usr/local/lib/sentora-elk/dashboards.py "${@:2}" ;;
@@ -862,7 +910,7 @@ except Exception: print("Stored:        nothing yet")'
         fi
         rm -f "$t"
         exec bash /usr/local/lib/sentora-elk/installer --update ;;
-    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 TOOL_EOF
 chmod 700 /usr/local/sbin/sentora-elk-node
