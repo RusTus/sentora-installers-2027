@@ -674,14 +674,14 @@ switch ($Do) {
         if ($User -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$' -or -not $Password) { throw 'ftpuser.ps1 add USER PASSWORD [FOLDER]' }
         if (-not $Folder) { $Folder = "$User\public_html" }
         if ($Folder -match '\.\.|^[\\/]|:') { throw 'FOLDER is a folder under C:\zpanel\hostdata' }
-        $home = Join-Path (Join-Path $root 'hostdata') $Folder
-        if (-not (Test-Path $home)) { New-Item -ItemType Directory -Path $home | Out-Null }
-        $body = @{ username = $User; password = $Password; status = 1; home_dir = $home; permissions = @{ '/' = @('*') } } | ConvertTo-Json -Depth 4
+        $userHome = Join-Path (Join-Path $root 'hostdata') $Folder
+        if (-not (Test-Path $userHome)) { New-Item -ItemType Directory -Path $userHome | Out-Null }
+        $body = @{ username = $User; password = $Password; status = 1; home_dir = $userHome; permissions = @{ '/' = @('*') } } | ConvertTo-Json -Depth 4
         Invoke-RestMethod $api -Method Post -Headers $h -ContentType 'application/json' -Body $body | Out-Null
-        "FTP user $User added: $home"
+        "FTP user $User added: $userHome"
     }
     'remove' { Invoke-RestMethod "$api/$User" -Method Delete -Headers $h | Out-Null; "FTP user $User removed (the files stay)" }
-    'list' { (Invoke-RestMethod "$api?limit=500" -Headers $h) | Select-Object username, home_dir, status | Format-Table -AutoSize }
+    'list' { (Invoke-RestMethod "$($api)?limit=500" -Headers $h) | Select-Object username, home_dir, status | Format-Table -AutoSize }
 }
 '@
         Ok "C:\zpanel\bin\ftpuser.ps1: add, remove and list FTP users"
