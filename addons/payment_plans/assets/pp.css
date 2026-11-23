@@ -23,7 +23,7 @@
 .pp-field { display: block; margin: 0; font-weight: normal; }
 .pp-field > span { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .pp-field small { display: block; color: var(--pp-muted); font-size: 12px; margin-top: 3px; line-height: 1.4; }
-.pp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.pp-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .pp-check { font-weight: normal; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
 .pp-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--pp-line); }
 .pp-foot2 { margin-top: 8px; }

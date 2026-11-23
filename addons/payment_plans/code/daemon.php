@@ -69,6 +69,17 @@ class pp_daemon
             $r = pp::MakeInvoice((int) $plan['pl_acc_fk']);
             $log[] = 'Payment Plans: ' . (is_array($r) ? 'invoice ' . $r['in_number_vc'] . ' made' : 'no invoice for account ' . (int) $plan['pl_acc_fk'] . ': ' . $r);
         }
+        // 2b. (110) a reminder the seller's days before the due date (not for an invoice made within the last
+        // day: its own email has just gone)
+        foreach ($zdbh->query("SELECT i.*, s.ps_before_in FROM x_pp_invoices i JOIN x_pp_sellers s ON s.ps_acc_fk = i.in_seller_fk
+            JOIN x_accounts a ON a.ac_id_pk = i.in_acc_fk AND a.ac_deleted_ts IS NULL
+            WHERE i.in_status_vc = 'open' AND i.in_soon_in = 0 AND i.in_reminded_in = 0 AND s.ps_on_in = 1 AND s.ps_before_in > 0
+            AND (i.in_test_in = 0 OR s.ps_mode_vc <> 'live') AND i.in_due_in > " . (int) $now . " AND i.in_due_in - s.ps_before_in * 86400 <= " . (int) $now
+            . " AND i.in_created_in <= " . ((int) $now - 86400) . ($only ? " AND i.in_seller_fk = " . $only : ''))->fetchAll(PDO::FETCH_ASSOC) as $inv) {
+            pp::Tell($inv, 'soon');
+            $zdbh->prepare("UPDATE x_pp_invoices SET in_soon_in = 1 WHERE in_id_pk = :i")->execute(array(':i' => (int) $inv['in_id_pk']));
+            $log[] = 'Payment Plans: invoice ' . $inv['in_number_vc'] . ' is due soon (reminded)';
+        }
         // 3. reminders on the due date, then switched off past the grace days
         // (a TEST invoice only while its seller is testing: after going live it reminds and switches off nobody)
         foreach ($zdbh->query("SELECT i.*, s.ps_grace_in, s.ps_suspend_in FROM x_pp_invoices i JOIN x_pp_sellers s ON s.ps_acc_fk = i.in_seller_fk

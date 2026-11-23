@@ -145,6 +145,14 @@ class module_controller extends ctrl_module
         $v['proc'] = self::Post('inProc');
         $v['auto'] = self::Post('inAuto') === '1';
         $v['period'] = self::Post('inUsual') === 'year' ? 'year' : 'month';
+        // (not sent: kept as they are)
+        $old = pp::Seller($seller);
+        $v['resume'] = isset($_POST['inResume']) ? (self::Post('inResume') === 'owed' ? 'owed' : 'today') : (string) ($old['ps_resume_vc'] ?? 'today');
+        $v['before'] = isset($_POST['inBefore']) ? trim(self::Post('inBefore')) : (string) (int) ($old['ps_before_in'] ?? 3);
+        if (!ctype_digit($v['before']) || (int) $v['before'] > 30) {
+            self::Say('error', 'Reminder days before the due date: 0 (none) to 30.');
+            return;
+        }
         if ($v['name'] === false || $v['name'] === '' || $v['address'] === false || $v['taxlabel'] === false) {
             self::Say('error', 'Give your business name (and address) as plain text: it shows on every invoice.');
             return;
@@ -438,6 +446,11 @@ class module_controller extends ctrl_module
             self::Say('error', 'Give the date the clients have paid until (today, if they have paid nothing yet).');
             return;
         }
+        // (test mode: these are real accounts; they get TEST invoices by email and can be switched off, so it is asked for)
+        if (pp::Testing($s) && self::Post('inTestOk') !== '1') {
+            self::Say('error', 'You are in test mode: tick that these real clients may get TEST invoices (and be switched off when one is unpaid), or go live first.');
+            return;
+        }
         $prices = pp::Prices($seller);
         $n = 0;
         foreach (pp::Unplanned($seller) as $uid => $c) {
@@ -483,6 +496,47 @@ class module_controller extends ctrl_module
             return false;
         }
         return true;
+    }
+
+    /**
+     * The seller's invoices as a CSV file (for the accounts): every invoice, newest first.
+     *
+     * @return void Sends the file and ends, or says why not.
+     */
+    static function doExport()
+    {
+        runtime_csfr::Protect();
+        $seller = self::SellerMe();
+        if (!$seller) {
+            return;
+        }
+        // (a cell starting with = + - @ would be a formula in a spreadsheet: a quote first keeps it text)
+        $cell = function ($v) {
+            $v = (string) $v;
+            if ($v !== '' && strpos('=+-@' . "\t\r", $v[0]) !== false && !preg_match('/^-?\d+(\.\d+)?$/', $v)) {
+                $v = "'" . $v;
+            }
+            return '"' . str_replace('"', '""', $v) . '"';
+        };
+        $d = function ($t) { return (int) $t > 0 ? date('Y-m-d', (int) $t) : ''; };
+        $lines = array(implode(',', array_map($cell, array('Number', 'Test', 'Client', 'Date', 'Due', 'From', 'To', 'Net', 'Tax', 'Total', 'Currency', 'State', 'Paid', 'Paid with', 'Refund', 'Chargeback'))));
+        global $zdbh;
+        $names = array();
+        foreach ($zdbh->query("SELECT ac_id_pk, ac_user_vc FROM x_accounts")->fetchAll(PDO::FETCH_NUM) as $r) {
+            $names[(int) $r[0]] = (string) $r[1];
+        }
+        foreach (pp::Invoices('seller', $seller, 1000000) as $i) {
+            $i['username'] = isset($names[(int) $i['in_acc_fk']]) ? $names[(int) $i['in_acc_fk']] : '#' . (int) $i['in_acc_fk'];
+            $c = (string) $i['in_currency_vc'];
+            $lines[] = implode(',', array_map($cell, array($i['in_number_vc'], (int) $i['in_test_in'] ? 'yes' : '', $i['username'] ?? '', $d($i['in_created_in']), $d($i['in_due_in']),
+                $d($i['in_from_in']), $d($i['in_to_in']), pp::Plain((int) $i['in_net_in'], $c), pp::Plain((int) $i['in_tax_in'], $c), pp::Plain((int) $i['in_total_in'], $c), $c,
+                $i['in_status_vc'], $d($i['in_paid_in']), $i['in_method_vc'], $i['in_refund_vc'] ?? '', $i['in_dispute_vc'] ?? '')));
+        }
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="invoices-' . date('Y-m-d') . '.csv"');
+        header('Cache-Control: no-store');
+        echo "\xEF\xBB\xBF" . implode("\r\n", $lines) . "\r\n";
+        die();
     }
 
     /**
@@ -860,6 +914,8 @@ class module_controller extends ctrl_module
             . $f('Invoice days ahead', '<input class="form-control" name="inLead" maxlength="2" value="' . (int) $s['ps_lead_in'] . '">')
             . $f('Grace days', '<input class="form-control" name="inGrace" maxlength="2" value="' . (int) $s['ps_grace_in'] . '">') . '</div>'
             . '<label class="pp-check"><input type="checkbox" name="inSuspend" value="1"' . ((int) $s['ps_suspend_in'] ? ' checked' : '') . '> ' . self::t('Switch a client off when an invoice is unpaid past the grace days (paying switches it on again)') . '</label>'
+            . '<div class="pp-row">' . $f('Reminder before due', '<input class="form-control" name="inBefore" maxlength="2" value="' . (int) ($s['ps_before_in'] ?? 0) . '">', 'Days before the due date a reminder goes out (0: none).')
+            . $f('After a switch-off', '<select class="form-control" name="inResume"><option value="today">' . self::t('Bill from the day they pay again') . '</option><option value="owed"' . ((string) ($s['ps_resume_vc'] ?? 'today') === 'owed' ? ' selected' : '') . '>' . self::t('Bill where it stopped (the months off are owed)') . '</option></select>', 'When a switched-off client pays, where their next period starts.') . '</div>'
             . '<legend class="pp-legend2">' . self::t('How your clients pay') . '</legend>'
             . $f('Payment service', '<select class="form-control" name="inProc">' . $pOpts . '</select>', 'The money goes straight into your own account with it. None: you mark invoices paid yourself (bank transfer, cash).')
             . '<label class="pp-check pp-testbox"><input type="checkbox" name="inTest" value="1"' . ($testing ? ' checked' : '') . '> <span><b>' . self::t('Test mode') . '</b> '
@@ -908,7 +964,9 @@ class module_controller extends ctrl_module
         $waiting = count(pp::Unplanned($seller));
         $bulk = $waiting > 0 ? '<form class="pp-bulk" method="post" action="./?module=payment_plans&amp;action=StartAll">' . runtime_csfr::Token()
             . '<span>' . self::t('%s client(s) on a priced package are not billed yet (made before automatic billing, or moved to you). Bill them all, %s, from the date they have paid until:', array($waiting, ui_language::translate((string) $s['ps_period_vc'] === 'year' ? 'yearly where the package has a yearly price' : 'monthly where the package has a monthly price')))
-            . '</span> <input class="form-control input-sm" type="date" name="inPaidUntil" value="' . date('Y-m-d') . '"> <button class="btn btn-sm btn-primary" type="submit" onclick="return confirm(this.dataset.ask)" data-ask="' . self::t('Start billing these clients? Each one\'s first invoice comes before the date you gave.') . '">' . self::t('Start billing them') . '</button></form>' : '';
+            . '</span> <input class="form-control input-sm" type="date" name="inPaidUntil" value="' . date('Y-m-d') . '">'
+            . (pp::Testing($s) ? ' <label class="pp-check pp-testbox"><input type="checkbox" name="inTestOk" value="1"> <span>' . self::t('Test mode: these are real clients. They get TEST invoices by email, and are switched off when one is unpaid.') . '</span></label>' : '')
+            . ' <button class="btn btn-sm btn-primary" type="submit" onclick="return confirm(this.dataset.ask)" data-ask="' . self::t('Start billing these clients? Each one\'s first invoice comes before the date you gave.') . '">' . self::t('Start billing them') . '</button></form>' : '';
         $out .= '<div class="pp-card"><h3>' . self::t('Clients') . '</h3>' . $bulk
             . ($rows === '' ? '<p class="pp-muted">' . self::t('You have no clients yet.') . '</p>'
                 : '<p class="pp-muted">' . self::t('Start or change a plan with the date the client has paid until: today for one who has paid nothing yet (their first invoice comes now), or the end of what they paid you before.') . ((int) $s['ps_auto_in'] ? ' ' . self::t('New clients on a priced package are billed by themselves.') : '') . '</p>'
@@ -933,7 +991,7 @@ class module_controller extends ctrl_module
                 . '<td>' . self::h(pp::Show((int) $inv['in_total_in'], (string) $inv['in_currency_vc'])) . '</td><td>' . self::h(ui_language::Date('j M Y', (int) $inv['in_due_in'])) . '</td>'
                 . '<td>' . self::State($inv) . ((string) $inv['in_status_vc'] === 'paid' ? ' <span class="pp-muted">' . self::h($inv['in_method_vc']) . '</span>' : '') . '</td><td class="pp-actions">' . $act . '</td></tr>';
         }
-        $out .= '<div class="pp-card"><h3>' . self::t('Invoices') . '</h3>' . ($rows === '' ? '<p class="pp-muted">' . self::t('No invoices yet.') . '</p>'
+        $out .= '<div class="pp-card"><h3>' . self::t('Invoices') . ' ' . ($rows === '' ? '' : self::Button('Export', 'Export (CSV)', array())) . '</h3>' . ($rows === '' ? '<p class="pp-muted">' . self::t('No invoices yet.') . '</p>'
             : '<table class="pp-table"><thead><tr><th>' . self::t('Number') . '</th><th>' . self::t('Client') . '</th><th>' . self::t('Total') . '</th><th>' . self::t('Due') . '</th><th>' . self::t('State') . '</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>') . '</div>';
         $tests = 0;
         foreach (pp::Invoices('seller', $seller, 500) as $inv) {

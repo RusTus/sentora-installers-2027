@@ -237,6 +237,9 @@ section('Existing clients: billing them all at once');
 $r = req(2);
 check(strpos($r['html'], '1 client(s) on a priced package are not billed yet') !== false, 'the page says 1 client is not billed yet (c_old; c_free has no price)');
 $r = req(2, 'StartAll', array('inPaidUntil' => date('Y-m-d', $now + 30 * 86400)));
+check(strpos($r['text'], 'You are in test mode') !== false && pp::Plan(10) === null, 'in test mode, billing real clients all at once needs a tick (they would get TEST invoices and could be switched off)', $r['text']);
+check(strpos($r0 = req(2)['html'], 'name="inTestOk"') !== false, 'the tick is on the page in test mode');
+$r = req(2, 'StartAll', array('inPaidUntil' => date('Y-m-d', $now + 30 * 86400), 'inTestOk' => '1'));
 check(strpos($r['text'], '1 client(s) are billed from') !== false, 'Start billing them', $r['text']);
 $p10 = pp::Plan(10);
 check($p10 && $p10['pl_period_vc'] === 'month', 'c_old is billed monthly from the date given');
@@ -558,6 +561,40 @@ $state = fake('state');
 list($code, $h, $b) = web(str_replace('{CHECKOUT_SESSION_ID}', $m[1], $state['stripe'][$m[1]]['success_url']));
 $a = row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 11");
 check(strpos($b, 'the invoice is paid') !== false && (int) $a['ac_enabled_in'] === 1 && ws_suspend::Reason(11) === '', 'paid through the pay link (no login): switched on again', $b);
+// (110) where the next period starts once a client switched off for a long time pays
+$offFor = function ($mode) use ($zdbh) {
+    $zdbh->exec("UPDATE x_pp_sellers SET ps_resume_vc = '" . $mode . "' WHERE ps_acc_fk = 2");
+    $zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . (time() - 70 * 86400) . ", pl_anchor_in = 0 WHERE pl_acc_fk = 11");
+    req(2, 'InvoiceNow', array('inClient' => '11'));
+    $inv = lastinv(11);
+    $zdbh->exec("UPDATE x_pp_plans SET pl_suspended_in = 1 WHERE pl_acc_fk = 11");
+    $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 11");
+    ws_suspend::Set(11, pp::REASON . $inv['in_number_vc'], 2);
+    pp::MarkPaid((int) $inv['in_id_pk'], 'Bank transfer');
+    return array($inv, pp::Plan(11));
+};
+list($inv, $p) = $offFor('today');
+check(abs((int) $p['pl_paiduntil_in'] - time()) < 120 && (int) $p['pl_anchor_in'] === (int) date('j') && (int) row("SELECT ac_enabled_in FROM x_accounts WHERE ac_id_pk = 11")['ac_enabled_in'] === 1,
+    'switched off two months, then paid: the next period starts today (no hosting was had meanwhile), and the client is on again', json_encode($p));
+list($inv, $p) = $offFor('owed');
+check((int) $p['pl_paiduntil_in'] === (int) $inv['in_to_in'] && (int) $p['pl_paiduntil_in'] < time() - 20 * 86400, 'the seller\'s other choice: it goes on where it stopped (the months off are owed)', json_encode($p));
+$zdbh->exec("UPDATE x_pp_sellers SET ps_resume_vc = 'today' WHERE ps_acc_fk = 2");
+$zdbh->exec("UPDATE x_pp_plans SET pl_paiduntil_in = " . (time() + 30 * 86400) . " WHERE pl_acc_fk = 11");
+// (110) a reminder before the due date (3 days by default), once, not for an invoice just made
+req(2, 'InvoiceNow', array('inClient' => '12'));
+$soon = lastinv(12);
+$zdbh->exec("UPDATE x_pp_invoices SET in_due_in = " . (time() + 2 * 86400) . ", in_created_in = " . (time() - 2 * 86400) . " WHERE in_id_pk = " . (int) $soon['in_id_pk']);
+daemon();
+daemon();
+check(count(events('email:pro@example.com:%Invoice ' . $soon['in_number_vc'] . ' is due on%')) === 1 && (int) lastinv(12)['in_soon_in'] === 1, 'two days before the due date: one reminder (not again on the next run)');
+req(2, 'Invoice', array('inId' => (string) $soon['in_id_pk'], 'inVoid' => '1'));
+$r = req(2, 'Settings', $st + array('inBefore' => '31'));
+check(strpos($r['text'], '0 (none) to 30') !== false, 'reminder days: 0 to 30 only', $r['text']);
+// (110) the invoices as a CSV file
+$csv = shell_exec('PP_REQ=' . escapeshellarg(json_encode(array('me' => 2, 'action' => 'Export', 'post' => array('csfr_token' => 'x'), 'get' => array()))) . ' php ' . escapeshellarg($T . '/run_req.php') . ' 2>&1');
+$rows = array_map('str_getcsv', explode("\r\n", trim(substr((string) $csv, 3))));
+check(substr((string) $csv, 0, 3) === "\xEF\xBB\xBF" && $rows[0][0] === 'Number' && $rows[0][9] === 'Total' && count($rows) === 1 + count(pp::Invoices('seller', 2, 100000)), 'Export: every invoice of the seller, one row each', substr((string) $csv, 0, 300));
+check(count(array_filter($rows, function ($r) { return isset($r[2]) && $r[2] === 'c_new'; })) > 0 && strpos((string) $csv, 'c_live') === false, 'with the client\'s name, and only this seller\'s');
 ws_suspend::Set(12, 'Abuse', 1);
 $zdbh->exec("UPDATE x_accounts SET ac_enabled_in = 0 WHERE ac_id_pk = 12");
 $zdbh->exec("UPDATE x_pp_plans SET pl_suspended_in = 1 WHERE pl_acc_fk = 12");
@@ -665,8 +702,8 @@ check(in_array('pending', array_column($h2, 'lg_what_vc'), true), 'a pending pay
 $h12 = pp::History($manual12);
 check(end($h12)['lg_what_vc'] === 'paid' && end($h12)['lg_note_vc'] === 'Bank transfer' && (int) end($h12)['lg_by_fk'] === 2, 'marked paid by hand: noted with who did it');
 $off = row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_acc_fk = 11 AND lg_what_vc IN ('off', 'on')");
-check((int) $off['n'] === 2, 'switching off and on again is noted');
-check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 6, 'voided invoices are noted');
+check((int) $off['n'] === 4, 'switching off and on again is noted (and the two switch-ons after paying a long-unpaid invoice)');
+check((int) row("SELECT COUNT(*) n FROM x_pp_log WHERE lg_what_vc = 'void'")['n'] === 7, 'voided invoices are noted');
 $r = req(12, '', array(), array('invoice' => (string) $manual12));
 $r2 = req(2, '', array(), array('invoice' => (string) $manual12));
 check(strpos($r['html'], 'Bank transfer') !== false && strpos($r['html'], 'by res1') === false && strpos($r2['html'], 'by res1') !== false,

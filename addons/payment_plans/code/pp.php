@@ -102,6 +102,15 @@ class pp
         // (109) the day of the month a plan is billed on (so the 31st stays the month's end after a short
         // month); 0 for plans from before: the day of their paid-until date, as before
         self::AddColumn('x_pp_plans', 'pl_anchor_in', 'TINYINT NOT NULL DEFAULT 0');
+        // (110) after a switch-off and payment, bill from that day (today) or where it stopped (owed); a
+        // reminder some days before an invoice is due. Sellers from before keep how it worked (owed, none)
+        if (self::AddColumn('x_pp_sellers', 'ps_resume_vc', "VARCHAR(5) NOT NULL DEFAULT 'today'")) {
+            $zdbh->exec("UPDATE x_pp_sellers SET ps_resume_vc = 'owed'");
+        }
+        if (self::AddColumn('x_pp_sellers', 'ps_before_in', 'TINYINT NOT NULL DEFAULT 3')) {
+            $zdbh->exec("UPDATE x_pp_sellers SET ps_before_in = 0");
+        }
+        self::AddColumn('x_pp_invoices', 'in_soon_in', 'TINYINT NOT NULL DEFAULT 0');
         // version 103: every step of every invoice, kept (made, payment started, paid, refused, voided, switched off...)
         $zdbh->exec("CREATE TABLE IF NOT EXISTS x_pp_log (
             lg_id_pk INT NOT NULL AUTO_INCREMENT PRIMARY KEY, lg_time_in INT NOT NULL, lg_seller_fk INT NOT NULL, lg_acc_fk INT NOT NULL, lg_inv_fk INT NOT NULL DEFAULT 0,
@@ -389,7 +398,7 @@ class pp
         return $r ? $r : array('ps_acc_fk' => (int) $seller, 'ps_name_vc' => '', 'ps_address_tx' => '', 'ps_email_vc' => '', 'ps_currency_vc' => 'USD',
             'ps_taxlabel_vc' => '', 'ps_taxrate_in' => 0, 'ps_prefix_vc' => 'INV-', 'ps_next_in' => 1, 'ps_lead_in' => 7, 'ps_grace_in' => 7,
             'ps_suspend_in' => 1, 'ps_mode_vc' => 'sandbox', 'ps_updated_in' => 0, 'ps_testnext_in' => 1, 'ps_proc_vc' => '',
-            'ps_auto_in' => 1, 'ps_autofrom_in' => 0, 'ps_period_vc' => 'month', 'ps_on_in' => 0, 'new' => true);
+            'ps_auto_in' => 1, 'ps_autofrom_in' => 0, 'ps_period_vc' => 'month', 'ps_on_in' => 0, 'ps_resume_vc' => 'today', 'ps_before_in' => 3, 'new' => true);
     }
 
     /**
@@ -448,12 +457,14 @@ class pp
         $live = $v['mode'] === 'live' && (!empty($old['new']) || (string) $old['ps_mode_vc'] !== 'live');
         $from = $auto && (!empty($old['new']) || !(int) $old['ps_auto_in'] || $live) ? time() : (int) $old['ps_autofrom_in'];
         $zdbh->prepare("REPLACE INTO x_pp_sellers (ps_acc_fk, ps_name_vc, ps_address_tx, ps_email_vc, ps_currency_vc, ps_taxlabel_vc, ps_taxrate_in, ps_prefix_vc,
-            ps_next_in, ps_lead_in, ps_grace_in, ps_suspend_in, ps_mode_vc, ps_updated_in, ps_testnext_in, ps_proc_vc, ps_auto_in, ps_autofrom_in, ps_period_vc, ps_on_in)
-            VALUES (:a, :n, :ad, :e, :c, :tl, :tr, :p, :nx, :l, :g, :su, :m, :t, :tn, :pr, :au, :af, :pe, :on)")
+            ps_next_in, ps_lead_in, ps_grace_in, ps_suspend_in, ps_mode_vc, ps_updated_in, ps_testnext_in, ps_proc_vc, ps_auto_in, ps_autofrom_in, ps_period_vc, ps_on_in,
+            ps_resume_vc, ps_before_in)
+            VALUES (:a, :n, :ad, :e, :c, :tl, :tr, :p, :nx, :l, :g, :su, :m, :t, :tn, :pr, :au, :af, :pe, :on, :rs, :bf)")
             ->execute(array(':a' => (int) $seller, ':n' => $v['name'], ':ad' => $v['address'], ':e' => $v['email'], ':c' => $v['currency'], ':tl' => $v['taxlabel'],
                 ':tr' => (int) $v['taxrate'], ':p' => $v['prefix'], ':nx' => max((int) $old['ps_next_in'], (int) $v['next']), ':l' => (int) $v['lead'],
                 ':g' => (int) $v['grace'], ':su' => $v['suspend'] ? 1 : 0, ':m' => $v['mode'], ':t' => time(), ':tn' => max(1, (int) $old['ps_testnext_in']),
-                ':pr' => (string) $v['proc'], ':au' => $auto ? 1 : 0, ':af' => $from, ':pe' => $v['period'] === 'year' ? 'year' : 'month', ':on' => (int) $old['ps_on_in'] ? 1 : 0));
+                ':pr' => (string) $v['proc'], ':au' => $auto ? 1 : 0, ':af' => $from, ':pe' => $v['period'] === 'year' ? 'year' : 'month', ':on' => (int) $old['ps_on_in'] ? 1 : 0,
+                ':rs' => ($v['resume'] ?? (string) $old['ps_resume_vc']) === 'owed' ? 'owed' : 'today', ':bf' => max(0, min(30, (int) ($v['before'] ?? $old['ps_before_in'])))));
     }
 
     // ----- prices and plans -----
@@ -773,6 +784,15 @@ class pp
                 . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :to2)") . " WHERE pl_acc_fk = :u")
                 ->execute(array(':to' => (int) $inv['in_to_in'], ':u' => (int) $inv['in_acc_fk']) + ((int) $inv['in_test_in'] ? array() : array(':to2' => (int) $inv['in_to_in'])));
             if ((int) $plan['pl_suspended_in']) {
+                // switched off, now paid: the next period starts today (the client had no hosting meanwhile),
+                // unless the seller bills where it stopped (the months it was off are owed)
+                $s = self::Seller((int) $inv['in_seller_fk']);
+                if ((string) ($s['ps_resume_vc'] ?? 'owed') === 'today') {
+                    $now = time();
+                    $zdbh->prepare("UPDATE x_pp_plans SET pl_paiduntil_in = :n, pl_anchor_in = :a" . ((int) $inv['in_test_in'] ? '' : ", pl_realuntil_in = GREATEST(pl_realuntil_in, :n2)")
+                        . " WHERE pl_acc_fk = :u AND pl_paiduntil_in < :n3")
+                        ->execute(array(':n' => $now, ':a' => (int) date('j', $now), ':u' => (int) $inv['in_acc_fk'], ':n3' => $now) + ((int) $inv['in_test_in'] ? array() : array(':n2' => $now)));
+                }
                 self::SwitchOn((int) $inv['in_acc_fk']);
             }
         }
@@ -873,6 +893,7 @@ class pp
         $texts = array(
             'new' => array('info', 'Invoice ' . $inv['in_number_vc'] . ': ' . $total, 'Your invoice ' . $inv['in_number_vc'] . ' for ' . $total . ' is due on ' . $due . '. Pay it in Billing (Account Information > Payment Plans).'
                 . ((int) $inv['in_reminded_in'] && (int) $s['ps_suspend_in'] ? ' Pay it within ' . (int) $s['ps_grace_in'] . ' days, or your hosting is switched off.' : '')),
+            'soon' => array('info', 'Invoice ' . $inv['in_number_vc'] . ' is due on ' . $due, 'A reminder: your invoice ' . $inv['in_number_vc'] . ' for ' . $total . ' is due on ' . $due . '. Pay it in Billing (Account Information > Payment Plans), or with the link below.'),
             'due' => array('warning', 'Invoice ' . $inv['in_number_vc'] . ' is due', 'Your invoice ' . $inv['in_number_vc'] . ' for ' . $total . ' was due on ' . $due . '. Pay it in Billing within ' . (int) $s['ps_grace_in'] . ' days, or your hosting is switched off.'),
             'suspended' => array('outage', 'Your hosting is switched off', 'Invoice ' . $inv['in_number_vc'] . ' for ' . $total . ' is not paid, so your websites, mail and FTP are switched off. Paying it (the pay link in your email, no login needed) switches them on again within minutes.'),
             'paid' => array('info', 'Invoice ' . $inv['in_number_vc'] . ' is paid', 'Thank you: invoice ' . $inv['in_number_vc'] . ' for ' . $total . ' is paid.'),
