@@ -472,7 +472,10 @@ for n in sentora-admin elastic 'Kiosk' 'a;b' ab; do
     in_box "sentora-elk-node viewer add '$n'" > /dev/null 2>&1 && bad "viewer add took '$n'" || true
 done
 ok "names refused: sentora-admin, elastic, capitals, other characters, too short"
-in_box 'sentora-elk-node viewer remove sentora-admin' > "$OUT/viewer-notviewer.txt" 2>&1; grep -q 'not a viewer' "$OUT/viewer-notviewer.txt" && ok "viewer remove leaves logins that are not viewers alone (sentora-admin)" || bad "viewer remove sentora-admin: $(cat "$OUT/viewer-notviewer.txt")"
+# (refused by its name, or as not a viewer: either way the login is still there)
+in_box 'sentora-elk-node viewer remove sentora-admin' > "$OUT/viewer-notviewer.txt" 2>&1; R=$?
+[ $R -ne 0 ] && grep -qE 'not a viewer|NAME: ' "$OUT/viewer-notviewer.txt" && es "https://127.0.0.1:9200/_security/user/sentora-admin" | grep -q '"sentora-admin"' \
+    && ok "viewer remove leaves logins that are not viewers alone (sentora-admin is still there)" || bad "viewer remove sentora-admin: $(cat "$OUT/viewer-notviewer.txt")"
 in_box 'sentora-elk-node viewer password kiosk1' > "$OUT/viewer-pw.txt" 2>&1
 VPW2=$(sed -n 's/.*login: kiosk1   password: \([A-Za-z0-9]*\).*/\1/p' "$OUT/viewer-pw.txt")
 [ -n "$VPW2" ] && [ "$(VK /api/spaces/space "$VPW2")" = 200 ] && [ "$(VK /api/spaces/space "$VPW")" = 401 ] && ok "viewer password: the new one works, the old one no more" || bad "viewer password: $(cat "$OUT/viewer-pw.txt")"
