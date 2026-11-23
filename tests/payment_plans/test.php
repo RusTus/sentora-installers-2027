@@ -875,10 +875,10 @@ function pdf_ok($pdf)
 function pdf_text($pdf)
 {
     global $T;
-    if (trim((string) shell_exec('command -v pdftotext')) === '') {
-        // (no pdftotext: the page's text as written, the PDF is not packed)
-        preg_match_all('/\((.*?)(?<!\\\\)\) Tj/', $pdf, $m);
-        return implode("\n", $m[1]);
+    if (getenv('PP_NO_PDFTOTEXT') || trim((string) shell_exec('command -v pdftotext')) === '') {
+        // (no pdftotext: the page's text as written, the PDF is not packed; \( \) \\ back to what they stand for)
+        preg_match_all('/\(((?:[^()\\\\]|\\\\.)*)\) Tj/', $pdf, $m);
+        return implode("\n", array_map(function ($t) { return preg_replace('/\\\\(.)/s', '$1', $t); }, $m[1]));
     }
     $f = tempnam(sys_get_temp_dir(), 'pp') . '.pdf';
     file_put_contents($f, $pdf);
