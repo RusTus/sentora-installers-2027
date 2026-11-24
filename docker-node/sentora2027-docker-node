@@ -380,18 +380,173 @@ gvisor_install
 if [ -x /usr/local/bin/runsc ]; then
     # (the runtime the apps with Extra isolation use: runsc with its two settings always, also when Podman starts
     # an app again after a restart, which passes no runtime flags of its own; Podman keeps each app's runtime)
+    # (the same as docker-node/runsc-sentora, which the gVisor SELinux probe and the node test use; the node test
+    # checks the two are the same)
     cat > /usr/local/bin/runsc-sentora.new <<'RUNSC_EOF'
-#!/bin/sh
-# Sentora Docker Node: gVisor for the apps with Extra isolation. The app's limits are held by its own slice
-# (sentora-app-<id>.slice, set by the agent): runsc does not manage cgroups itself under rootless Podman.
-# Its network is the app's own namespace (Podman's pasta), used through the namespace's stack. Changes to the
-# app's own files go to Podman's layer, as without gVisor (kept over a restart; gVisor's in-memory overlay would
-# leave a scratch file behind after a hard stop, and the app would then not start again). With SELinux
-# enforcing the agent does not use it (runsc takes no SELinux label): those apps run on the standard runtime.
-exec /usr/local/bin/runsc --ignore-cgroups --network=host --overlay2=none "$@"
+#!/bin/bash
+# Sentora Docker Node: gVisor for the apps with Extra isolation (installed as /usr/local/bin/runsc-sentora).
+# The app's limits are held by its own slice (sentora-app-<id>.slice, set by the agent): runsc does not manage
+# cgroups itself under rootless Podman. --overlay2=none: the app's own files go to Podman's layer, as without
+# gVisor (kept over a restart). --network=host: gVisor uses the network namespace Podman made for the app.
+RUNSC=/usr/local/bin/runsc
+FLAGS=(--ignore-cgroups --network=host --overlay2=none)
+[ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ] || exec "$RUNSC" "${FLAGS[@]}" "$@"
+
+# With SELinux enforcing (docker-node/selinux/sentora_runsc.te): runsc takes no SELinux label, so when a sandbox
+# is made the label Podman chose for the app (container_t at the app's own MCS categories) is taken out of the
+# app's spec, and runsc is started in Sentora's domain for it (sentora_runsc_t) at that same level: the sandbox
+# and its file helper are confined, and reach none of another app's files. Each app keeps gVisor's state in a
+# folder of its own (/run/user/<uid>/sentora-runsc/<container id>) at the app's level, so no app's sandbox can
+# touch another's state either; the pid file Podman asks for is written there and copied to Podman by this
+# wrapper (which runs as Podman does), so the sandbox needs no access to Podman's folders.
+base="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sentora-runsc"
+args=(); id=""; sub=""; bundle=""; pidfile=""; prev=""; skip=0
+for a in "$@"; do
+    if [ $skip = 1 ]; then skip=0; prev=$a; continue; fi
+    case "$prev" in --bundle|-bundle|-b) bundle=$a ;; --pid-file|-pid-file) pidfile=$a; a=@PIDFILE@ ;; esac
+    case "$a" in
+        --root|-root) skip=1; prev=$a; continue ;;
+        --root=*|-root=*) prev=$a; continue ;;
+        --bundle=*|-bundle=*) bundle=${a#*=} ;;
+        --pid-file=*|-pid-file=*) pidfile=${a#*=}; a=${a%%=*}=@PIDFILE@ ;;
+        create|run|delete) [ -z "$sub" ] && sub=$a ;;
+    esac
+    [ -z "$id" ] && [[ "$a" =~ ^[0-9a-f]{64}$ ]] && id=$a
+    args+=("$a"); prev=$a
+done
+[ -d "$base" ] || mkdir -m 700 "$base" 2> /dev/null
+root=$base; [ -n "$id" ] && root=$base/$id
+FLAGS+=(--root="$root")
+# (only a new sandbox writes its pid file into its own folder; exec and the rest write Podman's own, as Podman runs)
+case "$sub" in create|run) args=("${args[@]//@PIDFILE@/$root/pidfile}") ;; *) args=("${args[@]//@PIDFILE@/$pidfile}") ;; esac
+
+case "$sub" in
+create|run)
+    [ -n "$bundle" ] || bundle=$PWD
+    ctx=$(/usr/bin/python3 -I - "$bundle/config.json" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+with open(p) as f:
+    spec = json.load(f)
+label = (spec.get("process") or {}).get("selinuxLabel") or ""
+parts = label.split(":", 3)
+if len(parts) != 4 or not parts[3].startswith("s0"):
+    sys.exit(3)
+spec["process"].pop("selinuxLabel", None)
+(spec.get("linux") or {}).pop("mountLabel", None)
+for m in spec.get("mounts") or []:
+    if m.get("options"):
+        m["options"] = [o for o in m["options"] if not o.startswith("context=")]
+tmp = p + ".sentora"
+with open(tmp, "w") as f:
+    json.dump(spec, f)
+os.rename(tmp, p)
+print(":".join(parts[:2]) + ":sentora_runsc_t:" + parts[3])
+PY
+    )
+    # (no label to take over, or its folder can not have the app's level: refused, never run unconfined)
+    [ -n "$ctx" ] && [ -n "$id" ] || { echo "runsc-sentora: the app's SELinux label or id was not found ($bundle/config.json)" >&2; exit 1; }
+    # (the same folder again when the app is started again: Podman keeps its id and its level)
+    { [ -d "$root" ] || mkdir -m 700 "$root"; } && chcon -l "${ctx#*:*:*:}" "$root" || { echo "runsc-sentora: could not make $root at the app's level" >&2; exit 1; }
+    /usr/bin/runcon "$ctx" "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
+    if [ $rc = 0 ] && [ -n "$pidfile" ]; then cat "$root/pidfile" > "$pidfile.sentora" && mv -f "$pidfile.sentora" "$pidfile" || rc=1; fi
+    exit $rc ;;
+delete)
+    "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
+    # (runsc's empty network namespace stays mounted on its file: unmounted first, then the folder goes)
+    if [ $rc = 0 ] && [ -n "$id" ]; then umount "$root/null-netns" 2> /dev/null; rm -rf "$root" 2> /dev/null; fi
+    exit $rc ;;
+esac
+exec "$RUNSC" "${FLAGS[@]}" "${args[@]}"
 RUNSC_EOF
     install -m 755 -o root -g root /usr/local/bin/runsc-sentora.new /usr/local/bin/runsc-sentora; rm -f /usr/local/bin/runsc-sentora.new
     command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/runsc-sentora > /dev/null 2>&1
+    # With SELinux (AlmaLinux, Rocky, RHEL, Fedora): Sentora's own SELinux domain for gVisor (2026-11-24), built
+    # here from its source against this system's policy and container-selinux, so the sandbox is confined as an
+    # app is under container_t, at the app's own level. Without it loaded the agent does not use gVisor here.
+    if [ "$MAC" = selinux ]; then
+        sel=/usr/share/sentora-docker-node/selinux; mkdir -p "$sel"
+        cat > "$sel/sentora_runsc.te" <<'SENTORA_TE_EOF'
+policy_module(sentora_runsc, 1.0)
+
+# Sentora Docker Node: gVisor (runsc) for the apps with Extra isolation, under SELinux (2026-11-24).
+#
+# runsc takes no SELinux label of its own, so the wrapper (/usr/local/bin/runsc-sentora) starts it in this domain
+# at the app's own MCS level, the one Podman chose for the app: the sandbox (gVisor's kernel, which runs the app)
+# and its file helper (gofer) are confined as an app is under container_t, and one app's sandbox can reach none
+# of another app's files (MCS). The domain is made with container-selinux's own template, as its container
+# domains are; on top of that only what runsc needs to set itself up (found on a real AlmaLinux 10 by the probe,
+# .github/workflows/gvisor-selinux-probe.yml): its own state, mounts inside its own private namespace, and the
+# same network as container_t.
+
+gen_require(`
+	type container_runtime_t;
+	type container_file_t;
+	type user_tmp_t;
+	type proc_t;
+	type tmpfs_t;
+	type root_t;
+	type tmp_t;
+	attribute container_net_domain;
+')
+
+type sentora_runsc_exec_t;
+container_domain_template(sentora_runsc, container)
+domain_entry_file(sentora_runsc_t, sentora_runsc_exec_t)
+
+# the same network as container_t (an app listens on its port inside its own network namespace)
+typeattribute sentora_runsc_t container_net_domain;
+
+# gVisor's state (locks, state, control socket, its empty network namespace file, the pid file Podman asks for):
+# /run/user/<uid>/sentora-runsc/<container id>, made by the wrapper (as Podman's conmon runs) at the app's own
+# level, so what a sandbox writes there has the app's categories and no other app's sandbox can touch it. The
+# sandbox gets no access to Podman's own folders (the wrapper copies the pid file there).
+type sentora_runsc_state_t;
+files_type(sentora_runsc_state_t)
+filetrans_pattern(container_runtime_t, user_tmp_t, sentora_runsc_state_t, dir, "sentora-runsc")
+manage_dirs_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_sock_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+allow container_runtime_t sentora_runsc_state_t:dir { relabelfrom relabelto };
+allow sentora_runsc_t user_tmp_t:dir search_dir_perms;
+allow sentora_runsc_t sentora_runsc_state_t:dir rw_dir_perms;
+manage_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_sock_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+allow sentora_runsc_t sentora_runsc_state_t:file mounton;
+
+# started by Podman's conmon (container_runtime_t) through the wrapper; runsc then runs itself again (sandbox,
+# gofer) and its helper (gvisor-bin), all labelled sentora_runsc_exec_t
+allow container_runtime_t sentora_runsc_t:process transition;
+allow container_runtime_t sentora_runsc_exec_t:file { mmap_exec_file_perms execute_no_trans };
+allow container_runtime_t sentora_runsc_t:process { signal sigkill signull sigstop };
+allow container_runtime_t sentora_runsc_t:unix_stream_socket connectto;
+allow sentora_runsc_t sentora_runsc_exec_t:file { mmap_exec_file_perms execute_no_trans };
+allow sentora_runsc_t container_runtime_t:fd use;
+allow sentora_runsc_t container_runtime_t:fifo_file { rw_fifo_file_perms setattr };
+allow sentora_runsc_t container_runtime_t:process sigchld;
+# (runsc sets its standard input's owner to its own: /dev/null for an app; the owner can not change, as /dev/null
+# is root's and the app runs as the customer)
+dev_setattr_null_dev(sentora_runsc_t)
+
+# setting itself up inside its own mount namespace: a proc of its own, the root and /var/tmp as mount points
+allow sentora_runsc_t proc_t:filesystem { mount unmount };
+allow sentora_runsc_t tmpfs_t:filesystem remount;
+allow sentora_runsc_t { root_t tmp_t }:dir mounton;
+SENTORA_TE_EOF
+        cat > "$sel/sentora_runsc.fc" <<'SENTORA_FC_EOF'
+/usr/local/bin/runsc		--	gen_context(system_u:object_r:sentora_runsc_exec_t,s0)
+/usr/local/bin/gvisor-bin(/.*)?		gen_context(system_u:object_r:sentora_runsc_exec_t,s0)
+SENTORA_FC_EOF
+        : > "$sel/sentora_runsc.if"
+        if { [ -f /usr/share/selinux/devel/Makefile ] || run $PKG_INSTALL selinux-policy-devel; } && { command -v python3 > /dev/null 2>&1 || run $PKG_INSTALL python3; } \
+            && (cd "$sel" && run make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp) && run semodule -i "$sel/sentora_runsc.pp"; then
+            restorecon -R /usr/local/bin/runsc /usr/local/bin/gvisor-bin /usr/local/bin/runsc-sentora > /dev/null 2>&1
+            echo "RUNSC_SELINUX=1" >> /etc/sentora-docker-node/platform.conf
+            note "gVisor with SELinux: Sentora's domain for it (sentora_runsc) is loaded."
+        else
+            note "gVisor's SELinux domain could not be built or loaded (see $LOG): apps asking for Extra isolation run on the standard runtime, confined by SELinux as before."
+        fi
+    fi
     echo "RUNSC=/usr/local/bin/runsc-sentora" >> /etc/sentora-docker-node/platform.conf
 fi
 
@@ -770,6 +925,9 @@ if [ "${1:-}" = --purge ]; then
     # (the system's own Caddy back: the sites file below no longer uses the web firewall)
     rm -f "/etc/systemd/system/$CADDY_SERVICE.service.d/sentora-waf.conf" /usr/local/bin/caddy-sentora
     rm -f /etc/crowdsec/parsers/s02-enrich/sentora-safe-list.yaml /etc/crowdsec/acquis.d/sentora-caddy.yaml
+    # (gVisor's SELinux domain: no app uses it any more)
+    command -v semodule > /dev/null 2>&1 && semodule -l 2> /dev/null | grep -q '^sentora_runsc' && semodule -r sentora_runsc > /dev/null 2>&1
+    rm -rf /usr/share/sentora-docker-node
     echo "# no containers" > "$CADDY_DIR/sentora/sites.caddy"; systemctl daemon-reload; systemctl restart "$CADDY_SERVICE" 2>/dev/null
 fi
 systemctl daemon-reload

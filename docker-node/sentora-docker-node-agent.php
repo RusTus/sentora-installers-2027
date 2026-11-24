@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
 
 class snode
 {
-    const VERSION = '120';
+    const VERSION = '121';
 
     /** @var bool The panel understands only bare messages (Docker Hosting before 108). */
     static $bare = false;
@@ -690,15 +690,16 @@ class snode
         if ($r === '' || $r[0] !== '/' || !is_executable($r)) {
             return '';
         }
-        // (not with SELinux enforcing, for now: runsc takes no SELinux label, and started under the container's
-        // label it can not set itself up (found on a real AlmaLinux 10, 2026-11-16). The app runs on the
-        // standard runtime there, confined by SELinux as before; the panel shows "asked for, not in force".)
+        // (with SELinux enforcing only in Sentora's own SELinux domain for it, which the installer builds and loads
+        // (docker-node/selinux, 2026-11-24) and the wrapper starts runsc in, at the app's own level. Without that
+        // domain the app runs on the standard runtime, confined by SELinux as before; the panel shows "asked for,
+        // not in force".)
         static $enforcing = null;
         if ($enforcing === null) {
             $e = self::Run(array('getenforce'), null, 10);
             $enforcing = $e[0] === 0 && trim($e[1]) === 'Enforcing';
         }
-        return $enforcing ? '' : $r;
+        return $enforcing && self::P('RUNSC_SELINUX', '') !== '1' ? '' : $r;
     }
 
     /**

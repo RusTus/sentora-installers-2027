@@ -52,6 +52,12 @@ wait_for() { # wait_for <seconds> <command...>: until the command prints somethi
 diag() { panel log | tail -8; in_box 'journalctl -u sentora-docker-node --no-pager | tail -15; journalctl -u caddy --no-pager | tail -6'; }
 state_is() { local s; s=$(panel state "$1"); case "$s" in "$2"*) echo "$s" ;; esac; }
 
+say "The installer's own copies of gVisor's wrapper and SELinux policy"
+emb() { sed -n "/<<'$1'\$/,/^$1\$/p" "$REPO/docker-node/sentora2027-docker-node" | sed '1d;$d'; }
+for f in RUNSC_EOF:runsc-sentora SENTORA_TE_EOF:selinux/sentora_runsc.te SENTORA_FC_EOF:selinux/sentora_runsc.fc; do
+    diff <(emb "${f%%:*}") "$REPO/docker-node/${f#*:}" > /dev/null && ok "the installer's ${f#*:} is docker-node/${f#*:} (the one the probe proved)" || bad "the installer's ${f#*:} differs from docker-node/${f#*:}"
+done
+
 say "Stand-in panel with the add-on"
 W=$(mktemp -d)
 rm -rf "$T/root/modules"; mkdir -p "$T/root/modules"; cp -r "$MOD" "$T/root/modules/docker_hosting"
@@ -70,7 +76,7 @@ cleanup() {
     in_box 'cat /var/log/sentora2027-docker-node.log' > "$OUT/node-install.log" 2>&1
     in_box 'cat /etc/caddy/sentora/sites.caddy' > "$OUT/sites.caddy" 2>&1
     in_box 'journalctl -u crowdsec -u crowdsec-firewall-bouncer --no-pager; cat /var/log/crowdsec.log /var/log/crowdsec-firewall-bouncer.log 2> /dev/null | tail -80' > "$OUT/crowdsec.log" 2>&1
-    [ -n "$VMBOX" ] && in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null' > "$OUT/selinux-refusals.txt" 2>&1
+    [ -n "$VMBOX" ] && in_box "grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)' /var/log/audit/audit.log" > "$OUT/selinux-refusals.txt" 2>&1
     if [ -n "$VMBOX" ]; then [ -f "$W/qemu.pid" ] && kill "$(cat "$W/qemu.pid")" 2> /dev/null; [ -n "${TEST_KEEP:-}" ] || rm -rf "$W" "$T/root/modules"
     else [ -n "${TEST_KEEP:-}" ] || { docker exec "$NAME" sh -c 'rm -rf /home/*' > /dev/null 2>&1; docker rm -f "$NAME" > /dev/null 2>&1; rm -rf "$W" "$T/root/modules"; }; fi
 }
@@ -98,6 +104,9 @@ qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -m "$MEM" -smp "$(nproc)" 
 wait_ssh 150 || { tail -40 "$OUT/console.log"; echo "::error::the machine did not answer on SSH"; exit 1; }
 in_box 'cloud-init status --wait > /dev/null 2>&1; hostname -f; grep PRETTY /etc/os-release; getenforce'
 [ "$(in_box getenforce)" = Enforcing ] || { echo "::error::SELinux is not enforcing on this machine"; exit 1; }
+# (SELinux's refusals are read from audit.log itself: ausearch is not on this image; only what comes after this line)
+in_box 'systemctl is-active auditd' | grep -qx active || { echo "::error::auditd is not running: SELinux's refusals would not be seen"; exit 1; }
+AUDIT_FROM=$(in_box 'wc -l < /var/log/audit/audit.log' | tr -d '\r ')
 else
 say "A fresh $IMAGE with systemd"
 # (container images may mask systemd-logind; a server never does)
@@ -168,9 +177,19 @@ in_box 'podman ps -q 2> /dev/null | wc -l' | grep -qx 0 && ok "root runs no cont
 RT=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.OCIRuntime}}' sdh-$CID" | tr -d '\r')
 ENF=$(in_box 'getenforce 2> /dev/null' | tr -d '\r')
 case "$RT" in
-    *runsc*) GV=1; [ "$ENF" = Enforcing ] && bad "in gVisor although SELinux is enforcing ($RT)" || ok "runs in gVisor ($RT)" ;;
-    *) GV=0; [ "$ENF" = Enforcing ] && ok "SELinux enforcing: the standard runtime ($RT), confined by SELinux (gVisor is not used here: runsc takes no SELinux label)" || bad "not in gVisor: '$RT' (new apps are)" ;;
+    *runsc*) GV=1; ok "runs in gVisor ($RT)" ;;
+    *) GV=0; bad "not in gVisor: '$RT' (new apps are)" ;;
 esac
+# (with SELinux: gVisor's sandbox in Sentora's own domain for it, at the app's own level, the one Podman chose)
+if [ "$ENF" = Enforcing ] && [ "$GV" = 1 ]; then
+    PL=$(in_box "runuser -u sdh3 -- env XDG_RUNTIME_DIR=/run/user/\$(id -u sdh3) podman inspect --format '{{.ProcessLabel}}' sdh-$CID" | tr -d '\r')
+    SL=$(in_box "ps -eo label,args | grep -E 'runsc-(sandbox|gofer)' | grep -v grep | awk '{print \$1}' | sort -u" | tr -d '\r')
+    echo "  app's label: $PL; gVisor runs as: $(echo $SL)"
+    [ -n "$SL" ] && [ "$(echo "$SL" | wc -l)" = 1 ] && [ "${SL%%:s0*}" = "system_u:system_r:sentora_runsc_t" ] && [ "${SL#*:s0}" = "${PL#*:s0}" ] \
+        && ok "SELinux enforcing: gVisor's sandbox runs in Sentora's own domain (sentora_runsc_t) at the app's own level" || bad "gVisor's sandbox under SELinux: '$SL' (app: '$PL')"
+    in_box "ls -dZ /run/user/\$(id -u sdh3)/sentora-runsc/* 2> /dev/null" | grep -q "sentora_runsc_state_t:s0${PL#*:s0} " \
+        && ok "its state in a folder of its own, at the app's level" || bad "gVisor's state folder: $(in_box "ls -dZ /run/user/\$(id -u sdh3)/sentora-runsc/* 2>&1" | tr -d '\r')"
+fi
 # (an app in gVisor: its processes inside its own slice, where its limits are; GV=0: nothing to check)
 inslice() { [ "$GV" = 1 ] || return 0; INS=$(in_box "e='env XDG_RUNTIME_DIR=/run/user/'\$(id -u sdh3); n=0; for p in \$(runuser -u sdh3 -- \$e podman inspect --format '{{.State.ConmonPid}} {{.State.Pid}}' sdh-$CID); do grep -q '/sentora-app-$CID.slice/' /proc/\$p/cgroup || n=\$((n+1)); done; echo \$n" | tr -d '\r'); [ "$INS" = 0 ]; }
 if [ "$GV" = 1 ]; then
@@ -491,8 +510,9 @@ in_box 'journalctl --no-pager | grep -i "php \(warning\|notice\|fatal\|deprecate
 echo
 if [ -n "$VMBOX" ]; then
     say "SELinux: what it refused during all of this"
-    AV=$(in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null | grep -E "^type=(AVC|USER_AVC|SELINUX_ERR)"')
-    if [ -z "$AV" ]; then ok "SELinux (enforcing) refused nothing: Trivy, Caddy with Coraza, Podman and the agent all worked confined"
+    AV=$(in_box "tail -n +$(( ${AUDIT_FROM:-0} + 1 )) /var/log/audit/audit.log | grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)'")
+    in_box "grep -c . /var/log/audit/audit.log" | tr -d '\r' | grep -qv '^0$' && ok "SELinux's refusals are read from audit.log ($(in_box 'wc -l < /var/log/audit/audit.log' | tr -d '\r') lines)" || bad "audit.log is empty: SELinux's refusals would not be seen"
+    if [ -z "$AV" ]; then ok "SELinux (enforcing) refused nothing: gVisor, Trivy, Caddy with Coraza, Podman and the agent all worked confined"
     else bad "SELinux refused $(echo "$AV" | wc -l) thing(s)"; echo "$AV" | sed -E 's/.*(denied|granted) +\{ ([^}]*) \} for +pid=[0-9]+ +comm=([^ ]*).* scontext=([^ ]*) tcontext=([^ ]*) tclass=([^ ]*).*/  \1 \2 by \3: \4 -> \5 (\6)/' | sort | uniq -c | sort -rn | head -30; fi
 fi
 [ $FAILS -eq 0 ] && echo "NODE TEST PASSED" || echo "NODE TEST: $FAILS FAILED"
