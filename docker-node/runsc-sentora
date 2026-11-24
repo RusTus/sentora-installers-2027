@@ -60,13 +60,15 @@ PY
     )
     # (no label to take over, or its folder can not have the app's level: refused, never run unconfined)
     [ -n "$ctx" ] && [ -n "$id" ] || { echo "runsc-sentora: the app's SELinux label or id was not found ($bundle/config.json)" >&2; exit 1; }
-    rm -rf "$root"; mkdir -m 700 "$root" && chcon -l "${ctx#*:*:*:}" "$root" || { echo "runsc-sentora: could not make $root at the app's level" >&2; exit 1; }
+    # (the same folder again when the app is started again: Podman keeps its id and its level)
+    { [ -d "$root" ] || mkdir -m 700 "$root"; } && chcon -l "${ctx#*:*:*:}" "$root" || { echo "runsc-sentora: could not make $root at the app's level" >&2; exit 1; }
     /usr/bin/runcon "$ctx" "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
     if [ $rc = 0 ] && [ -n "$pidfile" ]; then cat "$root/pidfile" > "$pidfile.sentora" && mv -f "$pidfile.sentora" "$pidfile" || rc=1; fi
     exit $rc ;;
 delete)
     "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
-    [ $rc = 0 ] && [ -n "$id" ] && rm -rf "$root"
+    # (runsc's empty network namespace stays mounted on its file: unmounted first, then the folder goes)
+    if [ $rc = 0 ] && [ -n "$id" ]; then umount "$root/null-netns" 2> /dev/null; rm -rf "$root" 2> /dev/null; fi
     exit $rc ;;
 esac
 exec "$RUNSC" "${FLAGS[@]}" "${args[@]}"
