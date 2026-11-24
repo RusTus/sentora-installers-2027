@@ -214,3 +214,14 @@ $k = Tls $dom '/key.php'
 Remove-Item "$($folder.FullName)\key.php" -Force
 if ($k -match 'PRIVATE KEY') { throw "the account's own PHP can read the site's private key" }
 Ok "the account's own PHP can not read the site's private key ($(($k -split "`n")[0]))"
+# deleting the certificate on the Sencrypt page: its files go, and the domain is back on plain HTTP at the next daemon run
+$p = Page '/?module=sencrypt' $null
+$p = Page '/?module=sencrypt&action=TPDelete' @{ csfr_token = (Token $p.Content); inName = $dom }
+if (Test-Path $key) { throw "deleting the certificate on the Sencrypt page left its key ($key)" }
+$p = Page '/?module=sentoraconfig' $null
+$p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$ok = $false
+for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Site $dom '/') -match 'Your Sentora account is active' }
+if (-not $ok) { throw "after deleting its certificate, $dom is not back on plain HTTP: $(Site $dom '/')" }
+if ((CertSubject $dom) -match "CN=$([regex]::Escape($dom))(,|$)") { throw "after deleting its certificate, $dom still shows it" }
+Ok "a certificate deleted on the Sencrypt page: its files go, $dom is back on plain HTTP"
