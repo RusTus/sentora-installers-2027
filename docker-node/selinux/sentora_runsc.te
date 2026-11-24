@@ -18,7 +18,6 @@ gen_require(`
 	type tmpfs_t;
 	type root_t;
 	type tmp_t;
-	type null_device_t;
 	attribute container_net_domain;
 ')
 
@@ -55,7 +54,9 @@ allow sentora_runsc_t sentora_runsc_exec_t:file { mmap_exec_file_perms execute_n
 allow sentora_runsc_t container_runtime_t:fd use;
 allow sentora_runsc_t container_runtime_t:fifo_file { rw_fifo_file_perms setattr };
 allow sentora_runsc_t container_runtime_t:process sigchld;
-dontaudit sentora_runsc_t null_device_t:chr_file setattr;
+# (runsc sets its standard input's owner to its own: /dev/null for an app; the owner can not change, as /dev/null
+# is root's and the app runs as the customer)
+dev_setattr_null_dev(sentora_runsc_t)
 
 # setting itself up inside its own mount namespace: a proc of its own, the root and /var/tmp as mount points
 allow sentora_runsc_t proc_t:filesystem { mount unmount };
