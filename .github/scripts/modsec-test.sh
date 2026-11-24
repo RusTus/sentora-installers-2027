@@ -105,7 +105,9 @@ for i in $(seq 1 5); do FC "/style-$i.css" > /dev/null; done
 banned=0
 for _ in $(seq 1 20); do "$F2B" get sentora-flood banip 2> /dev/null | grep -q '10\.199\.0\.2' && { banned=1; break; }; sleep 2; done
 [ $banned = 1 ] && ok "45 requests in a minute from 10.199.0.2: banned by flood protection" || { bad "the flood was not banned"; "$F2B" status sentora-flood 2>&1 | sed 's/^/        /'; tail -3 /var/log/fail2ban.log 2> /dev/null | sed 's/^/        /'; }
-c=$(FC /); [ "$c" = 000 ] && ok "the banned address gets no answer at all (the firewall drops it)" || bad "the banned address still got $c"
+# (fail2ban lists the ban first, then its firewall action puts it in place: firewalld's takes a few seconds)
+for _ in $(seq 1 10); do c=$(FC /); [ "$c" = 000 ] && break; sleep 2; done
+[ "$c" = 000 ] && ok "the banned address gets no answer at all (the firewall drops it)" || bad "the banned address still got $c"
 c=$(code "$H" '/'); [ "$c" != 000 ] && ok "everyone else still gets the site ($c)" || bad "the site does not answer others"
 "$F2B" unban 10.199.0.2 > /dev/null 2>&1
 c=$(FC /); [ "$c" != 000 ] && ok "unbanned: it gets the site again ($c)" || bad "unbanned, but still no answer"
@@ -119,6 +121,8 @@ if command -v ausearch > /dev/null 2>&1; then
     [ "${D:-0}" -eq 0 ] && ok "no SELinux refusals for fail2ban" || { bad "$D SELinux refusal(s) for fail2ban:"; ausearch -m avc -ts boot 2> /dev/null | grep -i fail2ban | tail -5; }
 fi
 php modules/php_hardening/deploy/remove.run > /dev/null 2>&1
+# (fail2ban restarts after the jails are taken away: a moment before it answers again)
+for _ in $(seq 1 10); do [ ! -f /etc/fail2ban/jail.d/sentora-web-hardening.local ] && "$F2B" ping > /dev/null 2>&1 && break; sleep 2; done
 [ ! -f /etc/fail2ban/jail.d/sentora-web-hardening.local ] && "$F2B" ping > /dev/null 2>&1 && ok "removing the add-on takes its jails away; fail2ban keeps running" || bad "after removing the add-on: its jail file is still there, or fail2ban stopped"
 
 [ $FAIL -eq 0 ] && echo "MODSEC: PASSED" || echo "MODSEC: FAILED"
