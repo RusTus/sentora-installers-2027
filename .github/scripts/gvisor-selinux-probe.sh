@@ -32,7 +32,7 @@ box_cp "$REPO/docker-node/selinux" /root/probe/
 box_cp "$REPO/docker-node/runsc-sentora" /root/probe/runsc-sentora
 box_cp "$REPO/.github/scripts/gvisor-selinux-probe-inside.sh" /root/probe/inside.sh
 in_box 'bash /root/probe/inside.sh' 2>&1 | tee "$OUT/probe.txt"
-in_box 'ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null' > "$OUT/selinux-all.txt" 2>&1
+in_box "grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)' /var/log/audit/audit.log" > "$OUT/selinux-all.txt" 2>&1
 in_box 'cat /root/probe/out/* 2> /dev/null' > /dev/null
 scp "${SSHO[@]}" -P 2222 -q -r root@127.0.0.1:/root/probe/out "$OUT/inside" 2> /dev/null
 exit 0

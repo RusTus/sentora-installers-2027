@@ -3,13 +3,15 @@
 set -u
 P=/root/probe; O=$P/out; mkdir -p "$O"
 say() { printf '\n=== %s  (%s)\n' "$*" "$(date +%T)"; }
-mark() { date '+%m/%d/%Y %H:%M:%S' > "$O/mark"; sleep 1; }
-avc_since() { ausearch -m AVC,USER_AVC,SELINUX_ERR -ts "$(cat "$O/mark")" -i 2> /dev/null; }
+# (ausearch may not be there: the log itself, from a line number on)
+mark() { sleep 1; wc -l < /var/log/audit/audit.log > "$O/mark"; }
+avc_since() { tail -n +$(( $(cat "$O/mark") + 1 )) /var/log/audit/audit.log | grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)'; }
 U=gva; U2=gvb
 
 say "system"
 . /etc/os-release; echo "$PRETTY_NAME, kernel $(uname -r), $(getenforce)"
-dnf -y -q install podman container-selinux selinux-policy-devel policycoreutils-python-utils setools-console passt zstd python3 audit > /dev/null 2>&1
+dnf -y -q install podman container-selinux selinux-policy-devel policycoreutils-python-utils setools-console passt zstd python3 audit > /dev/null 2>&1 || echo "dnf: some packages missing"
+command -v ausearch audit2allow sesearch
 rpm -q podman container-selinux selinux-policy conmon crun passt
 # (the cloud image has auditd off: SELinux's refusals would go only to the kernel log)
 systemctl enable --now auditd > /dev/null 2>&1; sleep 2; systemctl is-active auditd
@@ -95,13 +97,13 @@ asu $U podman --runtime /usr/local/bin/runsc-sentora run --rm -v vol1:/data busy
 avc_since > "$O/avc-F.txt"
 
 say "everything sentora_runsc_t needed (permissive), as rules"
-ausearch -m AVC -i 2> /dev/null | grep 'scontext=[^ ]*sentora_runsc_t' > "$O/avc-runsc.txt"
+grep '^type=AVC' /var/log/audit/audit.log | grep 'scontext=[^ ]*sentora_runsc_t' > "$O/avc-runsc.txt"
 grep -c . "$O/avc-runsc.txt"
-ausearch -m AVC 2> /dev/null | grep 'sentora_runsc_t' | audit2allow 2>&1 | tee "$O/audit2allow.txt"
+grep '^type=AVC' /var/log/audit/audit.log | grep 'sentora_runsc_t' | audit2allow 2>&1 | tee "$O/audit2allow.txt"
 say "with the policy's own interfaces"
-ausearch -m AVC 2> /dev/null | grep 'sentora_runsc_t' | audit2allow -R 2>&1 | tee "$O/audit2allow-R.txt" | head -80
+grep '^type=AVC' /var/log/audit/audit.log | grep 'sentora_runsc_t' | audit2allow -R 2>&1 | tee "$O/audit2allow-R.txt" | head -80
 say "refusals NOT from the new domain (others: these are real denials)"
-ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null | grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)' | grep -v 'sentora_runsc_t:' | cut -c1-400 | head -30
+grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)' /var/log/audit/audit.log | grep -v 'sentora_runsc_t:' | cut -c1-400 | head -30
 
 say "ENFORCING: the domain with permissive taken out"
 cd /root/pol && sed -i 's/^permissive sentora_runsc_t;/# (enforcing)/' sentora_runsc.te && make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp > /dev/null 2>&1 && semodule -i sentora_runsc.pp && echo "enforcing module loaded"; semodule -DB; cd /
@@ -119,7 +121,8 @@ asu $U podman exec web sh -c 'echo exec-works' 2>&1 | tail -1
 asu $U podman logs web 2>&1 | tail -2
 asu $U podman rm -f web > /dev/null 2>&1; asu $U2 podman rm -f web2 > /dev/null 2>&1
 avc_since > "$O/avc-enforcing.txt"; echo "SELinux refusals while enforcing: $(grep -c '^type=AVC' "$O/avc-enforcing.txt")"
-grep '^type=AVC' "$O/avc-enforcing.txt" | cut -c1-300 | head -20
+grep '^type=AVC' "$O/avc-enforcing.txt" | cut -c1-400 | head -30
+echo "as rules:"; grep '^type=AVC' "$O/avc-enforcing.txt" | audit2allow 2>&1 | head -40
 
 say "PROOF: a process in the domain (as if it got out of gVisor) next to one in container_t, same files"
 # (test-only module: root may start a program in either domain, to try what the domain lets it reach)
@@ -175,3 +178,4 @@ semodule -r sentora_runsc_try > /dev/null 2>&1; semodule -B
 
 say "the kernel's own log of SELinux (in case audit missed any)"
 journalctl -k --no-pager 2> /dev/null | grep -iE 'avc:|selinux' | grep -v 'avc:  received' | tail -20
+cp /var/log/audit/audit.log "$O/audit.log" 2> /dev/null
