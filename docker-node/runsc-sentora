@@ -32,7 +32,8 @@ done
 [ -d "$base" ] || mkdir -m 700 "$base" 2> /dev/null
 root=$base; [ -n "$id" ] && root=$base/$id
 FLAGS+=(--root="$root")
-args=("${args[@]//@PIDFILE@/$root/pidfile}")
+# (only a new sandbox writes its pid file into its own folder; exec and the rest write Podman's own, as Podman runs)
+case "$sub" in create|run) args=("${args[@]//@PIDFILE@/$root/pidfile}") ;; *) args=("${args[@]//@PIDFILE@/$pidfile}") ;; esac
 
 case "$sub" in
 create|run)
