@@ -10,13 +10,27 @@
 # its file helper are confined, and one app's sandbox can not reach another app's files.
 RUNSC=/usr/local/bin/runsc
 FLAGS=(--ignore-cgroups --network=host --overlay2=none)
+ENFORCING=0; [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ] && ENFORCING=1
+# With SELinux: gVisor keeps its state in a folder of its own (/run/user/<uid>/sentora-runsc, its own SELinux type,
+# made here at the plain level so every app of the customer can use it; each app's files in it carry the app's
+# own categories) instead of Podman's runsc folder. Every runsc command goes through here, so all of them use it.
+if [ $ENFORCING = 1 ]; then
+    args=(); prev=""
+    for a in "$@"; do
+        case "$prev" in --root) a=${a%/*}/sentora-runsc; root=$a ;; esac
+        case "$a" in --root=*) root=${a#--root=}; root=${root%/*}/sentora-runsc; a=--root=$root ;; esac
+        args+=("$a"); prev=$a
+    done
+    set -- "${args[@]}"
+    [ -n "${root:-}" ] && [ ! -d "$root" ] && mkdir -m 700 "$root" 2> /dev/null
+fi
 sub=""; bundle=""; prev=""
 for a in "$@"; do
     case "$prev" in --bundle|-bundle|-b) bundle=$a ;; esac
     case "$a" in --bundle=*|-bundle=*) bundle=${a#*=} ;; create|run) [ -z "$sub" ] && sub=$a ;; esac
     prev=$a
 done
-if [ -n "$sub" ] && [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ]; then
+if [ -n "$sub" ] && [ $ENFORCING = 1 ]; then
     [ -n "$bundle" ] || bundle=$PWD
     level=$(/usr/bin/python3 -I - "$bundle/config.json" <<'PY'
 import json, os, sys

@@ -1,28 +1,63 @@
-policy_module(sentora_runsc, 0.1)
+policy_module(sentora_runsc, 1.0)
 
-# Sentora Docker Node: gVisor (runsc) for the apps with Extra isolation, under SELinux.
-# runsc takes no SELinux label of its own, so the wrapper (runsc-sentora) starts the sandbox in this domain at
-# the app's own MCS level (the one Podman chose for it): its sandbox and its file helper (gofer) are confined as an
-# app is under container_t, and one app's sandbox can not touch another app's files (MCS).
-# Round 1 (probe): permissive, to learn what runsc needs.
+# Sentora Docker Node: gVisor (runsc) for the apps with Extra isolation, under SELinux (2026-11-24).
+#
+# runsc takes no SELinux label of its own, so the wrapper (/usr/local/bin/runsc-sentora) starts it in this domain
+# at the app's own MCS level, the one Podman chose for the app: the sandbox (gVisor's kernel, which runs the app)
+# and its file helper (gofer) are confined as an app is under container_t, and one app's sandbox can reach none
+# of another app's files (MCS). The domain is made with container-selinux's own template, as its container
+# domains are; on top of that only what runsc needs to set itself up (found on a real AlmaLinux 10 by the probe,
+# .github/workflows/gvisor-selinux-probe.yml): its own state, mounts inside its own private namespace, and the
+# same network as container_t.
 
 gen_require(`
 	type container_runtime_t;
-	type unconfined_t;
 	type container_file_t;
+	type user_tmp_t;
+	type proc_t;
+	type tmpfs_t;
+	type root_t;
+	type tmp_t;
+	type null_device_t;
+	attribute container_net_domain;
 ')
 
 type sentora_runsc_exec_t;
-# (made as container-selinux makes its own container domains: container_t's base, its MCS rules, and the
-# app's files (container_file_t) at the app's own categories only)
 container_domain_template(sentora_runsc, container)
 domain_entry_file(sentora_runsc_t, sentora_runsc_exec_t)
 
-permissive sentora_runsc_t;
+# the same network as container_t (an app listens on its port inside its own network namespace)
+typeattribute sentora_runsc_t container_net_domain;
 
-# who may start it (the probe looks which one runs the wrapper; round 2 keeps only that one)
-allow { container_runtime_t unconfined_t } sentora_runsc_t:process transition;
-allow { container_runtime_t unconfined_t } sentora_runsc_exec_t:file { getattr open read execute map };
-allow sentora_runsc_t { container_runtime_t unconfined_t }:fd use;
-allow sentora_runsc_t { container_runtime_t unconfined_t }:fifo_file rw_fifo_file_perms;
-allow sentora_runsc_t { container_runtime_t unconfined_t }:process sigchld;
+# gVisor's state (locks, state, control sockets, its empty network namespace file), in its own folder
+# /run/user/<uid>/sentora-runsc that the wrapper makes; each app's files there carry the app's own categories.
+# Also the pid file Podman asks runsc to write.
+type sentora_runsc_state_t;
+files_type(sentora_runsc_state_t)
+filetrans_pattern(container_runtime_t, user_tmp_t, sentora_runsc_state_t, dir, "sentora-runsc")
+filetrans_pattern(sentora_runsc_t, user_tmp_t, sentora_runsc_state_t, file, "pidfile")
+allow sentora_runsc_t user_tmp_t:dir { search_dir_perms add_entry_dir_perms };
+manage_dirs_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_sock_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+allow sentora_runsc_t sentora_runsc_state_t:file mounton;
+manage_dirs_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_sock_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+
+# started by Podman's conmon (container_runtime_t) through the wrapper; runsc then runs itself again (sandbox,
+# gofer) and its helper (gvisor-bin), all labelled sentora_runsc_exec_t
+allow container_runtime_t sentora_runsc_t:process transition;
+allow container_runtime_t sentora_runsc_exec_t:file { mmap_exec_file_perms execute_no_trans };
+allow container_runtime_t sentora_runsc_t:process { signal sigkill signull sigstop };
+allow container_runtime_t sentora_runsc_t:unix_stream_socket connectto;
+allow sentora_runsc_t sentora_runsc_exec_t:file { mmap_exec_file_perms execute_no_trans };
+allow sentora_runsc_t container_runtime_t:fd use;
+allow sentora_runsc_t container_runtime_t:fifo_file { rw_fifo_file_perms setattr };
+allow sentora_runsc_t container_runtime_t:process sigchld;
+dontaudit sentora_runsc_t null_device_t:chr_file setattr;
+
+# setting itself up inside its own mount namespace: a proc of its own, the root and /var/tmp as mount points
+allow sentora_runsc_t proc_t:filesystem { mount unmount };
+allow sentora_runsc_t tmpfs_t:filesystem remount;
+allow sentora_runsc_t { root_t tmp_t }:dir mounton;

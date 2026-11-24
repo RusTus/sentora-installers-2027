@@ -44,12 +44,36 @@ cd /
 # (SELinux's "do not log" rules off: every refusal shows)
 semodule -DB && echo "dontaudit rules off"
 
-say "what sentora_runsc_t may do that container_t may not (the rules, compared)"
-sesearch -A -s sentora_runsc_t 2> /dev/null | sed 's/sentora_runsc_t/DOMAIN/g' | sort -u > "$O/rules-runsc.txt"
-sesearch -A -s container_t 2> /dev/null | sed 's/container_t /DOMAIN /g; s/container_t:/DOMAIN:/g' | sort -u > "$O/rules-container.txt"
-wc -l < "$O/rules-runsc.txt"; wc -l < "$O/rules-container.txt"
-comm -23 "$O/rules-runsc.txt" "$O/rules-container.txt" | tee "$O/rules-only-runsc.txt" | head -60
-echo "(container_t only, first 15:)"; comm -13 "$O/rules-runsc.txt" "$O/rules-container.txt" | head -15
+say "what sentora_runsc_t may do that container_t may not (each single permission compared; booleans as on this machine)"
+sesearch -A -s sentora_runsc_t 2> /dev/null > "$O/rules-runsc.txt"
+sesearch -A -s container_t 2> /dev/null > "$O/rules-container.txt"
+cat > /root/cmp.py <<'PYC'
+import re, sys
+def perms(path, me):
+    out = set()
+    for l in open(path):
+        m = re.match(r'allow (\S+) (\S+):(\S+) (\{[^}]*\}|\S+);(.*)$', l.strip())
+        if not m:
+            continue
+        src, tgt, cls, ps, rest = m.groups()
+        if tgt == me or tgt == src and src == me:
+            tgt = 'SELF'
+        b = re.search(r'\[ (.*) \]:(True|False)', rest)
+        if b and b.group(2) == 'False':
+            continue  # (a boolean that is off on this machine)
+        for p in ps.strip('{} ').split():
+            out.add((tgt, cls, p))
+    return out
+r = perms(sys.argv[1], 'sentora_runsc_t'); c = perms(sys.argv[2], 'container_t')
+only = sorted(r - c)
+print("permissions: sentora_runsc_t %d, container_t %d, only sentora_runsc_t %d, only container_t %d" % (len(r), len(c), len(only), len(c - r)))
+by = {}
+for t, cl, p in only:
+    by.setdefault((t, cl), []).append(p)
+for (t, cl), ps in sorted(by.items()):
+    print("  + %s:%s { %s }" % (t, cl, " ".join(ps)))
+PYC
+python3 /root/cmp.py "$O/rules-runsc.txt" "$O/rules-container.txt" | tee "$O/rules-only-runsc.txt"
 
 say "two customers (rootless Podman, as the node makes them)"
 for u in $U $U2; do useradd -m -s /bin/bash $u 2> /dev/null; loginctl enable-linger $u; done
@@ -73,7 +97,8 @@ sleep 5
 curl -s --max-time 5 http://127.0.0.1:18080/i || echo "no answer"
 ps -eo label,user,pid,ppid,args | grep -E "runsc|conmon|pasta|podman|exe" | grep -v grep | cut -c1-220
 asu $U podman inspect web --format '{{.ProcessLabel}} {{.MountLabel}} {{.OCIRuntime}}'
-ls -dZ /run/user/$(id -u $U)/runsc* /run/user/$(id -u $U)/containers 2> /dev/null
+ls -dZ /run/user/$(id -u $U)/runsc* /run/user/$(id -u $U)/sentora-runsc /run/user/$(id -u $U)/containers 2> /dev/null
+ls -Z /run/user/$(id -u $U)/sentora-runsc 2> /dev/null | head -8
 avc_since > "$O/avc-C.txt"; echo "SELinux notes: $(grep -c '^type=AVC' "$O/avc-C.txt")"
 
 say "D: a second customer's app at the same time (its own categories?)"
