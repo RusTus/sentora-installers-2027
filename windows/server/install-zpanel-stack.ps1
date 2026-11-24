@@ -1870,7 +1870,7 @@ switch ($Do) {
                 $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/current" -Headers @{ 'User-Agent' = 'sentora-windows-install'; Accept = 'application/vnd.github+json' } -UseBasicParsing -TimeoutSec 60
                 $a = @($rel.assets) | Where-Object { $_.name -eq $name } | Select-Object -First 1
                 if (-not $a) { Fail "$repo's current release has no $name." }
-                if ("$($a.digest)" -notmatch '^sha256:([0-9a-fA-F]{64})$') { Fail "$repo's current release gives no SHA-256 for $name: it is not used." }
+                if ("$($a.digest)" -notmatch '^sha256:([0-9a-fA-F]{64})$') { Fail "$repo's current release gives no SHA-256 for ${name}: it is not used." }
                 $sha = $Matches[1].ToUpper()
                 $zip = Join-Path $Dl $name
                 Invoke-WebRequest -Uri $a.browser_download_url -OutFile $zip -UseBasicParsing -TimeoutSec 900
@@ -2388,7 +2388,7 @@ function Get-Asset($name) {
     # (the file must match the SHA-256 GitHub keeps for it)
     $a = @($rel.assets) | Where-Object { $_.name -eq $name } | Select-Object -First 1
     if (-not $a) { throw "The release has no $name" }
-    if ("$($a.digest)" -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw "The release gives no SHA-256 for $name: nothing was changed." }
+    if ("$($a.digest)" -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw "The release gives no SHA-256 for ${name}: nothing was changed." }
     $sha = $Matches[1].ToUpper()
     $dh = $h.Clone(); $dh['Accept'] = 'application/octet-stream'
     $f = Join-Path $work $name
