@@ -11,6 +11,8 @@ say "system"
 . /etc/os-release; echo "$PRETTY_NAME, kernel $(uname -r), $(getenforce)"
 dnf -y -q install podman container-selinux selinux-policy-devel policycoreutils-python-utils setools-console passt zstd python3 audit > /dev/null 2>&1
 rpm -q podman container-selinux selinux-policy conmon crun passt
+# (the cloud image has auditd off: SELinux's refusals would go only to the kernel log)
+systemctl enable --now auditd > /dev/null 2>&1; sleep 2; systemctl is-active auditd
 say "container-selinux: the template container_t is made with"
 IF=/usr/share/selinux/devel/include/services/container.if
 grep -n "^template(\`container_domain_template'" -A45 $IF | head -60
@@ -28,7 +30,7 @@ say "the policy module"
 mkdir -p /root/pol && cp $P/selinux/* /root/pol/ && cd /root/pol
 if make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp > "$O/make.txt" 2>&1; then echo "built"; else echo "BUILD FAILED"; cat "$O/make.txt"
     # (fall back: without container-selinux's attributes, to learn the rest anyway)
-    sed -i -e '/attribute container_domain;/d' -e '/attribute container_net_domain;/d' -e '/^typeattribute sentora_runsc_t container_domain/d' sentora_runsc.te
+    sed -i -e '/attribute container_domain;/d' -e '/^typeattribute sentora_runsc_t container_domain/d' sentora_runsc.te
     make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp 2>&1 | tail -5; echo "(built without container_domain)"; fi
 semodule -i sentora_runsc.pp && echo loaded
 restorecon -v /usr/local/bin/runsc /usr/local/bin/runsc-sentora
@@ -99,7 +101,7 @@ say "refusals NOT from the new domain (others: these are real denials)"
 ausearch -m AVC,USER_AVC,SELINUX_ERR -i 2> /dev/null | grep -E '^type=(AVC|USER_AVC|SELINUX_ERR)' | grep -v 'sentora_runsc_t:' | cut -c1-400 | head -30
 
 say "ENFORCING: the domain with permissive taken out"
-cd /root/pol && sed -i 's/^permissive sentora_runsc_t;/# (enforcing)/' sentora_runsc.te && make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp > /dev/null 2>&1 && semodule -i sentora_runsc.pp && echo "enforcing module loaded"; cd /
+cd /root/pol && sed -i 's/^permissive sentora_runsc_t;/# (enforcing)/' sentora_runsc.te && make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp > /dev/null 2>&1 && semodule -i sentora_runsc.pp && echo "enforcing module loaded"; semodule -DB; cd /
 semodule -l | grep sentora; seinfo --permissive 2> /dev/null | grep -i sentora || echo "sentora_runsc_t is not permissive"
 mark
 asu $U podman --runtime /usr/local/bin/runsc-sentora run --rm busybox sh -c 'echo hello-enforcing' 2>&1 | tail -3
@@ -131,11 +133,11 @@ allow { sentora_runsc_t container_t } unconfined_t:process sigchld;
 allow { sentora_runsc_t container_t } user_devpts_t:chr_file rw_chr_file_perms;
 TE
 sed -i 's/type unconfined_t, /type unconfined_t, user_devpts_t, /' sentora_runsc_try.te
-make -f /usr/share/selinux/devel/Makefile sentora_runsc_try.pp > /dev/null 2>&1 && semodule -i sentora_runsc_try.pp && echo "try module loaded"
+make -f /usr/share/selinux/devel/Makefile sentora_runsc_try.pp > /dev/null 2>&1 && semodule -i sentora_runsc_try.pp && echo "try module loaded"; semodule -DB
 cp /usr/bin/busybox /root/t/bb 2> /dev/null || { dnf -y -q install busybox > /dev/null 2>&1; cp /usr/bin/busybox /root/t/bb 2> /dev/null; }
 [ -x /root/t/bb ] || { asu $U podman create --name bbx busybox > /dev/null; asu $U podman cp bbx:/bin/busybox /home/$U/bb; cp /home/$U/bb /root/t/bb; asu $U podman rm bbx > /dev/null; }
-mkdir -p /var/tmp/sentora-try && cp /root/t/bb /var/tmp/sentora-try/as-runsc && cp /root/t/bb /var/tmp/sentora-try/as-container
-chcon -t sentora_runsc_exec_t /var/tmp/sentora-try/as-runsc; chcon -t container_file_t -l s0 /var/tmp/sentora-try/as-container
+mkdir -p /var/tmp/sentora-try/r /var/tmp/sentora-try/c && cp /root/t/bb /var/tmp/sentora-try/r/busybox && cp /root/t/bb /var/tmp/sentora-try/c/busybox
+chcon -t sentora_runsc_exec_t /var/tmp/sentora-try/r/busybox; chcon -t container_file_t -l s0 /var/tmp/sentora-try/c/busybox
 echo "app A's own file" > /var/tmp/sentora-try/a.txt; chcon -t container_file_t -l s0:c1,c2 /var/tmp/sentora-try/a.txt
 echo "app B's file" > /var/tmp/sentora-try/b.txt; chcon -t container_file_t -l s0:c3,c4 /var/tmp/sentora-try/b.txt
 echo "customer home" > /home/$U2/secret.txt; restorecon /home/$U2/secret.txt
@@ -144,8 +146,8 @@ ls -Z /var/tmp/sentora-try/ /home/$U2/secret.txt /etc/sentora-docker-node/node.k
 try() { # try <label> <what> <busybox args...>
     local lab=$1 what=$2; shift 2
     local r1 r2
-    r1=$(runcon "system_u:system_r:sentora_runsc_t:$lab" /var/tmp/sentora-try/as-runsc "$@" 2>&1 | head -1)
-    r2=$(runcon "system_u:system_r:container_t:$lab" /var/tmp/sentora-try/as-container "$@" 2>&1 | head -1)
+    r1=$(runcon "system_u:system_r:sentora_runsc_t:$lab" /var/tmp/sentora-try/r/busybox "$@" 2>&1 | head -1)
+    r2=$(runcon "system_u:system_r:container_t:$lab" /var/tmp/sentora-try/c/busybox "$@" 2>&1 | head -1)
     printf '%-46s | sentora_runsc_t: %-40.40s | container_t: %.40s\n' "$what" "$r1" "$r2"
 }
 mark
@@ -165,3 +167,6 @@ try s0:c1,c2 "ptrace (attach to pid 1)"             sh -c 'cat /proc/1/mem > /de
 avc_since > "$O/avc-proof.txt"
 echo "(refusals logged during the proof: $(grep -c '^type=AVC' "$O/avc-proof.txt"))"
 semodule -r sentora_runsc_try > /dev/null 2>&1; semodule -B
+
+say "the kernel's own log of SELinux (in case audit missed any)"
+journalctl -k --no-pager 2> /dev/null | grep -iE 'avc:|selinux' | grep -v 'avc:  received' | tail -20
