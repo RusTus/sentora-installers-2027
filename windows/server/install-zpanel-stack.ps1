@@ -163,7 +163,7 @@ $FtpService    = 'SFTPGo'
 $FtpFirewall   = 'SFTPGo FTP and SFTP (21, 2022, 50000-50100)'
 $MailService   = 'Stalwart'
 $MailFirewall  = 'Stalwart mail (25, 143, 465, 587, 993, 995)'
-$HttpsFirewall = 'Apache HTTPS (webmail, ActiveSync)'
+$HttpsFirewall = 'Apache HTTPS (webmail, ActiveSync)'   # (the name kept from before: HTTPS for the websites too)
 $MailPorts     = @(25, 143, 465, 587, 993, 995)
 $ClamService   = 'ClamAV'
 $DnsService    = 'CoreDNS'
@@ -383,6 +383,11 @@ try {
     $busy = Get-NetTCPConnection -LocalPort $HttpPort -State Listen -ErrorAction SilentlyContinue |
         Where-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; $p -and $p.ProcessName -ne 'httpd' }
     if ($busy) { Fail "Port $HttpPort is already used by $((Get-Process -Id $busy[0].OwningProcess).ProcessName) (process $($busy[0].OwningProcess)). Stop it (IIS: Stop-Service W3SVC) or use -HttpPort." }
+    if ($WithPanel -and -not $WithMail) {
+        $b = Get-NetTCPConnection -LocalPort $HttpsPort -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; $p -and $p.ProcessName -ne 'httpd' }
+        if ($b) { Fail "Port $HttpsPort (HTTPS) is already used by $((Get-Process -Id $b[0].OwningProcess).ProcessName). Stop it (IIS: Stop-Service W3SVC) or use -HttpsPort." }
+    }
     if ($WithMail) {
         foreach ($port in @($HttpsPort) + $MailPorts) {
             $b = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
@@ -579,6 +584,59 @@ default-character-set=utf8mb4
     }
 
     # --------------------------------------------------------------------------------------------------------------
+    if ($WithPanel -or $WithMail) {
+        Say "HTTPS on port $HttpsPort (the server's certificate, configs\apache\ssl.conf)"
+        # the server's certificate, for HTTPS, IMAP and SMTP alike (made once; replace both files with a real one later,
+        # e.g. from Let's Encrypt, then: Restart-Service Apache2, Stalwart). The panel's websites get their own from
+        # the panel's Sencrypt page; this one answers for the server's own names and for names no website claims.
+        $sslCfg = Join-Path $Cfg 'ssl'
+        if (-not (Test-Path $sslCfg)) { New-Item -ItemType Directory -Path $sslCfg | Out-Null }
+        Protect-Folder $sslCfg
+        $mailHost = if ($ServerName -match '\.') { $ServerName.ToLower() } elseif ($WithMail) { "mail.$MailDomain" } else { $ServerName.ToLower() }
+        $srvCrt = Join-Path $sslCfg 'server.crt'; $srvKey = Join-Path $sslCfg 'server.key'
+        if (-not (Test-Path $srvCrt) -or -not (Test-Path $srvKey)) {
+            $names = @($mailHost, $ServerName.ToLower(), 'localhost') | Where-Object { $_ } | Select-Object -Unique
+            $cnf = Join-Path $Tmp ('cert-' + [guid]::NewGuid().ToString('N') + '.cnf')
+            Write-Utf8NoBom $cnf ("[req]`r`ndistinguished_name = dn`r`n[dn]`r`n[v3]`r`nbasicConstraints = CA:FALSE`r`nkeyUsage = digitalSignature, keyEncipherment`r`n" +
+                "extendedKeyUsage = serverAuth`r`nsubjectAltName = " + (($names | ForEach-Object { "DNS:$_" }) -join ', ') + ", IP:127.0.0.1`r`n")
+            $code = @'
+$o = ['config' => $argv[3], 'digest_alg' => 'sha256', 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'x509_extensions' => 'v3'];
+$k = openssl_pkey_new($o); $r = openssl_csr_new(['commonName' => $argv[4]], $k, $o);
+$x = openssl_csr_sign($r, null, $k, 825, $o, random_int(1, PHP_INT_MAX));
+if (!$x || !openssl_x509_export_to_file($x, $argv[1]) || !openssl_pkey_export_to_file($k, $argv[2], null, $o)) { fwrite(STDERR, (string) openssl_error_string()); exit(1); }
+echo 'ok';
+'@
+            $out = Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-r', $code, '--', $srvCrt, $srvKey, $cnf, $mailHost)
+            Remove-Item $cnf -Force -ErrorAction SilentlyContinue
+            if (($out -join '') -notmatch 'ok' -or -not (Test-Path $srvKey)) { Fail "Could not make the server certificate: $($out -join ' ')" }
+            Ok "certificate for $($names -join ', ') (made here, valid 825 days; browsers ask to trust it until a real one replaces it)"
+        } else { Ok "the certificate in $sslCfg is kept" }
+        # HTTPS for everything on this server: the port, the TLS versions and ciphers (one place, as sys_tls on Linux);
+        # with the panel and no mail, the panel answers names no website claims (with mail, mail.conf's site does)
+        $defaultSite = if ($WithMail) { '' } else { @"
+
+<VirtualHost *:$HttpsPort>
+    ServerName ${ServerName}
+    SSLEngine on
+    SSLCertificateFile "$(& $Fwd $srvCrt)"
+    SSLCertificateKeyFile "$(& $Fwd $srvKey)"
+    DocumentRoot "`${ZROOT}/panel"
+    ErrorLog "`${ZROOT}/logs/apache/ssl-error.log"
+    CustomLog "`${ZROOT}/logs/apache/ssl-access.log" combined
+</VirtualHost>
+"@ }
+        Write-Utf8NoBom (Join-Path $Cfg 'apache\ssl.conf') @"
+# Made by install-zpanel-stack.ps1 (HTTPS); run it again to rewrite this file.
+Listen $HttpsPort
+SSLSessionCache "shmcb:`${ZROOT}/temp/ssl_scache(512000)"
+SSLProtocol -all +TLSv1.2 +TLSv1.3
+SSLHonorCipherOrder off
+SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+$defaultSite
+"@
+        Ok "Apache: HTTPS on port $HttpsPort (configs\apache\ssl.conf)"
+    }
+
     Say 'Apache 2.4 settings (C:\zpanel\configs\apache\httpd.conf)'
     # hostdata: with the panel, each website's PHP runs as its account's own Windows account (phpaccount.ps1) and
     # nothing else may run there; without it (install-web-stack.ps1), PHP inside Apache as usual
@@ -733,12 +791,14 @@ AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript appl
 Header always set X-Content-Type-Options "nosniff"
 Header always set X-Frame-Options "SAMEORIGIN"
 
+# HTTPS (the port, TLS, the site for names no website claims) and the webmail's site: before the other sites, so the
+# first site on the HTTPS port is the server's own
+IncludeOptional "`${ZROOT}/configs/apache/ssl.conf"
+IncludeOptional "`${ZROOT}/configs/apache/mail.conf"
 Include "`${ZROOT}/configs/apache/httpd-vhosts.conf"
 # the panel's websites (its domains, subdomains and parked domains), written by the panel's daemon; after yours, so the
 # first site in httpd-vhosts.conf stays the one for names no site claims
 IncludeOptional "`${ZROOT}/configs/apache/sentora-vhosts.conf"
-# HTTPS, webmail and ActiveSync (written by the mail part of install-zpanel-stack.ps1)
-IncludeOptional "`${ZROOT}/configs/apache/mail.conf"
 # the virus check Stalwart calls for each message (written by the ClamAV part)
 IncludeOptional "`${ZROOT}/configs/apache/mailscan.conf"
 "@
@@ -766,6 +826,11 @@ IncludeOptional "`${ZROOT}/configs/apache/mailscan.conf"
         Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
         New-NetFirewallRule -DisplayName $FirewallRule -Direction Inbound -Action Allow -Protocol TCP -LocalPort $HttpPort -Program $httpd | Out-Null
         Ok "Windows Firewall: port $HttpPort open for Apache only (MySQL stays closed)"
+        if ($WithPanel -or $WithMail) {
+            Get-NetFirewallRule -DisplayName $HttpsFirewall -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+            New-NetFirewallRule -DisplayName $HttpsFirewall -Direction Inbound -Action Allow -Protocol TCP -LocalPort "$HttpsPort" -Program $httpd | Out-Null
+            Ok "Windows Firewall: port $HttpsPort (HTTPS) open for Apache only"
+        }
     }
 
     # --------------------------------------------------------------------------------------------------------------
@@ -919,26 +984,7 @@ switch ($Do) {
         foreach ($d in @($mailCfg, $mailData, $sslCfg, (Join-Path $Root 'data\z-push'))) { Protect-Folder $d }
         $mailHost = if ($ServerName -match '\.') { $ServerName.ToLower() } else { "mail.$MailDomain" }
 
-        # the server's certificate, for HTTPS, IMAP and SMTP alike (made once; replace both files with a real one later,
-        # e.g. from Let's Encrypt, then: Restart-Service Apache2, Stalwart)
-        $srvCrt = Join-Path $sslCfg 'server.crt'; $srvKey = Join-Path $sslCfg 'server.key'
-        if (-not (Test-Path $srvCrt) -or -not (Test-Path $srvKey)) {
-            $names = @($mailHost, $ServerName.ToLower(), 'localhost') | Where-Object { $_ } | Select-Object -Unique
-            $cnf = Join-Path $Tmp ('cert-' + [guid]::NewGuid().ToString('N') + '.cnf')
-            Write-Utf8NoBom $cnf ("[req]`r`ndistinguished_name = dn`r`n[dn]`r`n[v3]`r`nbasicConstraints = CA:FALSE`r`nkeyUsage = digitalSignature, keyEncipherment`r`n" +
-                "extendedKeyUsage = serverAuth`r`nsubjectAltName = " + (($names | ForEach-Object { "DNS:$_" }) -join ', ') + ", IP:127.0.0.1`r`n")
-            $code = @'
-$o = ['config' => $argv[3], 'digest_alg' => 'sha256', 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'x509_extensions' => 'v3'];
-$k = openssl_pkey_new($o); $r = openssl_csr_new(['commonName' => $argv[4]], $k, $o);
-$x = openssl_csr_sign($r, null, $k, 825, $o, random_int(1, PHP_INT_MAX));
-if (!$x || !openssl_x509_export_to_file($x, $argv[1]) || !openssl_pkey_export_to_file($k, $argv[2], null, $o)) { fwrite(STDERR, (string) openssl_error_string()); exit(1); }
-echo 'ok';
-'@
-            $out = Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-r', $code, '--', $srvCrt, $srvKey, $cnf, $mailHost)
-            Remove-Item $cnf -Force -ErrorAction SilentlyContinue
-            if (($out -join '') -notmatch 'ok' -or -not (Test-Path $srvKey)) { Fail "Could not make the server certificate: $($out -join ' ')" }
-            Ok "certificate for $($names -join ', ') (made here, valid 825 days; phones ask to trust it until a real one replaces it)"
-        } else { Ok "the certificate in $sslCfg is kept" }
+        # (the server's certificate, made with HTTPS before Apache's settings: configs\ssl\server.crt and server.key)
 
         # --- Stalwart, its service runner and the downloads for webmail and ActiveSync
         $mz = @{}
@@ -1551,12 +1597,7 @@ exit($fail);
         # --- Apache: HTTPS on $HttpsPort for the site, webmail and ActiveSync; calendars and contacts passed on to Stalwart;
         # on plain HTTP these addresses only send the visitor to HTTPS (passwords never cross the network in the clear)
         Write-Utf8NoBom (Join-Path $Cfg 'apache\mail.conf') @"
-# Made by install-zpanel-stack.ps1 (mail); run it again to rewrite this file.
-Listen $HttpsPort
-SSLSessionCache "shmcb:`${ZROOT}/temp/ssl_scache(512000)"
-SSLProtocol -all +TLSv1.2 +TLSv1.3
-SSLHonorCipherOrder off
-SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+# Made by install-zpanel-stack.ps1 (mail); run it again to rewrite this file. (The port and TLS: ssl.conf.)
 
 <LocationMatch "(?i)^/(webmail|Microsoft-Server-ActiveSync|dav/|\.well-known/(caldav|carddav))">
     <If "%{HTTPS} != 'on'">
@@ -1690,9 +1731,7 @@ switch ($Do) {
         if (-not $NoFirewall) {
             Get-NetFirewallRule -DisplayName $MailFirewall -ErrorAction SilentlyContinue | Remove-NetFirewallRule
             New-NetFirewallRule -DisplayName $MailFirewall -Direction Inbound -Action Allow -Protocol TCP -LocalPort ($MailPorts | ForEach-Object { "$_" }) -Program $stalwart | Out-Null
-            Get-NetFirewallRule -DisplayName $HttpsFirewall -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-            New-NetFirewallRule -DisplayName $HttpsFirewall -Direction Inbound -Action Allow -Protocol TCP -LocalPort "$HttpsPort" -Program $httpd | Out-Null
-            Ok "Windows Firewall: $($MailPorts -join ', ') open for Stalwart, $HttpsPort for Apache (Stalwart's admin port and 8091 stay closed)"
+            Ok "Windows Firewall: $($MailPorts -join ', ') open for Stalwart (its admin port and 8091 stay closed)"
         }
     }
 
@@ -2039,6 +2078,14 @@ switch ($Do) {
             if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
             Protect-Folder $p
         }
+        # the websites' certificates and keys (the panel's Sencrypt page writes them, Apache reads them; never the
+        # accounts' own PHP), and Let's Encrypt's check files, which every site serves (plain files only)
+        $certs = Join-Path $state 'certs'
+        if (-not (Test-Path $certs)) { New-Item -ItemType Directory -Path $certs | Out-Null }
+        Protect-Folder $certs
+        Grant-Apache $certs 'M'
+        $acme = Join-Path $state 'acme\.well-known\acme-challenge'
+        if (-not (Test-Path $acme)) { New-Item -ItemType Directory -Path $acme | Out-Null }
     }
     $cur = (Get-CimInstance Win32_Service -Filter "Name='$ApacheService'").StartName
     if ($cur -ne $acct) {

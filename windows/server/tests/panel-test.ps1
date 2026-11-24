@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt)'
 foreach ($m in @('apache_admin', 'dns_manager', 'mailboxes', 'ftp_management', 'cron', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -163,3 +163,54 @@ if ($pk -match 'inUsername|Your Sentora account is active' -or $pk -eq '') {
 Ok "a parked domain ($park) shows the parking page"
 if ((Site "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'a name no site claims does not land on the panel' }
 Ok 'a name no site claims still lands on the panel (httpd-vhosts.conf stays first)'
+
+# --- HTTPS: a certificate made on the Sencrypt page gives the domain its HTTPS site (sys_winvhosts at the daemon run),
+# plain HTTP sends visitors there except Let's Encrypt's check files; the key is where the account's own PHP can not read it
+function Tls($h, $path) { $ErrorActionPreference = 'Continue'; (& curl.exe -sk --max-time 30 --resolve "${h}:443:127.0.0.1" "https://$h$path" 2>&1) -join "`n" }
+if ((Tls "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'HTTPS: a name no site claims does not land on the panel' }
+Ok 'HTTPS: the panel answers on 443 with the server certificate (names no site claims)'
+$p = Page '/?module=sencrypt' $null
+$p = Page '/?module=sencrypt&ShowPanel=third-party&action=Makenew' @{ csfr_token = (Token $p.Content); inDomain = $dom; inName = 'Test State'; inAddress = 'admin@example.test'; inCity = 'Test City'; inCountry = 'US'; inCompany = 'Test Company' }
+$crt = "$Root\data\sentora\certs\zadmin\ssl\sencrypt\third_party\$dom\cert.pem"
+$key = "$Root\data\sentora\certs\zadmin\ssl\sencrypt\third_party\$dom\private.pem"
+if (-not (Test-Path $crt) -or -not (Test-Path $key)) {
+    $said = ([regex]::Matches($p.Content, '(?s)class="alert[^"]*"[^>]*>(.{0,300}?)</') | ForEach-Object { ($_.Groups[1].Value -replace '<[^>]+>', ' ').Trim() }) -join ' / '
+    throw "Sencrypt made no certificate for $dom (the page said: '$said'; certs: $((Get-ChildItem "$Root\data\sentora\certs" -Recurse -ErrorAction SilentlyContinue | ForEach-Object FullName) -join ', '))"
+}
+Ok "Sencrypt made a self-signed certificate for $dom (in the panel's certs folder, not the site's)"
+$p = Page '/?module=sentoraconfig' $null
+$p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$ok = $false
+for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Tls $dom '/') -match 'Your Sentora account is active' }
+if (-not $ok) { throw "HTTPS: $dom is not served (sentora-vhosts.conf: $((Select-String -Path "$Root\configs\apache\sentora-vhosts.conf" -Pattern 'HTTPS|SSLCert' | ForEach-Object Line) -join ' / '); daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -Tail 8 -ErrorAction SilentlyContinue) -join ' / '))" }
+# (Windows' curl uses Schannel, which does not show the certificate: .NET asks for it, with the name as SNI)
+function CertSubject($h) {
+    $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 443)
+    try {
+        $ssl = New-Object Net.Security.SslStream($c.GetStream(), $false, ([Net.Security.RemoteCertificateValidationCallback] { $true }))
+        $ssl.AuthenticateAsClient($h)
+        return $ssl.RemoteCertificate.Subject
+    } finally { $c.Close() }
+}
+$subj = CertSubject $dom
+if ($subj -notmatch "CN=$([regex]::Escape($dom))(,|$)") { throw "HTTPS: $dom does not show its own certificate: $subj" }
+Ok "HTTPS: $dom is served with its own certificate"
+if ((Tls $dom '/who.php') -ne 'nt service\sentoraphp-zadmin') { throw "HTTPS: the domain's PHP runs as: $(Tls $dom '/who.php')" }
+Ok 'HTTPS: its PHP is the account''s own, as on HTTP'
+$ErrorActionPreference = 'Continue'
+$r = (& curl.exe -s -o NUL --max-time 30 -w '%{http_code} %{redirect_url}' -H "Host: $dom" 'http://127.0.0.1/page?x=1' 2>&1) -join ''
+$ErrorActionPreference = 'Stop'
+if ($r -ne "301 https://$dom/page?x=1") { throw "HTTP does not send visitors to HTTPS: $r" }
+Ok "plain HTTP sends visitors to https://$dom/ (301)"
+$acme = "$Root\data\sentora\acme\.well-known\acme-challenge"
+Set-Content "$acme\test-token-$n" "token-$n" -Encoding ASCII
+Set-Content "$acme\test-$n.php" '<?php echo 40 + 2;' -Encoding ASCII
+if ((Site $dom "/.well-known/acme-challenge/test-token-$n").Trim() -ne "token-$n") { throw "Let's Encrypt's check file is not served on plain HTTP: $(Site $dom "/.well-known/acme-challenge/test-token-$n")" }
+if ((Site $dom "/.well-known/acme-challenge/test-$n.php") -match '^\s*42\s*$') { throw 'a PHP file in the check folder was run' }
+Remove-Item "$acme\test-token-$n", "$acme\test-$n.php" -Force
+Ok "Let's Encrypt's check files are served on plain HTTP for every site (as files only, never run)"
+Set-Content "$($folder.FullName)\key.php" ('<?php echo trim((string) shell_exec(''type "' + $key + '" 2>&1''));') -Encoding ASCII
+$k = Tls $dom '/key.php'
+Remove-Item "$($folder.FullName)\key.php" -Force
+if ($k -match 'PRIVATE KEY') { throw "the account's own PHP can read the site's private key" }
+Ok "the account's own PHP can not read the site's private key ($(($k -split "`n")[0]))"
