@@ -15,14 +15,16 @@ ENFORCING=0; [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ] && ENFORCING=
 # made here at the plain level so every app of the customer can use it; each app's files in it carry the app's
 # own categories) instead of Podman's runsc folder. Every runsc command goes through here, so all of them use it.
 if [ $ENFORCING = 1 ]; then
-    args=(); prev=""
+    # (runsc picks its own folder when none is given, as under Podman; one given is moved next to it)
+    root="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sentora-runsc"; args=(); prev=""; given=0
     for a in "$@"; do
-        case "$prev" in --root) a=${a%/*}/sentora-runsc; root=$a ;; esac
-        case "$a" in --root=*) root=${a#--root=}; root=${root%/*}/sentora-runsc; a=--root=$root ;; esac
+        case "$prev" in --root) root=${a%/*}/sentora-runsc; a=$root; given=1 ;; esac
+        case "$a" in --root=*) root=${a#--root=}; root=${root%/*}/sentora-runsc; a=--root=$root; given=1 ;; esac
         args+=("$a"); prev=$a
     done
     set -- "${args[@]}"
-    [ -n "${root:-}" ] && [ ! -d "$root" ] && mkdir -m 700 "$root" 2> /dev/null
+    [ $given = 1 ] || FLAGS+=(--root="$root")
+    [ -d "$root" ] || mkdir -m 700 "$root" 2> /dev/null
 fi
 sub=""; bundle=""; prev=""
 for a in "$@"; do
