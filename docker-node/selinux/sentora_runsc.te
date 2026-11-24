@@ -9,6 +9,7 @@ policy_module(sentora_runsc, 0.1)
 gen_require(`
 	type container_runtime_t;
 	type unconfined_t;
+	type container_file_t;
 ')
 
 type sentora_runsc_exec_t;
