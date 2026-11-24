@@ -13,9 +13,12 @@ dnf -y -q install podman container-selinux selinux-policy-devel policycoreutils-
 rpm -q podman container-selinux selinux-policy conmon crun passt
 # (the cloud image has auditd off: SELinux's refusals would go only to the kernel log)
 systemctl enable --now auditd > /dev/null 2>&1; sleep 2; systemctl is-active auditd
+echo "kernel command line: $(cat /proc/cmdline)"; auditctl -s 2> /dev/null | grep -E '^(enabled|failure|backlog)'
+auditctl -e 1 > /dev/null 2>&1; auditctl -s 2> /dev/null | grep '^enabled'
 say "container-selinux: the template container_t is made with"
 IF=/usr/share/selinux/devel/include/services/container.if
-grep -n "^template(\`container_domain_template'" -A45 $IF | head -60
+grep -n "^template(\`container_domain_template'" -A16 $IF
+grep -n "^template(\`container_manage_files_template'" -A80 $IF | head -90
 grep -n "container_domain_template(\|typeattribute container_t\|^type container_t\|mcs_constrained(container_t)" /usr/share/selinux/devel/include/services/container.* 2> /dev/null | head
 seinfo -a container_domain -x 2> /dev/null | head -20
 seinfo -a container_net_domain -x 2> /dev/null | head -5
@@ -165,7 +168,8 @@ try s0:c1,c2 "talk to the system bus"               sh -c 'echo > /run/dbus/syst
 try s0:c1,c2 "mount a tmpfs"                        mount -t tmpfs none /mnt
 try s0:c1,c2 "ptrace (attach to pid 1)"             sh -c 'cat /proc/1/mem > /dev/null && echo read-mem'
 avc_since > "$O/avc-proof.txt"
-echo "(refusals logged during the proof: $(grep -c '^type=AVC' "$O/avc-proof.txt"))"
+echo "(refusals logged during the proof: $(grep -c '^type=AVC' "$O/avc-proof.txt"); it tried /etc/shadow and more, so there must be some)"
+grep '^type=AVC' "$O/avc-proof.txt" | grep sentora_runsc_t | cut -c1-260 | head -12
 semodule -r sentora_runsc_try > /dev/null 2>&1; semodule -B
 
 say "the kernel's own log of SELinux (in case audit missed any)"

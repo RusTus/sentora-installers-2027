@@ -9,17 +9,13 @@ policy_module(sentora_runsc, 0.1)
 gen_require(`
 	type container_runtime_t;
 	type unconfined_t;
-	role system_r;
-	attribute container_domain;
 ')
 
-type sentora_runsc_t;
 type sentora_runsc_exec_t;
-domain_type(sentora_runsc_t)
+# (made as container-selinux makes its own container domains: container_t's base, its MCS rules, and the
+# app's files (container_file_t) at the app's own categories only)
+container_domain_template(sentora_runsc, container)
 domain_entry_file(sentora_runsc_t, sentora_runsc_exec_t)
-role system_r types sentora_runsc_t;
-mcs_constrained(sentora_runsc_t)
-typeattribute sentora_runsc_t container_domain;
 
 permissive sentora_runsc_t;
 
