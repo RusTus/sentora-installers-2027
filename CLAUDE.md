@@ -58,6 +58,18 @@ sentora-repo/ is built from it, never edited or zipped by hand).
   'false'), never written into the code. The installer of each distribution sets them. Commands
   that root runs stay hidden (changed with setso over SSH only).
 
+## The native Windows installer (windows/server; moved here from sentora-windows-2027, owner 2026-11-25)
+
+- `windows/server/install-zpanel-stack.ps1` installs Apache, PHP, MySQL, FTP, mail, DNS and the panel into C:\zpanel;
+  `install-web-stack.ps1` is the same file with `$Edition = 'stack'` (Apache, PHP and MySQL only; the owner keeps it for
+  other uses): change only install-zpanel-stack.ps1, then make the copy with
+  `sed "s/^\$Edition = 'sentora'\$/\$Edition = 'stack'/" install-zpanel-stack.ps1 > install-web-stack.ps1`.
+- It must run on Windows PowerShell 5.1 (what Windows Server ships). Every download has a SHA-256 pinned in its `$Pkg`
+  table (raised with its version); the panel's zips and the update are checked against the SHA-256 GitHub keeps for
+  each release file. Run again = repair: never lose data, passwords or users.
+- `.github/workflows/windows-server-test.yml` (Windows Server 2025, about 40 minutes; runs on a push to windows/server and
+  in every release) must pass. The release builds `sentora-windows-server.zip` with the core's VERSION written in.
+
 ## Pages and how they look
 
 - Before saying a page change is done, look at it: render the page with the panel's real stylesheets

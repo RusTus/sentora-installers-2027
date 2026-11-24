@@ -1,0 +1,275 @@
+# The native Windows installer (windows/server) on a fresh Windows Server 2025: install (every default, the panel from
+# sentora-core-2027), FTPS, mail, DNS, the panel, PHP per account, update, repair, uninstall; and its copy
+# install-web-stack.ps1 (Apache, PHP and MySQL only) on a second one. (Moved here from sentora-windows-2027, 2026-11-25.)
+name: Windows Server install test
+on:
+  push:
+    paths: ['windows/server/**', '.github/workflows/windows-server-test.yml']
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: The sentora-core-2027 branch the panel comes from
+        default: master2027
+  # (the release workflow runs this test first and publishes only when it passes)
+  workflow_call:
+jobs:
+  win:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free port 80 and 21
+        shell: powershell
+        run: |
+          Get-Service W3SVC, FTPSVC -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+          Get-NetTCPConnection -LocalPort 21, 80 -State Listen -ErrorAction SilentlyContinue | Format-Table -AutoSize
+      - name: The panel's code and database (sentora-core-2027 at the branch asked for; master2027 on a push)
+        shell: powershell
+        run: |
+          $ref = '${{ inputs.core_ref }}'; if (-not $ref) { $ref = 'master2027' }
+          git clone -q --depth 1 --branch $ref https://github.com/RusTus/sentora-core-2027.git $env:RUNNER_TEMP\core
+          "core $ref $(git -C $env:RUNNER_TEMP\core rev-parse --short HEAD)"
+      - name: Install, every question at its default (-Unattended), mail for example.test
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-zpanel-stack.ps1 -Unattended -MailDomain example.test -PanelSource $env:RUNNER_TEMP\core -PanelSqlSource $env:GITHUB_WORKSPACE
+      - name: An FTP user, an upload over FTPS, and who can reach what
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Service Apache2, MySQL, SFTPGo | Format-Table Name, Status, StartType -AutoSize
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 add webuser Upl0ad-Test-9x
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 list
+          # FTPS (explicit TLS required) with curl.exe, which ships with Windows Server 2025; -k: the certificate made at install time
+          Set-Content $env:TEMP\hello.txt 'hello over FTPS' -NoNewline -Encoding ascii
+          $ErrorActionPreference = 'Continue'
+          curl.exe -sS --ssl-reqd -k --ftp-pasv -T $env:TEMP\hello.txt ftp://127.0.0.1/ -u webuser:Upl0ad-Test-9x
+          if ($LASTEXITCODE -ne 0) { throw "FTPS upload failed ($LASTEXITCODE)" }
+          $f = 'C:\zpanel\hostdata\webuser\public_html\hello.txt'
+          if ((Get-Content $f -Raw) -ne 'hello over FTPS') { throw 'the uploaded file is not there' }
+          'ok   FTPS upload landed in C:\zpanel\hostdata\webuser\public_html'
+          $back = curl.exe -sS --ssl-reqd -k ftp://127.0.0.1/hello.txt -u webuser:Upl0ad-Test-9x
+          if ($back -ne 'hello over FTPS') { throw "FTPS download: $back" }
+          'ok   FTPS download gives the same file back'
+          # plain FTP without TLS must be refused (TLS required)
+          $plain = curl.exe -sS ftp://127.0.0.1/ -u webuser:Upl0ad-Test-9x 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw "plain FTP was accepted: $plain" }
+          "ok   plain FTP refused: $($plain.Trim())"
+          # wrong password refused
+          $bad = curl.exe -sS --ssl-reqd -k ftp://127.0.0.1/ -u webuser:wrong 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw 'a wrong password was accepted' }
+          "ok   a wrong password is refused: $($bad.Trim())"
+          $ErrorActionPreference = 'Stop'
+          Get-NetTCPConnection -State Listen -LocalPort 21, 2022, 8080, 3306 | Sort-Object LocalPort | Format-Table LocalAddress, LocalPort -AutoSize
+          $admin = Get-NetTCPConnection -State Listen -LocalPort 8080
+          if ($admin | Where-Object { $_.LocalAddress -ne '127.0.0.1' }) { throw 'the admin port listens beyond this server' }
+          'ok   SFTPGo admin and API on 127.0.0.1 only'
+          $env:MYSQL_PWD = (Get-Content C:\zpanel\configs\mysql\root-password.txt -Raw).Trim()
+          & C:\zpanel\bin\mysql\bin\mysql.exe -u root -N -e "SELECT username, home_dir FROM sftpgo.users"
+          (icacls C:\zpanel\configs\sftpgo) -join ' '
+          Get-NetFirewallRule -DisplayName 'SFTPGo*' | Format-Table DisplayName, Enabled -AutoSize
+      - name: Mail - mailboxes, SMTP, IMAP, POP3, webmail, calendars and contacts, ActiveSync
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Service Stalwart | Format-Table Name, Status, StartType -AutoSize
+          $mu = 'C:\zpanel\bin\mailuser.ps1'
+          powershell -NoProfile -ExecutionPolicy Bypass -File $mu add alice@example.test Alice-Pass-1234
+          powershell -NoProfile -ExecutionPolicy Bypass -File $mu add bob@example.test Bob-Pass-5678
+          powershell -NoProfile -ExecutionPolicy Bypass -File $mu list
+          Get-Service ClamAV, FreshClam | Format-Table Name, Status, StartType -AutoSize
+          python windows\server\tests\mail-test.py example.test alice@example.test Alice-Pass-1234 bob@example.test Bob-Pass-5678 --virus
+          if ($LASTEXITCODE -ne 0) { throw 'the mail test failed' }
+          # ActiveSync as a phone would: the server's rules, the folders, then mail, a calendar event and a contact
+          python windows\server\tests\eas-test.py https://127.0.0.1/Microsoft-Server-ActiveSync alice@example.test Alice-Pass-1234 "Sent on 587" "Planning meeting" "Bob"
+          if ($LASTEXITCODE -ne 0) { throw 'the ActiveSync test failed' }
+          $ErrorActionPreference = 'Continue'
+          $code = curl.exe -sk -o NUL -w '%{http_code}' -X OPTIONS -u alice@example.test:wrong-password https://127.0.0.1/Microsoft-Server-ActiveSync
+          if ($code -ne '401') { throw "ActiveSync with a wrong password answered $code" }
+          'ok   ActiveSync: a wrong password is refused (401)'
+          $ErrorActionPreference = 'Stop'
+          # Stalwart's web side (admin, API) on this server only; its setup port gone
+          $l = Get-NetTCPConnection -State Listen -LocalPort 8443 -ErrorAction SilentlyContinue
+          if (-not $l -or ($l | Where-Object { $_.LocalAddress -ne '127.0.0.1' })) { throw 'port 8443 is not on 127.0.0.1 only' }
+          if (Get-NetTCPConnection -State Listen -LocalPort 8091 -ErrorAction SilentlyContinue) { throw 'the setup port 8091 is still open' }
+          'ok   Stalwart admin and API on 127.0.0.1:8443 only; setup port closed'
+          $cl = Get-NetTCPConnection -State Listen -LocalPort 3310 -ErrorAction SilentlyContinue
+          if (-not $cl -or ($cl | Where-Object { $_.LocalAddress -ne '127.0.0.1' })) { throw 'ClamAV is not on 127.0.0.1:3310 only' }
+          'ok   ClamAV on 127.0.0.1:3310 only'
+          $ErrorActionPreference = 'Continue'
+          $code = curl.exe -s -o NUL -w '%{http_code}' -X POST -d '{}' http://127.0.0.1/_sentora/mailscan
+          if ($code -ne '403') { throw "the virus check page without its key answered $code" }
+          'ok   the virus check page refuses a caller without the key (403)'
+          $ErrorActionPreference = 'Stop'
+          Get-NetTCPConnection -State Listen -LocalPort 25, 143, 443, 465, 587, 993, 995 | Sort-Object LocalPort | Format-Table LocalAddress, LocalPort -AutoSize
+          (icacls C:\zpanel\configs\stalwart) -join ' '
+          Get-NetFirewallRule -DisplayName 'Stalwart*', 'Apache HTTPS*' | Format-Table DisplayName, Enabled -AutoSize
+      - name: DNS - zones, records, nothing answered for strangers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Service CoreDNS | Format-Table Name, Status, StartType -AutoSize
+          $dz = 'C:\zpanel\bin\dnszone.ps1'
+          $mx = Resolve-DnsName example.test -Type MX -Server 127.0.0.1 -DnsOnly
+          if (($mx | Where-Object { $_.Type -eq 'MX' }).NameExchange -ne 'mail.example.test') { throw 'the mail zone has no MX' }
+          'ok   example.test (made with mail): MX mail.example.test'
+          powershell -NoProfile -ExecutionPolicy Bypass -File $dz add shop.example 10.0.0.9
+          powershell -NoProfile -ExecutionPolicy Bypass -File $dz record shop.example add app A 10.0.0.7
+          powershell -NoProfile -ExecutionPolicy Bypass -File $dz record shop.example add _dmarc TXT 'v=DMARC1; p=none'
+          $ok = $false
+          for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
+            try { $ok = ((Resolve-DnsName app.shop.example -Type A -Server 127.0.0.1 -DnsOnly -ErrorAction Stop).IPAddress -eq '10.0.0.7') } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { throw 'the new zone and record are not answered' }
+          'ok   a new zone and a new record answered (within 40 seconds)'
+          # (CoreDNS reads changed zones on its own reload interval: asked again for up to 40 seconds)
+          $t = ''
+          for ($i = 0; $i -lt 40 -and -not $t; $i++) { try { $t = (Resolve-DnsName _dmarc.shop.example -Type TXT -Server 127.0.0.1 -DnsOnly -ErrorAction Stop).Strings -join '' } catch { Start-Sleep 1 } }
+          if ($t -ne 'v=DMARC1; p=none') { throw "TXT: $t" }
+          'ok   TXT record answered'
+          powershell -NoProfile -ExecutionPolicy Bypass -File $dz record shop.example remove app A
+          $gone = $false
+          for ($i = 0; $i -lt 40 -and -not $gone; $i++) {
+            try { Resolve-DnsName app.shop.example -Type A -Server 127.0.0.1 -DnsOnly -ErrorAction Stop | Out-Null; Start-Sleep 1 } catch { $gone = $true }
+          }
+          if (-not $gone) { throw 'a removed record is still answered' }
+          'ok   a removed record goes away'
+          try { Resolve-DnsName www.google.com -Server 127.0.0.1 -DnsOnly -ErrorAction Stop | Out-Null; throw 'answered for google.com: an open resolver' } catch { if ("$_" -match 'open resolver') { throw } }
+          'ok   names that are not ours are refused (not an open resolver)'
+          $p = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dz, 'record', 'shop.example', 'add', 'bad', 'A', '999.1.1.1' -Wait -PassThru -NoNewWindow -RedirectStandardError "$env:TEMP\dz-err.txt"
+          if ($p.ExitCode -eq 0) { throw 'a bad address was accepted' }
+          "ok   a bad record value is refused: $((Get-Content "$env:TEMP\dz-err.txt" | Select-Object -First 1))"
+          Get-NetFirewallRule -DisplayName 'CoreDNS*' | Format-Table DisplayName, Enabled -AutoSize
+      - name: The Sentora panel - log in, the modules ready for Windows, the daemon through zsudo, Apache's own account
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\panel-test.ps1
+      - name: PHP per hosting account - each its own Windows account, walled off from the others, the panel and the server
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\php-account-test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'the PHP per account test failed' }
+      - name: Update - the nightly check sees the newest release, then an update to it keeps everything
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Content C:\zpanel\configs\install-choices.json
+          Get-ScheduledTask -TaskName 'Sentora update check' | Format-Table TaskName, State -AutoSize
+          # (until a release carries the Windows zip, there is nothing to update to)
+          $rel = Invoke-RestMethod https://api.github.com/repos/RusTus/sentora-installers-2027/releases/tags/current -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'test' }
+          if (-not (@($rel.assets) | Where-Object name -eq 'sentora-windows-server.zip')) { 'note the current release has no sentora-windows-server.zip yet: the update is tried from the next one'; exit 0 }
+          $up = 'C:\zpanel\bin\sentora-update.ps1'
+          $c = powershell -NoProfile -ExecutionPolicy Bypass -File $up -Check | Out-String; $c
+          if ($c -notmatch 'is out' -or -not (Test-Path C:\zpanel\logs\update-available.txt)) { throw 'the check did not tell about the release' }
+          'ok   the check tells (logs\update-available.txt)'
+          powershell -NoProfile -ExecutionPolicy Bypass -File $up
+          if ($LASTEXITCODE -ne 0) { throw 'the update failed' }
+          $v = (Get-Content C:\zpanel\configs\version.txt -Raw).Trim()
+          if ($v -notmatch '^2027\.\d+$') { throw "no version after the update: $v" }
+          "ok   updated to $v"
+          Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS | Format-Table Name, Status -AutoSize
+          if (Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS | Where-Object { $_.Status -ne 'Running' }) { throw 'a service is not running after the update' }
+          $ml = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\mailuser.ps1 list | Out-String
+          if ($ml -notmatch 'alice@example.test') { throw 'a mailbox is gone after the update' }
+          $zl = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\dnszone.ps1 list | Out-String
+          if ($zl -notmatch 'shop.example') { throw 'a DNS zone is gone after the update' }
+          python windows\server\tests\eas-test.py https://127.0.0.1/Microsoft-Server-ActiveSync alice@example.test Alice-Pass-1234 "Sent on 587"
+          if ($LASTEXITCODE -ne 0) { throw 'ActiveSync after the update failed' }
+          $c = powershell -NoProfile -ExecutionPolicy Bypass -File $up -Check | Out-String; $c
+          if ($c -notmatch 'Up to date') { throw 'the check does not see the update' }
+          if (Test-Path C:\zpanel\logs\update-available.txt) { throw 'the note stayed after the update' }
+          Get-ChildItem C:\zpanel\backups | Format-Table Name, Length -AutoSize
+          'ok   the update kept the mailboxes, mail, zones and services; the check says up to date'
+      - name: Run again (repair keeps the FTP users and passwords)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $e1 = Get-Content C:\zpanel\configs\sftpgo\env.d\sftpgo.env -Raw
+          $m1 = (Get-FileHash C:\zpanel\configs\stalwart\admin.txt).Hash + (Get-FileHash C:\zpanel\configs\stalwart\roundcube.inc.php).Hash
+          $z1 = Get-Content C:\zpanel\configs\panel\zadmin-password.txt -Raw
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-zpanel-stack.ps1 -Unattended -RelaxedSqlMode -LegacyForeignKeys -WithFtp -WithMail -MailDomain example.test -PanelSource $env:RUNNER_TEMP\core -PanelSqlSource $env:GITHUB_WORKSPACE
+          if ((Get-Content C:\zpanel\configs\sftpgo\env.d\sftpgo.env -Raw) -ne $e1) { throw 'the FTP passwords changed' }
+          if ((Get-Content C:\zpanel\configs\panel\zadmin-password.txt -Raw) -ne $z1) { throw "zadmin's password changed" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\panel-test.ps1
+          'ok   repair kept the panel (zadmin, its database) and it still works'
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\php-account-test.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { throw 'the PHP accounts do not work after the repair' }
+          'ok   repair rebuilt the PHP accounts (keys kept) and their websites work'
+          $m2 = (Get-FileHash C:\zpanel\configs\stalwart\admin.txt).Hash + (Get-FileHash C:\zpanel\configs\stalwart\roundcube.inc.php).Hash
+          if ($m2 -ne $m1) { throw 'the mail passwords changed' }
+          $ml = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\mailuser.ps1 list | Out-String; $ml
+          if ($ml -notmatch 'alice@example.test') { throw 'the mailbox is gone' }
+          python windows\server\tests\eas-test.py https://127.0.0.1/Microsoft-Server-ActiveSync alice@example.test Alice-Pass-1234 "Sent on 587"
+          if ($LASTEXITCODE -ne 0) { throw 'ActiveSync after the repair failed' }
+          'ok   repair kept the mailboxes, the mail and the passwords'
+          $zl = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\dnszone.ps1 list | Out-String
+          if ($zl -notmatch 'shop.example') { throw 'the DNS zone is gone' }
+          $ok = $false
+          for ($i = 0; $i -lt 30 -and -not $ok; $i++) { try { $ok = [bool](Resolve-DnsName shop.example -Type A -Server 127.0.0.1 -DnsOnly -ErrorAction Stop) } catch { Start-Sleep 1 } }
+          if (-not $ok) { throw 'DNS does not answer after the repair' }
+          'ok   repair kept the DNS zones'
+          $l = powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 list | Out-String; $l
+          if ($l -notmatch 'webuser') { throw 'the FTP user is gone' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File C:\zpanel\bin\ftpuser.ps1 remove webuser
+          'ok   repair kept the users; remove works'
+      - name: Uninstall
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-zpanel-stack.ps1 -Uninstall
+          if (Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS, SentoraZsudo, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'services still there' }
+          if (Get-LocalGroup -Name SentoraPHP -ErrorAction SilentlyContinue) { throw 'the group SentoraPHP is still there' }
+          if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { throw "the panel's daemon task is still there" }
+          if (Get-ScheduledTask -TaskName 'Sentora update check' -ErrorAction SilentlyContinue) { throw 'the nightly check is still there' }
+          'ok   services removed'
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpanel-logs
+          path: |
+            C:\zpanel\logs
+            C:\zpanel\configs\sftpgo\sftpgo.json
+            C:\zpanel\configs\apache
+  stack:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: install-web-stack.ps1 is install-zpanel-stack.ps1 with only its $Edition line changed
+        shell: powershell
+        run: |
+          $a = (Get-Content windows\server\install-zpanel-stack.ps1 -Raw) -replace "(?m)^\`$Edition = 'sentora'(\r?)$", "`$Edition = 'stack'`$1"
+          if ($a -ne (Get-Content windows\server\install-web-stack.ps1 -Raw)) { throw 'install-web-stack.ps1 differs from install-zpanel-stack.ps1 in more than its $Edition line' }
+          'ok   the two installers are the same but for $Edition'
+      - name: Free port 80
+        shell: powershell
+        run: Get-Service W3SVC -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
+      - name: Apache, PHP and MySQL only (-Unattended asks nothing else)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-web-stack.ps1 -Unattended
+      - name: Only those, PHP inside Apache, also for a site in hostdata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($n in 'Apache2', 'MySQL') { if ((Get-Service $n).Status -ne 'Running') { throw "$n does not run" } }
+          if (Get-Service SFTPGo, Stalwart, ClamAV, CoreDNS, SentoraZsudo, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'it installed more than Apache, PHP and MySQL' }
+          if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { throw 'the panel came with it' }
+          'ok   Apache and MySQL run; no FTP, mail, DNS or panel'
+          $ch = Get-Content C:\zpanel\configs\install-choices.json -Raw | ConvertFrom-Json
+          if ($ch.WithPanel -or $ch.WithFtp -or $ch.WithMail -or $ch.WithDns) { throw "its saved answers: $($ch | ConvertTo-Json -Compress)" }
+          'ok   its answers are saved as Apache, PHP and MySQL only (an update keeps it so)'
+          New-Item -ItemType Directory -Force C:\zpanel\hostdata\site\public_html | Out-Null
+          Set-Content C:\zpanel\hostdata\site\public_html\x.php '<?php echo PHP_SAPI, "|", extension_loaded("mysqli") ? "mysqli" : "no";' -Encoding ASCII
+          Add-Content C:\zpanel\configs\apache\httpd-vhosts.conf "`r`n<VirtualHost *:80>`r`n    ServerName site.test`r`n    DocumentRoot `"C:/zpanel/hostdata/site/public_html`"`r`n</VirtualHost>`r`n"
+          Restart-Service Apache2 -Force
+          Start-Sleep 2
+          $r = (& curl.exe -s --max-time 30 -H 'Host: site.test' http://127.0.0.1/x.php) -join ''
+          if ($r -ne 'apache2handler|mysqli') { throw "PHP for a site in hostdata: $r" }
+          'ok   a site in hostdata runs its PHP inside Apache, as before (no per-account PHP without the panel)'
+      - name: Uninstall
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-web-stack.ps1 -Uninstall
+          if (Get-Service Apache2, MySQL -ErrorAction SilentlyContinue) { throw 'services still there' }
+          'ok   services removed'
