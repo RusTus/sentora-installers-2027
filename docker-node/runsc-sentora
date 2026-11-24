@@ -3,38 +3,41 @@
 # The app's limits are held by its own slice (sentora-app-<id>.slice, set by the agent): runsc does not manage
 # cgroups itself under rootless Podman. --overlay2=none: the app's own files go to Podman's layer, as without
 # gVisor (kept over a restart). --network=host: gVisor uses the network namespace Podman made for the app.
-#
-# With SELinux enforcing: runsc takes no SELinux label, so when a sandbox is made (create/run) the label Podman
-# chose for the app (container_t with its own MCS categories) is taken out of the app's spec, and runsc is
-# started in Sentora's domain for it (sentora_runsc_t, docker-node/selinux) at that same level: the sandbox and
-# its file helper are confined, and one app's sandbox can not reach another app's files.
 RUNSC=/usr/local/bin/runsc
 FLAGS=(--ignore-cgroups --network=host --overlay2=none)
-ENFORCING=0; [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ] && ENFORCING=1
-# With SELinux: gVisor keeps its state in a folder of its own (/run/user/<uid>/sentora-runsc, its own SELinux type,
-# made here at the plain level so every app of the customer can use it; each app's files in it carry the app's
-# own categories) instead of Podman's runsc folder. Every runsc command goes through here, so all of them use it.
-if [ $ENFORCING = 1 ]; then
-    # (runsc picks its own folder when none is given, as under Podman; one given is moved next to it)
-    root="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sentora-runsc"; args=(); prev=""; given=0
-    for a in "$@"; do
-        case "$prev" in --root) root=${a%/*}/sentora-runsc; a=$root; given=1 ;; esac
-        case "$a" in --root=*) root=${a#--root=}; root=${root%/*}/sentora-runsc; a=--root=$root; given=1 ;; esac
-        args+=("$a"); prev=$a
-    done
-    set -- "${args[@]}"
-    [ $given = 1 ] || FLAGS+=(--root="$root")
-    [ -d "$root" ] || mkdir -m 700 "$root" 2> /dev/null
-fi
-sub=""; bundle=""; prev=""
+[ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ] || exec "$RUNSC" "${FLAGS[@]}" "$@"
+
+# With SELinux enforcing (docker-node/selinux/sentora_runsc.te): runsc takes no SELinux label, so when a sandbox
+# is made the label Podman chose for the app (container_t at the app's own MCS categories) is taken out of the
+# app's spec, and runsc is started in Sentora's domain for it (sentora_runsc_t) at that same level: the sandbox
+# and its file helper are confined, and reach none of another app's files. Each app keeps gVisor's state in a
+# folder of its own (/run/user/<uid>/sentora-runsc/<container id>) at the app's level, so no app's sandbox can
+# touch another's state either; the pid file Podman asks for is written there and copied to Podman by this
+# wrapper (which runs as Podman does), so the sandbox needs no access to Podman's folders.
+base="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/sentora-runsc"
+args=(); id=""; sub=""; bundle=""; pidfile=""; prev=""; skip=0
 for a in "$@"; do
-    case "$prev" in --bundle|-bundle|-b) bundle=$a ;; esac
-    case "$a" in --bundle=*|-bundle=*) bundle=${a#*=} ;; create|run) [ -z "$sub" ] && sub=$a ;; esac
-    prev=$a
+    if [ $skip = 1 ]; then skip=0; prev=$a; continue; fi
+    case "$prev" in --bundle|-bundle|-b) bundle=$a ;; --pid-file|-pid-file) pidfile=$a; a=@PIDFILE@ ;; esac
+    case "$a" in
+        --root|-root) skip=1; prev=$a; continue ;;
+        --root=*|-root=*) prev=$a; continue ;;
+        --bundle=*|-bundle=*) bundle=${a#*=} ;;
+        --pid-file=*|-pid-file=*) pidfile=${a#*=}; a=${a%%=*}=@PIDFILE@ ;;
+        create|run|delete) [ -z "$sub" ] && sub=$a ;;
+    esac
+    [ -z "$id" ] && [[ "$a" =~ ^[0-9a-f]{64}$ ]] && id=$a
+    args+=("$a"); prev=$a
 done
-if [ -n "$sub" ] && [ $ENFORCING = 1 ]; then
+[ -d "$base" ] || mkdir -m 700 "$base" 2> /dev/null
+root=$base; [ -n "$id" ] && root=$base/$id
+FLAGS+=(--root="$root")
+args=("${args[@]//@PIDFILE@/$root/pidfile}")
+
+case "$sub" in
+create|run)
     [ -n "$bundle" ] || bundle=$PWD
-    level=$(/usr/bin/python3 -I - "$bundle/config.json" <<'PY'
+    ctx=$(/usr/bin/python3 -I - "$bundle/config.json" <<'PY'
 import json, os, sys
 p = sys.argv[1]
 with open(p) as f:
@@ -55,8 +58,15 @@ os.rename(tmp, p)
 print(":".join(parts[:2]) + ":sentora_runsc_t:" + parts[3])
 PY
     )
-    # (no label to take over: refused, never started without SELinux's confinement)
-    [ -n "$level" ] || { echo "runsc-sentora: the app's SELinux label was not found in $bundle/config.json" >&2; exit 1; }
-    exec /usr/bin/runcon "$level" "$RUNSC" "${FLAGS[@]}" "$@"
-fi
-exec "$RUNSC" "${FLAGS[@]}" "$@"
+    # (no label to take over, or its folder can not have the app's level: refused, never run unconfined)
+    [ -n "$ctx" ] && [ -n "$id" ] || { echo "runsc-sentora: the app's SELinux label or id was not found ($bundle/config.json)" >&2; exit 1; }
+    rm -rf "$root"; mkdir -m 700 "$root" && chcon -l "${ctx#*:*:*:}" "$root" || { echo "runsc-sentora: could not make $root at the app's level" >&2; exit 1; }
+    /usr/bin/runcon "$ctx" "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
+    if [ $rc = 0 ] && [ -n "$pidfile" ]; then cat "$root/pidfile" > "$pidfile.sentora" && mv -f "$pidfile.sentora" "$pidfile" || rc=1; fi
+    exit $rc ;;
+delete)
+    "$RUNSC" "${FLAGS[@]}" "${args[@]}"; rc=$?
+    [ $rc = 0 ] && [ -n "$id" ] && rm -rf "$root"
+    exit $rc ;;
+esac
+exec "$RUNSC" "${FLAGS[@]}" "${args[@]}"

@@ -28,21 +28,22 @@ domain_entry_file(sentora_runsc_t, sentora_runsc_exec_t)
 # the same network as container_t (an app listens on its port inside its own network namespace)
 typeattribute sentora_runsc_t container_net_domain;
 
-# gVisor's state (locks, state, control sockets, its empty network namespace file), in its own folder
-# /run/user/<uid>/sentora-runsc that the wrapper makes; each app's files there carry the app's own categories.
-# Also the pid file Podman asks runsc to write.
+# gVisor's state (locks, state, control socket, its empty network namespace file, the pid file Podman asks for):
+# /run/user/<uid>/sentora-runsc/<container id>, made by the wrapper (as Podman's conmon runs) at the app's own
+# level, so what a sandbox writes there has the app's categories and no other app's sandbox can touch it. The
+# sandbox gets no access to Podman's own folders (the wrapper copies the pid file there).
 type sentora_runsc_state_t;
 files_type(sentora_runsc_state_t)
 filetrans_pattern(container_runtime_t, user_tmp_t, sentora_runsc_state_t, dir, "sentora-runsc")
-filetrans_pattern(sentora_runsc_t, user_tmp_t, sentora_runsc_state_t, file, "pidfile")
-allow sentora_runsc_t user_tmp_t:dir { search_dir_perms add_entry_dir_perms };
-manage_dirs_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
-manage_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
-manage_sock_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
-allow sentora_runsc_t sentora_runsc_state_t:file mounton;
 manage_dirs_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
 manage_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
 manage_sock_files_pattern(container_runtime_t, sentora_runsc_state_t, sentora_runsc_state_t)
+allow container_runtime_t sentora_runsc_state_t:dir { relabelfrom relabelto };
+allow sentora_runsc_t user_tmp_t:dir search_dir_perms;
+allow sentora_runsc_t sentora_runsc_state_t:dir rw_dir_perms;
+manage_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+manage_sock_files_pattern(sentora_runsc_t, sentora_runsc_state_t, sentora_runsc_state_t)
+allow sentora_runsc_t sentora_runsc_state_t:file mounton;
 
 # started by Podman's conmon (container_runtime_t) through the wrapper; runsc then runs itself again (sandbox,
 # gofer) and its helper (gvisor-bin), all labelled sentora_runsc_exec_t

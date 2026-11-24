@@ -138,13 +138,20 @@ asu $U podman --runtime /usr/local/bin/runsc-sentora run --rm busybox sh -c 'ech
 asu $U podman --runtime /usr/local/bin/runsc-sentora run -d --name web -p 127.0.0.1:18080:8080 -v vol1:/data busybox sh -c 'cat /data/f > /tmp/i; httpd -f -p 8080 -h /tmp' 2>&1 | tail -1
 asu $U2 podman --runtime /usr/local/bin/runsc-sentora run -d --name web2 -p 127.0.0.1:18081:8080 busybox sh -c 'echo two > /tmp/i; httpd -f -p 8080 -h /tmp' 2>&1 | tail -1
 sleep 5
-echo "web: $(curl -s --max-time 5 http://127.0.0.1:18080/i || echo no answer)  web2: $(curl -s --max-time 5 http://127.0.0.1:18081/i || echo no answer)"
+asu $U podman --runtime /usr/local/bin/runsc-sentora run -d --name web3 -p 127.0.0.1:18082:8080 busybox sh -c 'echo three > /tmp/i; httpd -f -p 8080 -h /tmp' 2>&1 | tail -1
+sleep 4
+echo "web: $(curl -s --max-time 5 http://127.0.0.1:18080/i || echo no answer)  web2: $(curl -s --max-time 5 http://127.0.0.1:18081/i || echo no answer)  web3 (same customer as web): $(curl -s --max-time 5 http://127.0.0.1:18082/i || echo no answer)"
+echo "gVisor's state, one folder per app at the app's own level:"
+ls -dZ /run/user/$(id -u $U)/sentora-runsc /run/user/$(id -u $U)/sentora-runsc/* 2> /dev/null | sed 's|/run/user/[0-9]*/sentora-runsc/\(.\{12\}\)[0-9a-f]*|.../\1...|'
+ls -Z /run/user/$(id -u $U)/sentora-runsc/*/ 2> /dev/null | head -12
+asu $U podman inspect web web3 --format '{{.Name}} {{.ProcessLabel}}' 
 ps -eo label,user,args | grep -E 'sentora_runsc_t|conmon' | grep -v grep | awk '{print $1, $2, $3}' | sort | uniq -c
 asu $U podman stop -t 5 web > /dev/null 2>&1; asu $U podman start web > /dev/null 2>&1; sleep 4
 echo "after a restart: $(curl -s --max-time 5 http://127.0.0.1:18080/i || echo no answer)"
 asu $U podman exec web sh -c 'echo exec-works' 2>&1 | tail -1
 asu $U podman logs web 2>&1 | tail -2
-asu $U podman rm -f web > /dev/null 2>&1; asu $U2 podman rm -f web2 > /dev/null 2>&1
+asu $U podman rm -f web web3 > /dev/null 2>&1; asu $U2 podman rm -f web2 > /dev/null 2>&1
+echo "after removing: $(ls /run/user/$(id -u $U)/sentora-runsc/ 2> /dev/null | wc -l) state folder(s) left"
 avc_since > "$O/avc-enforcing.txt"; echo "SELinux refusals while enforcing: $(grep -c '^type=AVC' "$O/avc-enforcing.txt")"
 grep '^type=AVC' "$O/avc-enforcing.txt" | cut -c1-400 | head -30
 echo "as rules:"; grep '^type=AVC' "$O/avc-enforcing.txt" | audit2allow 2>&1 | head -40
@@ -171,6 +178,8 @@ mkdir -p /var/tmp/sentora-try/r /var/tmp/sentora-try/c && cp /root/t/bb /var/tmp
 chcon -t sentora_runsc_exec_t /var/tmp/sentora-try/r/busybox; chcon -t container_file_t -l s0 /var/tmp/sentora-try/c/busybox
 echo "app A's own file" > /var/tmp/sentora-try/a.txt; chcon -t container_file_t -l s0:c1,c2 /var/tmp/sentora-try/a.txt
 echo "app B's file" > /var/tmp/sentora-try/b.txt; chcon -t container_file_t -l s0:c3,c4 /var/tmp/sentora-try/b.txt
+echo "app A's gVisor state" > /var/tmp/sentora-try/sa.state; chcon -t sentora_runsc_state_t -l s0:c1,c2 /var/tmp/sentora-try/sa.state
+echo "app B's gVisor state" > /var/tmp/sentora-try/sb.state; chcon -t sentora_runsc_state_t -l s0:c3,c4 /var/tmp/sentora-try/sb.state
 echo "customer home" > /home/$U2/secret.txt; restorecon /home/$U2/secret.txt
 mkdir -p /etc/sentora-docker-node && echo "node key" > /etc/sentora-docker-node/node.key && chmod 600 /etc/sentora-docker-node/node.key; restorecon -R /etc/sentora-docker-node
 ls -Z /var/tmp/sentora-try/ /home/$U2/secret.txt /etc/sentora-docker-node/node.key
@@ -185,6 +194,10 @@ mark
 try s0:c1,c2 "read its own app's file"              cat /var/tmp/sentora-try/a.txt
 try s0:c1,c2 "read ANOTHER app's file"              cat /var/tmp/sentora-try/b.txt
 try s0:c1,c2 "write ANOTHER app's file"             sh -c 'echo x >> /var/tmp/sentora-try/b.txt && echo written'
+try s0:c1,c2 "read its own gVisor state"            cat /var/tmp/sentora-try/sa.state
+try s0:c1,c2 "read ANOTHER app's gVisor state"      cat /var/tmp/sentora-try/sb.state
+try s0:c1,c2 "write ANOTHER app's gVisor state"     sh -c 'echo x >> /var/tmp/sentora-try/sb.state && echo written'
+try s0:c1,c2 "write Podman's files (user_tmp_t)"    sh -c 'echo x > /run/user/0/sentora-try 2>&1 || echo x > /tmp/sentora-try-file && echo written'
 try s0:c1,c2 "read a customer's home"               cat /home/$U2/secret.txt
 try s0:c1,c2 "read /etc/shadow"                     cat /etc/shadow
 try s0:c1,c2 "read the node's key"                  cat /etc/sentora-docker-node/node.key
