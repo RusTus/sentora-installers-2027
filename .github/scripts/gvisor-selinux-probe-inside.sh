@@ -38,7 +38,7 @@ if make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp > "$O/make.txt" 2>
     sed -i -e '/attribute container_domain;/d' -e '/^typeattribute sentora_runsc_t container_domain/d' sentora_runsc.te
     make -f /usr/share/selinux/devel/Makefile sentora_runsc.pp 2>&1 | tail -5; echo "(built without container_domain)"; fi
 semodule -i sentora_runsc.pp && echo loaded
-restorecon -v /usr/local/bin/runsc /usr/local/bin/runsc-sentora
+restorecon -R -v /usr/local/bin/runsc /usr/local/bin/runsc-sentora /usr/local/bin/gvisor-bin
 ls -Z /usr/local/bin/runsc /usr/local/bin/runsc-sentora
 cd /
 # (SELinux's "do not log" rules off: every refusal shows)
