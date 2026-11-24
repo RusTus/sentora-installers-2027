@@ -1,0 +1,32 @@
+policy_module(sentora_runsc, 0.1)
+
+# Sentora Docker Node: gVisor (runsc) for the apps with Extra isolation, under SELinux.
+# runsc takes no SELinux label of its own, so the wrapper (runsc-sentora) starts the sandbox in this domain at
+# the app's own MCS level (the one Podman chose for it): its sandbox and its file helper (gofer) are confined as an
+# app is under container_t, and one app's sandbox can not touch another app's files (MCS).
+# Round 1 (probe): permissive, to learn what runsc needs.
+
+gen_require(`
+	type container_runtime_t;
+	type unconfined_t;
+	role system_r;
+	attribute container_domain;
+	attribute container_net_domain;
+')
+
+type sentora_runsc_t;
+type sentora_runsc_exec_t;
+domain_type(sentora_runsc_t)
+domain_entry_file(sentora_runsc_t, sentora_runsc_exec_t)
+role system_r types sentora_runsc_t;
+mcs_constrained(sentora_runsc_t)
+typeattribute sentora_runsc_t container_domain, container_net_domain;
+
+permissive sentora_runsc_t;
+
+# who may start it (the probe looks which one runs the wrapper; round 2 keeps only that one)
+allow { container_runtime_t unconfined_t } sentora_runsc_t:process transition;
+allow { container_runtime_t unconfined_t } sentora_runsc_exec_t:file { getattr open read execute map };
+allow sentora_runsc_t { container_runtime_t unconfined_t }:fd use;
+allow sentora_runsc_t { container_runtime_t unconfined_t }:fifo_file rw_fifo_file_perms;
+allow sentora_runsc_t { container_runtime_t unconfined_t }:process sigchld;

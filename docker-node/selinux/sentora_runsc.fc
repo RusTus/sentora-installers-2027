@@ -1,0 +1,1 @@
+/usr/local/bin/runsc		--	gen_context(system_u:object_r:sentora_runsc_exec_t,s0)

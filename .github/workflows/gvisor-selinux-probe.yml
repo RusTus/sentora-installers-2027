@@ -1,0 +1,24 @@
+# A probe, not a test: gVisor (runsc) under rootless Podman on a real AlmaLinux 10 machine with SELinux enforcing,
+# in Sentora's own SELinux domain for it (docker-node/selinux). Its answers decide the policy (2026-11-24).
+name: gVisor SELinux probe
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  alma10-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: KVM and QEMU
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
+      - run: bash .github/scripts/gvisor-selinux-probe.sh results
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gvisor-selinux-probe
+          path: results
+          retention-days: 14

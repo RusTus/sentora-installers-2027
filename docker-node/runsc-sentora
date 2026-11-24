@@ -1,0 +1,46 @@
+#!/bin/bash
+# Sentora Docker Node: gVisor for the apps with Extra isolation (installed as /usr/local/bin/runsc-sentora).
+# The app's limits are held by its own slice (sentora-app-<id>.slice, set by the agent): runsc does not manage
+# cgroups itself under rootless Podman. --overlay2=none: the app's own files go to Podman's layer, as without
+# gVisor (kept over a restart). --network=host: gVisor uses the network namespace Podman made for the app.
+#
+# With SELinux enforcing: runsc takes no SELinux label, so when a sandbox is made (create/run) the label Podman
+# chose for the app (container_t with its own MCS categories) is taken out of the app's spec, and runsc is
+# started in Sentora's domain for it (sentora_runsc_t, docker-node/selinux) at that same level: the sandbox and
+# its file helper are confined, and one app's sandbox can not reach another app's files.
+RUNSC=/usr/local/bin/runsc
+FLAGS=(--ignore-cgroups --network=host --overlay2=none)
+sub=""; bundle=""; prev=""
+for a in "$@"; do
+    case "$prev" in --bundle|-bundle|-b) bundle=$a ;; esac
+    case "$a" in --bundle=*|-bundle=*) bundle=${a#*=} ;; create|run) [ -z "$sub" ] && sub=$a ;; esac
+    prev=$a
+done
+if [ -n "$sub" ] && [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ]; then
+    [ -n "$bundle" ] || bundle=$PWD
+    level=$(/usr/bin/python3 -I - "$bundle/config.json" <<'PY'
+import json, os, sys
+p = sys.argv[1]
+with open(p) as f:
+    spec = json.load(f)
+label = (spec.get("process") or {}).get("selinuxLabel") or ""
+parts = label.split(":", 3)
+if len(parts) != 4 or not parts[3].startswith("s0"):
+    sys.exit(3)
+spec["process"].pop("selinuxLabel", None)
+(spec.get("linux") or {}).pop("mountLabel", None)
+for m in spec.get("mounts") or []:
+    if m.get("options"):
+        m["options"] = [o for o in m["options"] if not o.startswith("context=")]
+tmp = p + ".sentora"
+with open(tmp, "w") as f:
+    json.dump(spec, f)
+os.rename(tmp, p)
+print(":".join(parts[:2]) + ":sentora_runsc_t:" + parts[3])
+PY
+    )
+    # (no label to take over: refused, never started without SELinux's confinement)
+    [ -n "$level" ] || { echo "runsc-sentora: the app's SELinux label was not found in $bundle/config.json" >&2; exit 1; }
+    exec /usr/bin/runcon "$level" "$RUNSC" "${FLAGS[@]}" "$@"
+fi
+exec "$RUNSC" "${FLAGS[@]}" "$@"
