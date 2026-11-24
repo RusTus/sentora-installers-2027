@@ -635,6 +635,14 @@ SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-E
 $defaultSite
 "@
         Ok "Apache: HTTPS on port $HttpsPort (configs\apache\ssl.conf)"
+        # (an older mail.conf opened the port and set TLS itself: those lines are ssl.conf's now, or Apache would see the
+        # port twice; the mail part below writes the rest of that file again)
+        $oldMail = Join-Path $Cfg 'apache\mail.conf'
+        if (Test-Path $oldMail) {
+            $mc = [IO.File]::ReadAllText($oldMail)
+            $mc2 = [regex]::Replace($mc, '(?m)^(Listen|SSLSessionCache|SSLProtocol|SSLHonorCipherOrder|SSLCipherSuite)\b[^\r\n]*\r?\n', '')
+            if ($mc2 -ne $mc) { Write-Utf8NoBom $oldMail $mc2; Ok 'mail.conf: the port and TLS lines moved to ssl.conf' }
+        }
     }
 
     Say 'Apache 2.4 settings (C:\zpanel\configs\apache\httpd.conf)'
