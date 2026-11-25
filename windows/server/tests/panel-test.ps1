@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health)'
 foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -565,6 +565,26 @@ if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors
     throw "System Log Viewer does not list the Windows logs (a site's access log, Apache's or PHP's). Listed: '$names'. The page shows: $shown. Inside Apache: $inside"
 }
 Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
+} catch { $late += "$_" }
+
+# --- Site Health: the daemon (SYSTEM) checks each site and reads its logs; the client's page shows the site answering
+try {
+$f = 'C:\zpanel\data\sentora\sitehealth'
+# (its check runs with the daemon's hourly jobs: the next run does them)
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='0' WHERE so_name_vc='daemon_hourrun';" | Out-Null
+Remove-Item Env:\MYSQL_PWD
+for ($i = 0; $i -lt 40 -and -not (Get-ChildItem $f -Filter 'acct-*.json' -ErrorAction SilentlyContinue); $i++) {
+    if ($i % 10 -eq 0) { $p = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) } }
+    Start-Sleep 3
+}
+$c = (Page '/?module=site_health' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Site Health page does not load' }
+if ($c -notmatch [regex]::Escape($dom) -or $c -notmatch 'Answers') {
+    $dl = (Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String -Pattern 'Site Health' | Select-Object -Last 4) -join ' | '
+    throw "Site Health: $dom is not shown as checked (files: $((Get-ChildItem $f -ErrorAction SilentlyContinue).Name -join ', '); daemon: $dl)"
+}
+Ok "Site Health: $dom was checked by the daemon and its page shows it answering"
 } catch { $late += "$_" }
 
 if ($late) { throw ($late -join ' || ') }

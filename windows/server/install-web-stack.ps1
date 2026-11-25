@@ -2161,6 +2161,7 @@ switch ($Do) {
         # (sentora-update.ps1's progress and answers, which the Panel Update page reads; Server Monitor's figures)
         Grant-Apache (Join-Path $state 'update') 'RX'
         Grant-Apache (Join-Path $state 'monitor') 'RX'
+        Grant-Apache (Join-Path $state 'sitehealth') 'RX'
         # the websites' certificates and keys (the panel's Sencrypt page writes them, Apache reads them; never the
         # accounts' own PHP), and Let's Encrypt's check files, which every site serves (plain files only)
         $certs = Join-Path $state 'certs'

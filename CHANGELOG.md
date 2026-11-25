@@ -655,6 +655,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: Widget Admin (uploaded dashboard widgets are checked and installed by the daemon).
 - System Log Viewer: its log folders come from the log_dir setting (on Linux the same as before), and it works on Windows (the panel's, sites', Apache, PHP, FTP, mail, DNS and MySQL logs).
 - Panel on Windows: Server Monitor (live CPU, memory, disks, network, processes and services from a small Windows service, SentoraStats) and its alerts for full disks and stopped services.
+- Panel on Windows: Site Health (each site's hourly check, traffic and errors from its logs).
 - Release 2027.97: on Windows, Panel Update from the panel (Check now, Update now, its steps on the page), Apache Config, Protected Directories, Server Monitor, System Log Viewer, FTP Config, Module Admin and Widget Admin; "Site not found" switched off works there too.
 - Release 2027.96: on Windows, mail aliases and distribution lists, Backup Manager (Back up now, download, delete), phpMyAdmin, Webmail, Services and Domain Logs; the VM test's Log Forwarder check fixed.
 - Release 2027.95: the panel on Windows grows: HTTPS for websites (Sencrypt: self-signed, your own certificate, Let's Encrypt), DNS Manager on CoreDNS, FTP Accounts on SFTPGo, Mailboxes on Stalwart and Cron Manager's tasks run as each client's own account; release pages cut a too-long README at a heading.
