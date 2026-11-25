@@ -455,18 +455,6 @@ if (-not (Test-Path $wf)) {
 }
 Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
 
-# --- System Log Viewer: the Windows logs from the log_dir setting (the panel's, the sites', Apache's), none of Linux's
-$c = (Page '/?module=system_logviewer' $null).Content
-if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the System Log Viewer page does not load' }
-if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') {
-    $names = ([regex]::Matches($c, 'lv-item-name">([^<]+)<') | ForEach-Object { $_.Groups[1].Value }) -join ', '
-    $why = "$Root\panel\ztest-$([guid]::NewGuid().ToString('N')).php"
-    [IO.File]::WriteAllText($why, '<?php foreach (array("C:/zpanel/logs", "C:/zpanel/logs/apache", "C:/zpanel/logs/domains") as $d) { echo $d, " dir=", (is_dir($d) ? 1 : 0), " read=", (is_readable($d) ? 1 : 0), " link=", (is_link($d) ? 1 : 0), " scan=", implode("|", (array) @scandir($d)), " glob=", implode("|", (array) glob($d . "/*")), "; "; }')
-    try { $inside = (Invoke-WebRequest "http://127.0.0.1/$(Split-Path $why -Leaf)" -UseBasicParsing -TimeoutSec 30).Content } catch { $inside = "$_" } finally { Remove-Item $why -Force }
-    throw "System Log Viewer does not list the Windows logs (a site's access log, Apache's or PHP's). Listed: '$names'. Inside Apache: $inside"
-}
-Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
-
 # --- Server Monitor: the live figures come from the service SentoraStats (SYSTEM) through the page's own endpoint
 if ((Get-Service SentoraStats -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'the service SentoraStats does not run' }
 $c = (Page '/?module=server_monitor' $null).Content
@@ -533,6 +521,20 @@ SaveVhost ''
 $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
 & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='' WHERE so_name_vc='global_vhcustom'; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed';" | Out-Null
 Remove-Item Env:\MYSQL_PWD
+
+# --- System Log Viewer: the Windows logs from the log_dir setting (the panel's, the sites', Apache's), none of Linux's
+$c = (Page '/?module=system_logviewer' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the System Log Viewer page does not load' }
+if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') {
+    $names = ([regex]::Matches($c, 'lv-item-name">([^<]+)<') | ForEach-Object { $_.Groups[1].Value }) -join ', '
+    $why = "$Root\panel\ztest-$([guid]::NewGuid().ToString('N')).php"
+    [IO.File]::WriteAllText($why, '<?php foreach (array("C:/zpanel/logs", "C:/zpanel/logs/apache", "C:/zpanel/logs/domains") as $d) { echo $d, " dir=", (is_dir($d) ? 1 : 0), " read=", (is_readable($d) ? 1 : 0), " link=", (is_link($d) ? 1 : 0), " scan=", implode("|", (array) @scandir($d)), " glob=", implode("|", (array) glob($d . "/*")), "; "; }')
+    try { $inside = (Invoke-WebRequest "http://127.0.0.1/$(Split-Path $why -Leaf)" -UseBasicParsing -TimeoutSec 30).Content } catch { $inside = "$_" } finally { Remove-Item $why -Force }
+    $shown = 'no module part'
+    if ($c -match '(?s)id="zmodule_header_[^"]*"(.*)$') { $tx = ($Matches[1] -replace '(?s)<script.*?</script>', ' ' -replace '<[^>]+>', ' ' -replace '\s+', ' ').Trim(); $shown = $tx.Substring(0, [Math]::Min(900, $tx.Length)) }
+    throw "System Log Viewer does not list the Windows logs (a site's access log, Apache's or PHP's). Listed: '$names'. The page shows: $shown. Inside Apache: $inside"
+}
+Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
 
 # --- Mailboxes: a mailbox made on the Mailboxes page becomes a Stalwart account at the daemon run (sys_winmail, through
 # Stalwart's API as SYSTEM) and logs in over IMAPS with its password; a new password works, the old one no longer;
