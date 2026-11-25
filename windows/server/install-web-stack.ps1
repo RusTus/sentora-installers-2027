@@ -319,6 +319,7 @@ if ($Uninstall) {
     Unregister-ScheduledTask -TaskName 'Sentora update check' -Confirm:$false -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName 'Sentora update' -Confirm:$false -ErrorAction SilentlyContinue
     Stop-AndRemoveService 'SentoraZsudo'
+    Stop-AndRemoveService 'SentoraStats'
     Get-Service -Name 'SentoraPHP-*' -ErrorAction SilentlyContinue | ForEach-Object { Stop-AndRemoveService $_.Name }
     Get-LocalGroup -Name 'SentoraPHP' -ErrorAction SilentlyContinue | Remove-LocalGroup
     Unregister-ScheduledTask -TaskName 'Sentora daemon' -Confirm:$false -ErrorAction SilentlyContinue
@@ -2002,6 +2003,8 @@ switch ($Do) {
             # FTP: SFTPGo's driver; the daemon (SYSTEM) reads SFTPGo's administrator from its settings file
             $settings['ftp_php'] = 'sftpgo.php'; $settings['ftp_api'] = 'http://127.0.0.1:8080/api/v2'
             $settings['ftp_env'] = "$fwdRoot/configs/sftpgo/env.d/sftpgo.env"; $settings['ftp_passive_ports'] = '50000-50100'
+            # the services' names (Server Monitor, its alerts)
+            $settings['db_service'] = $MySQLService; $settings['mail_service'] = $MailService; $settings['clamd_service'] = $ClamService; $settings['freshclam_service'] = $FreshService
             # mail: Stalwart's API on this server, and its administrator (read by the daemon only)
             $settings['mail_api'] = 'https://127.0.0.1:8443'; $settings['mail_admin'] = "$fwdRoot/configs/stalwart/admin.txt"
             $q = ''
@@ -2071,6 +2074,19 @@ switch ($Do) {
         Invoke-Native $nssm @('set', $zsvc, 'Start', 'SERVICE_AUTO_START') | Out-Null
         Start-Service $zsvc
         Ok "service $zsvc (the panel's root jobs, from a fixed list)"
+        # Server Monitor's figures (CPU, memory, disks, network, processes, services) every 3 seconds, as SYSTEM, in the
+        # state folder's monitor\ (Apache's account reads them; the panel's PHP gets no access to Windows' counters)
+        $ssvc = 'SentoraStats'
+        Stop-AndRemoveService $ssvc
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        Invoke-Native $nssm @('install', $ssvc, $psExe) | Out-Null
+        Invoke-Native $nssm @('set', $ssvc, 'AppParameters', ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + (Join-Path $panelDir 'bin\sentora-winstats.ps1') + '" -Out "' + (Join-Path $stateDir 'monitor\winstats.json') + '"')) | Out-Null
+        Invoke-Native $nssm @('set', $ssvc, 'DisplayName', 'Sentora server figures (Server Monitor)') | Out-Null
+        Invoke-Native $nssm @('set', $ssvc, 'Description', 'Writes the figures Server Monitor shows every 3 seconds (bin\sentora-winstats.ps1)') | Out-Null
+        Invoke-Native $nssm @('set', $ssvc, 'AppStderr', (Join-Path $panelLogs 'winstats-service.log')) | Out-Null
+        Invoke-Native $nssm @('set', $ssvc, 'Start', 'SERVICE_AUTO_START') | Out-Null
+        Start-Service $ssvc
+        Ok "service $ssvc (Server Monitor's figures)"
 
         # the daemon every 5 minutes, as the Linux cron job (SYSTEM)
         $daemonAction = New-ScheduledTaskAction -Execute $phpExe -Argument ('-c "' + (Join-Path $PhpDir 'php.ini') + '" -q "' + (Join-Path $panelDir 'bin\daemon.php') + '"') -WorkingDirectory $panelDir
@@ -2142,8 +2158,9 @@ switch ($Do) {
             if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
             Protect-Folder $p
         }
-        # (sentora-update.ps1's progress and answers, which the Panel Update page reads)
+        # (sentora-update.ps1's progress and answers, which the Panel Update page reads; Server Monitor's figures)
         Grant-Apache (Join-Path $state 'update') 'RX'
+        Grant-Apache (Join-Path $state 'monitor') 'RX'
         # the websites' certificates and keys (the panel's Sencrypt page writes them, Apache reads them; never the
         # accounts' own PHP), and Let's Encrypt's check files, which every site serves (plain files only)
         $certs = Join-Path $state 'certs'

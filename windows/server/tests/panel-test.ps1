@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor)'
 foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -460,6 +460,24 @@ $c = (Page '/?module=system_logviewer' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the System Log Viewer page does not load' }
 if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') { throw 'System Log Viewer does not list the Windows logs (a site''s access log, Apache''s or PHP''s)' }
 Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
+
+# --- Server Monitor: the live figures come from the service SentoraStats (SYSTEM) through the page's own endpoint
+if ((Get-Service SentoraStats -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'the service SentoraStats does not run' }
+$c = (Page '/?module=server_monitor' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Server Monitor page does not load' }
+if ($c -match 'id="sm-hard"') { throw 'Server Monitor shows the Linux Hardening card on Windows' }
+$j = $null
+for ($i = 0; $i -lt 20 -and -not $j; $i++) {
+    try { $j = (Page '/modules/server_monitor/code/stats.php?info=1' $null).Content | ConvertFrom-Json } catch { Start-Sleep 3 }
+}
+if (-not $j) { throw "Server Monitor: no figures (winstats.json: $(Test-Path C:\var\lib\sentora\monitor\winstats.json); its log: $(Get-Content "$Root\logs\panel\winstats-service.log" -Raw -ErrorAction SilentlyContinue))" }
+if (@($j.cpu.cpu).Count -ne 8 -or [int64]$j.mem.total -le 0 -or -not (@($j.fs) | Where-Object { $_.mount -eq 'C:' -and [int64]$_.total -gt 0 }) -or @($j.procs).Count -lt 10 -or $j.services.Apache -ne $true -or $j.services.MySQL -ne $true -or -not $j.info.os) {
+    throw "Server Monitor: the figures are not complete: $(($j | ConvertTo-Json -Depth 3 -Compress).Substring(0, 600))"
+}
+Ok "Server Monitor: live figures from SentoraStats (CPU, $([math]::Round($j.mem.total / 1GB, 1)) GB memory, disk C:, $(@($j.procs).Count) processes; Apache and MySQL running; $($j.info.os))"
+# Apache's account may read the figures, never write them
+$acl = (icacls C:\zpanel\data\sentora\monitor) -join ' '
+if ($acl -match 'Apache2:\(OI\)\(CI\)\((M|F|W)') { throw "the monitor folder lets Apache write: $acl" }
 
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
 $c = (Page '/?module=ftp_admin' $null).Content
