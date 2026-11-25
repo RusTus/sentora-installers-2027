@@ -353,7 +353,7 @@ if ($WithMail -and -not $PSBoundParameters.ContainsKey('WithClamAV')) { $WithCla
 if (-not $WithMail) { $WithClamAV = [switch]$false }
 $askedClamAV = [bool]$WithClamAV
 if (-not $PSBoundParameters.ContainsKey('WithDns'))           { $WithDns = [switch]($Edition -ne 'stack' -and (Ask 'Install DNS (CoreDNS: answers for your own domains, from zone files like BIND''s)?')) }
-if (-not $PSBoundParameters.ContainsKey('WithPanel'))         { $WithPanel = [switch]($Edition -ne 'stack' -and (Ask 'Install the Sentora panel in C:\zpanel\panel (a preview on Windows: clients, packages, MySQL; more parts follow)?')) }
+if (-not $PSBoundParameters.ContainsKey('WithPanel'))         { $WithPanel = [switch]($Edition -ne 'stack' -and (Ask 'Install the Sentora panel in C:\zpanel\panel (clients, websites with HTTPS, DNS, FTP, mail, cron, backups)?')) }
 if ($WithMail -and -not $MailDomain) {
     # (a domain-joined server: its DNS domain; else asked, or this computer's name under .local)
     $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
@@ -2566,7 +2566,7 @@ Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
     if ($clamSkipped) { Write-Host "  (Not yet: ClamAV's virus check: its list did not download. Allow database.clamav.net, then run the installer again.)" -ForegroundColor Yellow }
     if ($WithPanel) {
         Write-Host "  Sentora panel:   http://$($ServerName):$HttpPort/  (user zadmin, password in $(Join-Path $Cfg 'panel\zadmin-password.txt'))"
-        Write-Host "                   a preview on Windows: clients, packages, MySQL; root jobs: service SentoraZsudo; daemon: task 'Sentora daemon'"
+        Write-Host "                   on Windows: clients, websites with HTTPS, DNS, FTP, mail, cron, backups, MySQL and phpMyAdmin; root jobs: service SentoraZsudo; daemon: task 'Sentora daemon'"
     } else { Write-Host "  Web root:        $(Join-Path $Root 'panel')   (put your app's index.php here)" }
     Write-Host "  Sites:           $(Join-Path $Root 'hostdata')"
     Write-Host "  Logs:            $Logs  (apache\access.log, apache\error.log, php\php_errors.log, mysql\mysql_error.log)"
