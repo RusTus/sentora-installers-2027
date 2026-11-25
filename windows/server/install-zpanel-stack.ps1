@@ -2031,6 +2031,28 @@ switch ($Do) {
         } else { Ok 'zadmin keeps its password' }
         Protect-Folder $panelCfg
 
+        # phpMyAdmin (shipped in the panel's etc\apps\phpmyadmin): its settings as on Linux (preconf/phpmyadmin), the
+        # database on 127.0.0.1, its compiled templates and login log where the websites can not write, no setup folder;
+        # its cookie secret made once (kept in configs\panel)
+        $pma = Join-Path $panelDir 'etc\apps\phpmyadmin'
+        if (Test-Path $pma) {
+            $pmaSecretFile = Join-Path $panelCfg 'phpmyadmin-secret.txt'
+            if (-not (Test-Path $pmaSecretFile)) { Write-Utf8NoBom $pmaSecretFile (New-Password + New-Password) }
+            $pmaSecret = (Get-Content $pmaSecretFile -Raw).Trim()
+            $pmaTmp = Join-Path $Root 'data\sentora\tmp\phpmyadmin'
+            if (-not (Test-Path $pmaTmp)) { New-Item -ItemType Directory -Path $pmaTmp | Out-Null }
+            Write-Utf8NoBom (Join-Path $pma 'config.inc.php') ("<?php`r`n// Made by install-zpanel-stack.ps1 (as preconf/phpmyadmin on Linux); run it again to rewrite this file.`r`n" +
+                "`$cfg['blowfish_secret'] = '$pmaSecret';`r`n`$i = 1;`r`n`$cfg['Servers'][`$i]['auth_type'] = 'cookie';`r`n" +
+                "`$cfg['Servers'][`$i]['host'] = '127.0.0.1';`r`n`$cfg['Servers'][`$i]['compress'] = false;`r`n`$cfg['Servers'][`$i]['AllowNoPassword'] = false;`r`n" +
+                "`$cfg['Servers'][`$i]['hide_db'] = '^(information_schema|sys|performance_schema)`$';`r`n" +
+                "`$cfg['AuthLog'] = '" + (& $Fwd (Join-Path $Logs 'panel\phpmyadmin-auth.log')) + "';`r`n" +
+                "`$cfg['TempDir'] = '" + (& $Fwd $pmaTmp) + "/';`r`n`$cfg['UploadDir'] = '';`r`n`$cfg['SaveDir'] = '';`r`n" +
+                "`$cfg['ShowCreateDb'] = false;`r`n`$cfg['ShowChgPassword'] = false;`r`n`$cfg['AllowUserDropDatabase'] = false;`r`n" +
+                "`$cfg['PmaNoRelation_DisableWarning'] = true;`r`n`$cfg['ShowServerInfo'] = false;`r`n`$cfg['VersionCheck'] = false;`r`n`$cfg['SendErrorReports'] = 'never';`r`n")
+            Remove-Item (Join-Path $pma 'setup') -Recurse -Force -ErrorAction SilentlyContinue
+            Ok 'phpMyAdmin: its settings (cookie login, 127.0.0.1, temporary files outside the websites), no setup folder'
+        }
+
         # the root jobs the panel may ask for (bin\zsudo.php: a fixed list), done by the service SentoraZsudo as SYSTEM
         $nssm = Join-Path $Bin 'nssm\nssm.exe'
         if (-not (Test-Path $nssm)) { Expand-Into (Get-Verified $Pkg.Nssm) $Pkg.Nssm.Top (Join-Path $Bin 'nssm') }

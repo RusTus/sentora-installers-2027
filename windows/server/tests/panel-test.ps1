@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin)'
 foreach ($m in @('apache_admin', 'forwarders', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -306,6 +306,11 @@ Ok 'Webmail: the page opens Roundcube at /webmail'
 $p = Page '/?module=user_logviewer' $null
 if ($p.Content -notmatch [regex]::Escape($dom)) { throw "the Domain Logs page does not list $dom" }
 Ok "Domain Logs: $dom is listed"
+$pm = Page '/etc/apps/phpmyadmin/' $null
+if ($pm.Content -notmatch 'pma_username') { throw "phpMyAdmin does not show its login: $(($pm.Content -replace '<[^>]+>', ' ' -replace '\s+', ' ').Substring(0, [Math]::Min(300, $pm.Content.Length)))" }
+$ErrorActionPreference = 'Continue'; $setup = (& curl.exe -s -o NUL -w '%{http_code}' 'http://127.0.0.1/etc/apps/phpmyadmin/setup/' 2>&1) -join ''; $ErrorActionPreference = 'Stop'
+if ($setup -eq '200') { throw "phpMyAdmin's setup folder is reachable" }
+Ok "phpMyAdmin: its login page shows (cookie login), its setup folder is gone ($setup)"
 
 # --- Cron: a task made in Cron Manager runs at its minute (the task 'Sentora cron', bin\sentora-cron.php) as the account's
 # own Windows account through its own PHP, never as SYSTEM; its output is the log Cron Manager shows
