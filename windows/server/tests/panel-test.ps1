@@ -35,16 +35,16 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update)'
-foreach ($m in @('apache_admin', 'forwarders', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config)'
+foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(apache_admin|forwarders)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(php_versions|forwarders)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
@@ -427,6 +427,49 @@ $c = ''
 for ($i = 0; $i -lt 40 -and $c -ne '200'; $i++) { Start-Sleep 3; $c = Code "nothere$n.example.net" }
 if ((Site "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'panel_fallback on again: a name no site claims does not open the panel' }
 Ok 'on again: names no site claims open the panel'
+
+# --- Apache Config: a domain's own lines (saved on its page) and the lines for every website go into the Windows sites;
+# a line Apache refuses switches off only that domain's lines (the page says so), the rest stays live
+$p = Page '/?module=apache_admin' $null
+if ($p.Content -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Apache Config page does not load' }
+if ($p.Content -match '/etc/hosts|PHP processes per account') { throw 'the Apache Config page shows Linux-only settings on Windows' }
+function Loc($h, $path) { $ErrorActionPreference = 'Continue'; (& curl.exe -s -o NUL -w '%{http_code} %{redirect_url}' --max-time 20 -H "Host: $h" "http://127.0.0.1$path" 2>&1) -join '' }
+function SaveVhost($custom) {
+    $p = Page "/?module=apache_admin&show=Vhost&id=$vid" $null
+    if ($p.Content -match 'Allow FollowSymLinks|SSL settings') { throw 'the domain page shows Linux-only settings on Windows' }
+    $null = Page "/?module=apache_admin&show=Vhost&id=$vid&action=SaveVhost" @{ csfr_token = (Token $p.Content); vh_id_pk = $vid; vh_enabled_in = '1'; vh_custom_tx = $custom }
+    $p = Page '/?module=sentoraconfig' $null
+    $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+}
+SaveVhost 'Redirect 302 /sentora-own https://example.com/own'
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='Redirect 302 /sentora-every https://example.com/every' WHERE so_name_vc='global_vhcustom';" | Out-Null
+Remove-Item Env:\MYSQL_PWD
+$c = ''
+for ($i = 0; $i -lt 40 -and $c -notmatch '^302 https://example.com/own'; $i++) { Start-Sleep 3; $c = Loc $dom '/sentora-own' }
+if ($c -notmatch '^302 https://example.com/own') { throw "Apache Config: the domain's own lines are not in its site ($c)" }
+Ok "Apache Config: $dom's own lines (saved on its page) are in its site"
+$c = Loc $dom '/sentora-every'
+if ($c -notmatch '^302 https://example.com/every') { throw "Apache Config: the lines for every website are not in $dom's site ($c)" }
+Ok 'Apache Config: the lines for every website are in each site'
+SaveVhost 'ThisIsNotAnApacheDirective on'
+$off = ''
+for ($i = 0; $i -lt 40 -and $off -eq ''; $i++) {
+    Start-Sleep 3
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $off = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='apache_custom_problems'") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    if ($off -notmatch "vh:$($vid):custom") { $off = '' }
+}
+if ($off -eq '') { throw "Apache Config: a line Apache refuses was not switched off: $(Get-Content "$Root\logs\panel\daemon-panel-run.log" -Raw -ErrorAction SilentlyContinue)" }
+if ((Site $dom '/') -notmatch 'Your Sentora account is active') { throw "Apache Config: $dom is no longer served after a refused line" }
+if ((Loc $dom '/sentora-every') -notmatch '^302 ') { throw 'Apache Config: the lines for every website went away with the refused line' }
+if ((Page '/?module=apache_admin' $null).Content -notmatch 'Apache did not take some settings') { throw 'Apache Config: the page does not say a line was switched off' }
+Ok 'Apache Config: a line Apache refuses is switched off (the page says so); the site and everything else stay live'
+SaveVhost ''
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='' WHERE so_name_vc='global_vhcustom'; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed';" | Out-Null
+Remove-Item Env:\MYSQL_PWD
 
 # --- Mailboxes: a mailbox made on the Mailboxes page becomes a Stalwart account at the daemon run (sys_winmail, through
 # Stalwart's API as SYSTEM) and logs in over IMAPS with its password; a new password works, the old one no longer;
