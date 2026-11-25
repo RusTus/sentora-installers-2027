@@ -299,6 +299,32 @@ if (Get-Service SFTPGo -ErrorAction SilentlyContinue) {
     Ok 'FTP: deleted on the page, it can no longer log in; its files stay'
 }
 
+# --- Cron: a task made in Cron Manager runs at its minute (the task 'Sentora cron', bin\sentora-cron.php) as the account's
+# own Windows account through its own PHP, never as SYSTEM; its output is the log Cron Manager shows
+if (-not (Get-ScheduledTask -TaskName 'Sentora cron' -ErrorAction SilentlyContinue)) { throw "the task 'Sentora cron' is not there" }
+Set-Content "$($folder.FullName)\cronjob.php" '<?php echo "cron ran as ", trim((string) shell_exec("whoami")), "\n";' -Encoding ASCII
+$p = Page '/?module=cron' $null
+$timing = if ($p.Content -match 'value="\* \* \* \* \*"') { '* * * * *' } else { '*/5 * * * *' }
+$p = Page '/?module=cron&action=CreateCron' @{ csfr_token = (Token $p.Content); inScript = "$($folder.Name)/cronjob.php"; inTiming = $timing; inDescription = 'Windows test' }
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$cid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT ct_id_pk FROM sentora_core.x_cronjobs WHERE ct_fullpath_vc LIKE '%/cronjob.php' AND ct_deleted_ts IS NULL ORDER BY ct_id_pk DESC LIMIT 1") -join ''
+Remove-Item Env:\MYSQL_PWD
+if ($cid -notmatch '^\d+$') {
+    $said = ([regex]::Matches($p.Content, '(?s)class="[^"]*(alert|msg)[^"]*"[^>]*>(.{0,300}?)</') | ForEach-Object { ($_.Groups[2].Value -replace '<[^>]+>', ' ').Trim() }) -join ' / '
+    throw "Cron Manager did not save the task ($said)"
+}
+$log = "$Root\hostdata\zadmin\tmp\cron-$cid.log"
+$wait = if ($timing -eq '* * * * *') { 150 } else { 420 }
+for ($i = 0; $i -lt $wait / 5 -and -not ((Test-Path $log) -and ((Get-Content $log -Raw) -match 'Finished')); $i++) { Start-Sleep 5 }
+if (-not (Test-Path $log)) { throw "the cron task $cid did not run within $wait seconds (task 'Sentora cron': $((Get-ScheduledTaskInfo -TaskName 'Sentora cron').LastTaskResult))" }
+$c = Get-Content $log -Raw
+if ($c -notmatch 'cron ran as nt service\\sentoraphp-zadmin') { throw "the cron task did not run as the account's own PHP: $c" }
+Ok "Cron: a task made in Cron Manager ran at its minute as nt service\sentoraphp-zadmin, its log in tmp\cron-$cid.log"
+$p = Page '/?module=cron' $null
+if ($p.Content -notmatch 'cron ran as|Finished|ran') { Write-Host '   (note: the Cron Manager page does not show the run yet)' }
+$p = Page '/?module=cron&action=DeleteCron' @{ csfr_token = (Token $p.Content); inJob = $cid }
+Remove-Item "$($folder.FullName)\cronjob.php" -Force
+
 # --- Mailboxes: a mailbox made on the Mailboxes page becomes a Stalwart account at the daemon run (sys_winmail, through
 # Stalwart's API as SYSTEM) and logs in over IMAPS with its password; a new password works, the old one no longer;
 # switched off it can not log in; deleted on the page, it goes
@@ -351,29 +377,3 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     if ($left -notmatch 'alice@example\.test') { throw "Mail: a mailbox made with mailuser.ps1 (alice@example.test) went: $left" }
     Ok 'Mail: deleted on the page, it goes from Stalwart; mailboxes made with mailuser.ps1 stay'
 }
-
-# --- Cron: a task made in Cron Manager runs at its minute (the task 'Sentora cron', bin\sentora-cron.php) as the account's
-# own Windows account through its own PHP, never as SYSTEM; its output is the log Cron Manager shows
-if (-not (Get-ScheduledTask -TaskName 'Sentora cron' -ErrorAction SilentlyContinue)) { throw "the task 'Sentora cron' is not there" }
-Set-Content "$($folder.FullName)\cronjob.php" '<?php echo "cron ran as ", trim((string) shell_exec("whoami")), "\n";' -Encoding ASCII
-$p = Page '/?module=cron' $null
-$timing = if ($p.Content -match 'value="\* \* \* \* \*"') { '* * * * *' } else { '*/5 * * * *' }
-$p = Page '/?module=cron&action=CreateCron' @{ csfr_token = (Token $p.Content); inScript = "$($folder.Name)/cronjob.php"; inTiming = $timing; inDescription = 'Windows test' }
-$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
-$cid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT ct_id_pk FROM sentora_core.x_cronjobs WHERE ct_fullpath_vc LIKE '%/cronjob.php' AND ct_deleted_ts IS NULL ORDER BY ct_id_pk DESC LIMIT 1") -join ''
-Remove-Item Env:\MYSQL_PWD
-if ($cid -notmatch '^\d+$') {
-    $said = ([regex]::Matches($p.Content, '(?s)class="[^"]*(alert|msg)[^"]*"[^>]*>(.{0,300}?)</') | ForEach-Object { ($_.Groups[2].Value -replace '<[^>]+>', ' ').Trim() }) -join ' / '
-    throw "Cron Manager did not save the task ($said)"
-}
-$log = "$Root\hostdata\zadmin\tmp\cron-$cid.log"
-$wait = if ($timing -eq '* * * * *') { 150 } else { 420 }
-for ($i = 0; $i -lt $wait / 5 -and -not ((Test-Path $log) -and ((Get-Content $log -Raw) -match 'Finished')); $i++) { Start-Sleep 5 }
-if (-not (Test-Path $log)) { throw "the cron task $cid did not run within $wait seconds (task 'Sentora cron': $((Get-ScheduledTaskInfo -TaskName 'Sentora cron').LastTaskResult))" }
-$c = Get-Content $log -Raw
-if ($c -notmatch 'cron ran as nt service\\sentoraphp-zadmin') { throw "the cron task did not run as the account's own PHP: $c" }
-Ok "Cron: a task made in Cron Manager ran at its minute as nt service\sentoraphp-zadmin, its log in tmp\cron-$cid.log"
-$p = Page '/?module=cron' $null
-if ($p.Content -notmatch 'cron ran as|Finished|ran') { Write-Host '   (note: the Cron Manager page does not show the run yet)' }
-$p = Page '/?module=cron&action=DeleteCron' @{ csfr_token = (Token $p.Content); inJob = $cid }
-Remove-Item "$($folder.FullName)\cronjob.php" -Force
