@@ -454,6 +454,11 @@ if (-not (Test-Path $wf)) {
     throw "Widget Admin: the widget was not installed. Results: $(Get-Content C:\var\lib\sentora\widget-results.json -Raw -ErrorAction SilentlyContinue) Queue: $((Get-ChildItem C:\var\lib\sentora\tmp -Filter 'widget-*' -ErrorAction SilentlyContinue).Name -join ', ') Daemon: $dl"
 }
 Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
+# (the upload went with a copy of the session's cookie, and the panel renews the session on such a request: log in again)
+$s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$p = Page '/' $null
+$p = Page '/' @{ inUsername = 'zadmin'; inPassword = $pw; inSessionSecurity = 'on'; csfr_token = (Token $p.Content); sublogin2 = 'LogIn' }
+if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in again after the widget upload' }
 
 $late = @()
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
