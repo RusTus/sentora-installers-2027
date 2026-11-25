@@ -35,16 +35,16 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt)'
-foreach ($m in @('apache_admin', 'dns_manager', 'mailboxes', 'ftp_management', 'cron', 'backupmgr', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config)'
+foreach ($m in @('apache_admin', 'mailboxes', 'ftp_management', 'cron', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(apache_admin|dns_manager|mailboxes|cron)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(apache_admin|mailboxes|cron)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
@@ -225,3 +225,42 @@ for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Site $dom '/
 if (-not $ok) { throw "after deleting its certificate, $dom is not back on plain HTTP: $(Site $dom '/')" }
 if ((CertSubject $dom) -match "CN=$([regex]::Escape($dom))(,|$)") { throw "after deleting its certificate, $dom still shows it" }
 Ok "a certificate deleted on the Sencrypt page: its files go, $dom is back on plain HTTP"
+
+# --- DNS: the default records made on the DNS Manager page are answered by CoreDNS (the daemon writes db.DOMAIN, marked as
+# the panel's; CoreDNS reads it by itself); a zone the administrator made with dnszone.ps1 is never touched
+$zones = "$Root\configs\dns\zones"
+$adminZones = @{}
+Get-ChildItem $zones -Filter 'db.*' | ForEach-Object { $adminZones[$_.Name] = (Get-FileHash $_.FullName).Hash }
+$my = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$vid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT vh_id_pk FROM sentora_core.x_vhosts WHERE vh_name_vc='$dom' AND vh_deleted_ts IS NULL") -join ''
+$sip = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='server_ip'") -join ''
+Remove-Item Env:\MYSQL_PWD
+if ($vid -notmatch '^\d+$') { throw "no domain id for $dom ($vid)" }
+$p = Page '/?module=dns_manager' $null
+$p = Page '/?module=dns_manager&action=CreateDefaultRecords' @{ csfr_token = (Token $p.Content); inDomain = $vid; inUserID = '1' }
+$p = Page '/?module=sentoraconfig' $null
+$p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$a = $null
+for ($i = 0; $i -lt 40 -and -not $a; $i++) {
+    Start-Sleep 3
+    try { $a = @(Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction Stop | Where-Object Type -eq 'A') } catch { $a = $null }
+}
+if (-not $a) { throw "CoreDNS does not answer for $dom (zone file: $(Test-Path "$zones\db.$dom"); daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -Tail 6 -ErrorAction SilentlyContinue) -join ' / '))" }
+if ($sip -and $a[0].IPAddress -ne $sip) { throw "$dom answers $($a[0].IPAddress), not the server's address $sip" }
+Ok "DNS: the default records made on the DNS Manager page are answered by CoreDNS ($dom A $($a[0].IPAddress))"
+$mx = @(Resolve-DnsName $dom -Server 127.0.0.1 -Type MX -DnsOnly -ErrorAction SilentlyContinue | Where-Object Type -eq 'MX')
+if (-not $mx) { throw "DNS: $dom has no MX record" }
+Ok "DNS: and its MX ($($mx[0].NameExchange))"
+if ((Get-Content "$zones\db.$dom" -TotalCount 1) -notmatch '^; Made by the Sentora panel') { throw "the zone file of $dom is not marked as the panel's" }
+foreach ($k in $adminZones.Keys) {
+    if (-not (Test-Path "$zones\$k") -or (Get-FileHash "$zones\$k").Hash -ne $adminZones[$k]) { throw "the panel changed or removed a zone it did not make: $k" }
+}
+Ok "DNS: the zones made with dnszone.ps1 are left as they are ($($adminZones.Keys -join ', '))"
+$before = (Get-Process coredns -ErrorAction Stop).StartTime
+$p = Page '/?module=dns_admin' $null
+$p = Page '/?module=dns_admin&action=UpdateService' @{ csfr_token = (Token $p.Content); inReloadService = '1' }
+$after = (Get-Process coredns -ErrorAction SilentlyContinue).StartTime
+if (-not $after -or $after -le $before) { throw "DNS Config's reload button did not restart CoreDNS (before $before, after $after)" }
+if (-not (Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction SilentlyContinue)) { throw "after the restart CoreDNS does not answer for $dom" }
+Ok 'DNS Config: its reload button restarts CoreDNS through SentoraZsudo, and the zones are answered again'

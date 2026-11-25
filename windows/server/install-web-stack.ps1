@@ -1982,6 +1982,9 @@ switch ($Do) {
                 mysqldump_exe = (& $Fwd (Join-Path $MySQLDir 'bin\mysqldump.exe')); sentora_domain = $ServerName; root_drive = $drive.Replace('\', '/')
                 bind_service = $DnsService; zone_dir = "$fwdRoot/configs/dns/zones/"; ftp_service = $FtpService
             }
+            # the server's address, for the DNS records the panel makes (the one on the network with the default gateway)
+            $ipNow = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress
+            if ($ipNow) { $settings['server_ip'] = $ipNow }
             $q = ''
             foreach ($k in $settings.Keys) { $q += "UPDATE sentora_core.x_settings SET so_value_tx = '" + "$($settings[$k])".Replace('\', '\\').Replace("'", "''") + "' WHERE so_name_vc = '$k';" }
             $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', $q)
