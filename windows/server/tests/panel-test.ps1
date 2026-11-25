@@ -390,8 +390,13 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     }
     # (a message to an address on this server, the way mail from outside arrives: port 25, no login)
     function MailTo($to, $subject) {
-        $c = New-Object Net.Mail.SmtpClient('127.0.0.1', 25)
-        $c.Send((New-Object Net.Mail.MailMessage('tester@outside.example', $to, $subject, 'Windows panel test')))
+        # (as another mail server would: a real domain in EHLO, STARTTLS when offered; .NET's own sender says only the
+        # computer's name, which Stalwart rightly refuses)
+        $py = "import smtplib,ssl,sys`ns=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=30)`ns.ehlo()`nif s.has_extn('starttls'):`n    s.starttls(context=ssl._create_unverified_context()); s.ehlo()`ns.sendmail('tester@outside.example',[sys.argv[1]],'From: tester@outside.example\r\nTo: '+sys.argv[1]+'\r\nSubject: '+sys.argv[2]+'\r\n\r\nWindows panel test\r\n')`ns.quit()"
+        $ErrorActionPreference = 'Continue'
+        $o = (& python -c $py $to $subject 2>&1) -join ' '
+        $ErrorActionPreference = 'Stop'
+        if ($LASTEXITCODE -ne 0) { throw "sending to $to failed: $o" }
     }
     # (whether a mailbox has a message with this subject, in its inbox or its junk folder)
     function ImapHas($user, $pass, $subject) {
