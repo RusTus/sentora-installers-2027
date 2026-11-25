@@ -335,7 +335,10 @@ Ok "Backup Manager: Back up now made $($zip.Name) with the site's files ($($name
 $ErrorActionPreference = 'Continue'
 $dl = (& curl.exe -s -o NUL -w '%{http_code} %{size_download}' -b ("PHPSESSID=" + ($s.Cookies.GetCookies('http://127.0.0.1/') | Where-Object Name -eq 'PHPSESSID').Value) "http://127.0.0.1/modules/backupmgr/code/downloadbackup.php?id=1&file=$($zip.Name)" 2>&1) -join ''
 $ErrorActionPreference = 'Stop'
-if ($dl -notmatch '^200 [1-9]') { throw "the backup does not download from the page: $dl" }
+if ($dl -notmatch '^200 [1-9]') {
+    $why = @(Get-ChildItem "$Root\logs\apache\error.log", "$Root\logs\apache\panel-error.log", "$Root\logs\php\*.log" -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 4 }) -join ' / '
+    throw "the backup does not download from the page: $dl (logs: $why)"
+}
 Ok "Backup Manager: it downloads from the page ($dl)"
 $bn = [IO.Path]::GetFileNameWithoutExtension($zip.Name)
 $p = Page '/?module=backupmgr' $null
