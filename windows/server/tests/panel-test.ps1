@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories)'
 foreach ($m in @('apache_admin', 'forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -371,6 +371,36 @@ $p = Page '/?module=cron' $null
 if ($p.Content -notmatch 'cron ran as|Finished|ran') { Write-Host '   (note: the Cron Manager page does not show the run yet)' }
 $p = Page '/?module=cron&action=DeleteCron' @{ csfr_token = (Token $p.Content); inJob = $cid }
 Remove-Item "$($folder.FullName)\cronjob.php" -Force
+
+# --- Protected Directories: a folder protected on the page asks for a login (the daemon writes its .htaccess block and
+# password file on Windows); its user gets in with the password; unprotected, it is open again
+$p = Page '/?module=protected_directories' $null
+$p = Page '/?module=protected_directories&action=CreateProtection' @{ csfr_token = (Token $p.Content); inPath = $folder.Name; inMessage = 'Windows test' }
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$pid2 = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT x_htpasswd_file_id FROM sentora_core.x_htpasswd_file WHERE x_htpasswd_file_target LIKE '%/$($folder.Name)' AND x_htpasswd_file_deleted IS NULL ORDER BY x_htpasswd_file_id DESC LIMIT 1") -join ''
+Remove-Item Env:\MYSQL_PWD
+if ($pid2 -notmatch '^\d+$') { throw "Protected Directories did not save the protection of $($folder.Name)" }
+$p = Page "/?module=protected_directories&control=Edit&id=$pid2" $null
+$p = Page "/?module=protected_directories&control=Edit&id=$pid2&action=AddUser" @{ csfr_token = (Token $p.Content); inId = $pid2; inUser = 'guest'; inPassword = "Guest-Pass-$n-Aa9" }
+$p = Page '/?module=sentoraconfig' $null
+$null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+function AuthCode($cred) { $ErrorActionPreference = 'Continue'; $a = @('-s', '-o', 'NUL', '-w', '%{http_code}', '--max-time', '20', '-H', "Host: $dom"); if ($cred) { $a += @('-u', $cred) }; (& curl.exe @a 'http://127.0.0.1/' 2>&1) -join '' }
+$c = ''
+for ($i = 0; $i -lt 40 -and $c -ne '401'; $i++) { Start-Sleep 3; $c = AuthCode $null }
+if ($c -ne '401') { throw "Protected Directories: $dom does not ask for a login ($c; .htaccess: $(Get-Content "$($folder.FullName)\.htaccess" -Raw -ErrorAction SilentlyContinue))" }
+if ((AuthCode "guest:Wrong-Pass-1") -ne '401') { throw 'Protected Directories: a wrong password got in' }
+$c = ''
+for ($i = 0; $i -lt 20 -and $c -ne '200'; $i++) { $c = AuthCode "guest:Guest-Pass-$n-Aa9"; if ($c -ne '200') { Start-Sleep 3 } }
+if ($c -ne '200') { throw "Protected Directories: its user does not get in ($c)" }
+Ok "Protected Directories: $dom asks for a login, a wrong password is refused, its user gets in"
+$p = Page '/?module=protected_directories' $null
+$p = Page '/?module=protected_directories&action=DeleteProtection' @{ csfr_token = (Token $p.Content); inId = $pid2 }
+$p = Page '/?module=sentoraconfig' $null
+$null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$c = ''
+for ($i = 0; $i -lt 40 -and $c -ne '200'; $i++) { Start-Sleep 3; $c = AuthCode $null }
+if ($c -ne '200') { throw "Protected Directories: unprotected, $dom still answers $c" }
+Ok 'Protected Directories: unprotected on the page, the folder is open again'
 
 # --- "Site not found falls back to panel login" (panel_fallback) switched off: names no site claims get Not Found, the
 # server's own addresses still open the panel; on again: they open the panel
