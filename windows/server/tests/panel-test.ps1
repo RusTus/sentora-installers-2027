@@ -372,6 +372,29 @@ if ($p.Content -notmatch 'cron ran as|Finished|ran') { Write-Host '   (note: the
 $p = Page '/?module=cron&action=DeleteCron' @{ csfr_token = (Token $p.Content); inJob = $cid }
 Remove-Item "$($folder.FullName)\cronjob.php" -Force
 
+# --- "Site not found falls back to panel login" (panel_fallback) switched off: names no site claims get Not Found, the
+# server's own addresses still open the panel; on again: they open the panel
+function SetFallback($v) {
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='$v' WHERE so_name_vc='panel_fallback'; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed';" | Out-Null
+    Remove-Item Env:\MYSQL_PWD
+    $p = Page '/?module=sentoraconfig' $null
+    $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+}
+function Code($h) { $ErrorActionPreference = 'Continue'; (& curl.exe -s -o NUL -w '%{http_code}' --max-time 20 -H "Host: $h" 'http://127.0.0.1/' 2>&1) -join '' }
+SetFallback 'false'
+$c = ''
+for ($i = 0; $i -lt 40 -and $c -ne '404'; $i++) { Start-Sleep 3; $c = Code "nothere$n.example.net" }
+if ($c -ne '404') { throw "panel_fallback off: a name no site claims still gets $c (sentora-fallback.conf: $(Get-Content "$Root\configs\apache\sentora-fallback.conf" -Raw -ErrorAction SilentlyContinue))" }
+if ((Site '127.0.0.1' '/') -notmatch 'inUsername') { throw 'panel_fallback off: the server''s own address no longer opens the panel' }
+if ((Site $dom '/') -notmatch 'Your Sentora account is active') { throw "panel_fallback off: $dom is no longer served" }
+Ok 'Site not found falls back to panel login, off: unknown names get 404, 127.0.0.1 still opens the panel, the sites are served'
+SetFallback 'true'
+$c = ''
+for ($i = 0; $i -lt 40 -and $c -ne '200'; $i++) { Start-Sleep 3; $c = Code "nothere$n.example.net" }
+if ((Site "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'panel_fallback on again: a name no site claims does not open the panel' }
+Ok 'on again: names no site claims open the panel'
+
 # --- Mailboxes: a mailbox made on the Mailboxes page becomes a Stalwart account at the daemon run (sys_winmail, through
 # Stalwart's API as SYSTEM) and logs in over IMAPS with its password; a new password works, the old one no longer;
 # switched off it can not log in; deleted on the page, it goes

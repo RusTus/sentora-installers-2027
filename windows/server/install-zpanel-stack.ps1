@@ -803,6 +803,8 @@ Header always set X-Frame-Options "SAMEORIGIN"
 # HTTPS (the port, TLS, the site for names no website claims) and the webmail's site: before the other sites, so the
 # first site on the HTTPS port is the server's own
 IncludeOptional "`${ZROOT}/configs/apache/ssl.conf"
+# "Site not found falls back to panel login" switched off in Sentora Config: the panel's daemon writes the first site here
+IncludeOptional "`${ZROOT}/configs/apache/sentora-fallback.conf"
 IncludeOptional "`${ZROOT}/configs/apache/mail.conf"
 Include "`${ZROOT}/configs/apache/httpd-vhosts.conf"
 # the panel's websites (its domains, subdomains and parked domains), written by the panel's daemon; after yours, so the
