@@ -35,12 +35,12 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin)'
-foreach ($m in @('apache_admin', 'forwarders', 'backupmgr', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager)'
+foreach ($m in @('apache_admin', 'forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
@@ -311,6 +311,31 @@ if ($pm.Content -notmatch 'pma_username') { throw "phpMyAdmin does not show its 
 $ErrorActionPreference = 'Continue'; $setup = (& curl.exe -s -o NUL -w '%{http_code}' 'http://127.0.0.1/etc/apps/phpmyadmin/setup/' 2>&1) -join ''; $ErrorActionPreference = 'Stop'
 if ($setup -eq '200') { throw "phpMyAdmin's setup folder is reachable" }
 Ok "phpMyAdmin: its login page shows (cookie login), its setup folder is gone ($setup)"
+
+# --- Backup Manager: "Back up now" makes a zip of the account's site in its backups folder (the worker as SYSTEM, through
+# SentoraZsudo); the page downloads and deletes it
+$bdir = "$Root\hostdata\zadmin\backups"
+$before = @(Get-ChildItem $bdir -Filter '*.zip' -ErrorAction SilentlyContinue).Count
+$p = Page '/?module=backupmgr' $null
+$p = Page '/?module=backupmgr&action=BackupNow' @{ csfr_token = (Token $p.Content) }
+$zip = $null
+for ($i = 0; $i -lt 60 -and -not $zip; $i++) { Start-Sleep 3; $zip = Get-ChildItem $bdir -Filter '*.zip' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1; if ($zip -and @(Get-ChildItem $bdir -Filter '*.zip').Count -le $before) { $zip = $null } }
+if (-not $zip) { throw "Backup Manager made no backup in $bdir (zsudo log: $((Get-Content "$Root\logs\panel\zsudo.log" -Tail 4 -ErrorAction SilentlyContinue) -join ' / '))" }
+Start-Sleep 3
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$entries = [IO.Compression.ZipFile]::OpenRead($zip.FullName); $names = @($entries.Entries | ForEach-Object FullName); $entries.Dispose()
+if (-not ($names -match "^public_html/$([regex]::Escape($folder.Name))/who\.php$")) { throw "the backup does not hold the site's files: $($names[0..5] -join ', ')" }
+Ok "Backup Manager: Back up now made $($zip.Name) with the site's files ($($names.Count) entries)"
+$ErrorActionPreference = 'Continue'
+$dl = (& curl.exe -s -o NUL -w '%{http_code} %{size_download}' -b ("PHPSESSID=" + ($s.Cookies.GetCookies('http://127.0.0.1/') | Where-Object Name -eq 'PHPSESSID').Value) "http://127.0.0.1/modules/backupmgr/code/downloadbackup.php?id=1&file=$($zip.Name)" 2>&1) -join ''
+$ErrorActionPreference = 'Stop'
+if ($dl -notmatch '^200 [1-9]') { throw "the backup does not download from the page: $dl" }
+Ok "Backup Manager: it downloads from the page ($dl)"
+$bn = [IO.Path]::GetFileNameWithoutExtension($zip.Name)
+$p = Page '/?module=backupmgr' $null
+$p = Page '/?module=backupmgr&action=DeleteBackup' @{ csfr_token = (Token $p.Content); "inDelete_$bn" = '1'; "inDelete_$($zip.Name)" = '1' }
+if (Test-Path $zip.FullName) { throw 'Backup Manager could not delete the backup' }
+Ok 'Backup Manager: it deletes from the page'
 
 # --- Cron: a task made in Cron Manager runs at its minute (the task 'Sentora cron', bin\sentora-cron.php) as the account's
 # own Windows account through its own PHP, never as SYSTEM; its output is the log Cron Manager shows
