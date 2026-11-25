@@ -260,9 +260,13 @@ Ok "DNS: the zones made with dnszone.ps1 are left as they are ($($adminZones.Key
 $before = (Get-Process coredns -ErrorAction Stop).StartTime
 $p = Page '/?module=dns_admin' $null
 $p = Page '/?module=dns_admin&action=UpdateService' @{ csfr_token = (Token $p.Content); inReloadService = '1' }
-$after = (Get-Process coredns -ErrorAction SilentlyContinue).StartTime
+# (it is restarting: a moment before it runs again)
+$after = $null
+for ($i = 0; $i -lt 20 -and -not ($after -and $after -gt $before); $i++) { $after = (Get-Process coredns -ErrorAction SilentlyContinue).StartTime; if (-not ($after -and $after -gt $before)) { Start-Sleep 1 } }
 if (-not $after -or $after -le $before) { throw "DNS Config's reload button did not restart CoreDNS (before $before, after $after)" }
-if (-not (Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction SilentlyContinue)) { throw "after the restart CoreDNS does not answer for $dom" }
+$back = $null
+for ($i = 0; $i -lt 30 -and -not $back; $i++) { $back = Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction SilentlyContinue; if (-not $back) { Start-Sleep 1 } }
+if (-not $back) { throw "after the restart CoreDNS does not answer for $dom" }
 Ok 'DNS Config: its reload button restarts CoreDNS through SentoraZsudo, and the zones are answered again'
 
 # --- FTP: an account made on the FTP Accounts page becomes an SFTPGo user at the daemon run (sys_winftp, through SFTPGo's
