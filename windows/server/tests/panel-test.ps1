@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders, File Manager)'
 foreach ($m in @('php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -428,6 +428,30 @@ for ($i = 0; $i -lt 40 -and $c -ne '200'; $i++) { Start-Sleep 3; $c = Code "noth
 if ((Site "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'panel_fallback on again: a name no site claims does not open the panel' }
 Ok 'on again: names no site claims open the panel'
 
+$late = @()
+# --- File Manager: run by the account's own PHP at /sentora-fm/NAME/ (the panel sends a signed one-minute pass); it lists
+# the account's folder and serves its files; without the pass, with a forged or a used one it refuses; the panel's own
+# PHP does not run it on Windows
+try {
+$fmFile = Get-ChildItem $folder.FullName -File | Select-Object -First 1
+$r = Page '/modules/file_manager/code/open.php' $null
+if ($r.Content -notmatch 'public_html' -or $r.BaseResponse.ResponseUri.AbsolutePath -notmatch '^/sentora-fm/zadmin/') { throw "the File Manager did not open (ended at $($r.BaseResponse.ResponseUri), $($r.Content.Length) bytes: $(($r.Content -replace '<[^>]+>', ' ' -replace '\s+', ' ').Substring(0, [Math]::Min(300, ($r.Content -replace '<[^>]+>', ' ' -replace '\s+', ' ').Length))))" }
+$raw = Page "/sentora-fm/zadmin/raw.php?f=$([uri]::EscapeDataString("public_html/$($folder.Name)/$($fmFile.Name)"))" $null
+if ($raw.RawContentLength -ne $fmFile.Length) { throw "the File Manager did not serve $($fmFile.Name) ($($raw.RawContentLength) of $($fmFile.Length) bytes)" }
+Ok "File Manager: opened from the panel as the account's own PHP (/sentora-fm/zadmin/), lists its folder and serves its files"
+function FmCode($url) { $ErrorActionPreference = 'Continue'; (& curl.exe -s -o NUL -w '%{http_code}' --max-time 20 "http://127.0.0.1$url" 2>&1) -join '' }
+$c1 = FmCode '/sentora-fm/zadmin/index.php'
+$c2 = FmCode '/sentora-fm/zadmin/index.php?t=eyJ1IjoiemFkbWluIiwiZXhwIjo5OTk5OTk5OTk5LCJuIjoiMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAifQ.0000000000000000000000000000000000000000000000000000000000000000'
+$c3 = FmCode '/modules/file_manager/app/index.php'
+if ($c1 -ne '403' -or $c2 -ne '403' -or $c3 -ne '403') { throw "the File Manager let in a stranger: without a pass $c1, a forged pass $c2, the panel's own copy $c3 (403 each expected)" }
+# a pass used once does not work again
+$hop = Invoke-WebRequest 'http://127.0.0.1/modules/file_manager/code/open.php' -WebSession $s -MaximumRedirection 0 -UseBasicParsing -ErrorAction SilentlyContinue
+$pass = "$($hop.Headers.Location)"
+$first = FmCode $pass; $again = FmCode $pass
+if ($first -ne '302' -or $again -ne '403') { throw "a File Manager pass: first use $first (302 expected), second use $again (403 expected)" }
+Ok 'File Manager: refuses without the pass, with a forged one, a pass used twice, and the panel''s own copy (403 each)'
+} catch { $late += "$_" }
+
 # --- Module Admin: every module listed, the ones not ready for Windows marked, no add-on upload (add-ons are Linux's)
 $c = (Page '/?module=moduleadmin' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Module Admin page does not load' }
@@ -460,7 +484,6 @@ $p = Page '/' $null
 $p = Page '/' @{ inUsername = 'zadmin'; inPassword = $pw; inSessionSecurity = 'on'; csfr_token = (Token $p.Content); sublogin2 = 'LogIn' }
 if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in again after the widget upload' }
 
-$late = @()
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
 try {
 $c = (Page '/?module=ftp_admin' $null).Content

@@ -2303,8 +2303,11 @@ function Build($a) {
     # command line as well (sentora-php-pool.php)
     $ini = Join-Path $cfg "$n.ini"
     $base = [IO.File]::ReadAllText((Join-Path $php 'php.ini'))
-    [IO.File]::WriteAllText($ini, $base + "`r`n; --- $n (phpaccount.ps1)`r`nopen_basedir = `"$hd\;$guard`"`r`nauto_prepend_file = `"$guard`"`r`nerror_log = `"$hd\tmp\php-error.log`"`r`nupload_tmp_dir = `"$hd\tmp`"`r`nsys_temp_dir = `"$hd\tmp`"`r`nsession.save_path = `"$hd\sessions`"`r`ncgi.fix_pathinfo = 0`r`n")
-    $params = "-n `"$pool`" `"$ini`" " + ($ports -join ',') + " `"open_basedir=$hd\;$guard`" `"auto_prepend_file=$guard`""
+    # (the panel's File Manager runs as the account's own PHP: its code may be read, nothing else of the panel)
+    $fmApp = Join-Path $root 'panel\modules\file_manager\app'
+    $fence = if (Test-Path $fmApp) { "$hd\;$guard;$fmApp" } else { "$hd\;$guard" }
+    [IO.File]::WriteAllText($ini, $base + "`r`n; --- $n (phpaccount.ps1)`r`nopen_basedir = `"$fence`"`r`nauto_prepend_file = `"$guard`"`r`nerror_log = `"$hd\tmp\php-error.log`"`r`nupload_tmp_dir = `"$hd\tmp`"`r`nsys_temp_dir = `"$hd\tmp`"`r`nsession.save_path = `"$hd\sessions`"`r`ncgi.fix_pathinfo = 0`r`n")
+    $params = "-n `"$pool`" `"$ini`" " + ($ports -join ',') + " `"open_basedir=$fence`" `"auto_prepend_file=$guard`""
     if (Get-Service $svc -ErrorAction SilentlyContinue) { Stop-Service $svc -Force -ErrorAction SilentlyContinue }
     else { Native $nssm @('install', $svc, (Join-Path $php 'php.exe')) | Out-Null }
     Native $nssm @('set', $svc, 'Application', (Join-Path $php 'php.exe')) | Out-Null
@@ -2341,6 +2344,26 @@ $members
     ProxyFCGISetEnvIf "true" SENTORA_KEY "$($a.key)"
 </Directory>
 "@)
+    if (Test-Path $fmApp) {
+        # the panel's File Manager at /sentora-fm/NAME/, run by NAME's own PHP with NAME's key (NAME's files only; the
+        # panel sends a signed pass, app\winaccount.inc.php); its pictures and scripts are plain files
+        $fmFw = $fmApp -replace '\\', '/'
+        [IO.File]::AppendAllText((Join-Path $apacheCfg "$n.conf"), @"
+Alias "/sentora-fm/$n/" "$fmFw/"
+<LocationMatch "^/sentora-fm/$n/[a-z]+\.php$">
+    SetEnvIf Request_URI "^/sentora-fm/$n/([a-z]+\.php)$" SENTORA_FM=`$1
+    SetHandler "proxy:balancer://php-$n/"
+    ProxyFCGIBackendType GENERIC
+    ProxyFCGISetEnvIf "true" SCRIPT_FILENAME "$fmFw/%{reqenv:SENTORA_FM}"
+    ProxyFCGISetEnvIf "true" SENTORA_KEY "$($a.key)"
+</LocationMatch>
+"@)
+        # (the accounts' PHP may read the File Manager's code, and only list the folders above it)
+        Native 'icacls.exe' @($fmApp, '/grant', "${group}:(OI)(CI)RX") | Out-Null
+        foreach ($up in @((Join-Path $root 'panel'), (Join-Path $root 'panel\modules'), (Join-Path $root 'panel\modules\file_manager'))) {
+            Native 'icacls.exe' @($up, '/grant', "${group}:(RX)") | Out-Null
+        }
+    }
     Start-Service $svc
 }
 
