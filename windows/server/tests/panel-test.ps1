@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer)'
 foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -451,6 +451,12 @@ $wf = "$Root\panel\etc\dashboard-widgets\wintest$n\widget.php"
 for ($i = 0; $i -lt 40 -and -not (Test-Path $wf); $i++) { Start-Sleep 3 }
 if (-not (Test-Path $wf)) { throw "Widget Admin: the widget was not installed: $(Get-Content C:\var\lib\sentora\widget-results.json -Raw -ErrorAction SilentlyContinue)" }
 Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
+
+# --- System Log Viewer: the Windows logs from the log_dir setting (the panel's, the sites', Apache's), none of Linux's
+$c = (Page '/?module=system_logviewer' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the System Log Viewer page does not load' }
+if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') { throw 'System Log Viewer does not list the Windows logs (a site''s access log, Apache''s or PHP''s)' }
+Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
 
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
 $c = (Page '/?module=ftp_admin' $null).Content
