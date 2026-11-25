@@ -148,11 +148,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\php-account-test.ps1
           if ($LASTEXITCODE -ne 0) { throw 'the PHP per account test failed' }
-      - name: Probe (information only) - what Stalwart's API offers for forwarding a mailbox
-        shell: powershell
-        continue-on-error: true
-        run: |
-          & C:\zpanel\bin\php\php.exe -c C:\zpanel\bin\php\php.ini windows\server\tests\stalwart-probe.php C:\zpanel\configs\stalwart\admin.txt alice@example.test Alice-Pass-1234
       - name: Update - from the panel's Panel Update page (Check now, Update now), and the update keeps everything
         env:
           GH_TOKEN: ${{ github.token }}

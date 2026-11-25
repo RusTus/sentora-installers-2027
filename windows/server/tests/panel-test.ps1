@@ -35,16 +35,16 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health)'
-foreach ($m in @('forwarders', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders)'
+foreach ($m in @('php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(php_versions|forwarders)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(php_versions)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
@@ -680,6 +680,28 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sl) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sl) } catch { $ok = $false } }
     if (-not $ok) { throw "Mail: a message to the list $lst@$dom did not reach both members (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
     Ok "Mail: a distribution list made on its page ($lst@$dom) delivers to both its members"
+    # forwarders: to alice@example.test with a copy kept (a Sieve script on the mailbox), then also to
+    # bob@example.test (two addresses go through a list of the panel's: Stalwart redirects once per script)
+    $p = Page '/?module=forwarders' $null
+    $p = Page '/?module=forwarders&action=CreateForwarder' @{ csfr_token = (Token $p.Content); inAddress = $addr; inDestinationName = 'alice'; inDestinationDomain = 'example.test'; inKeepMessage = '1' }
+    MailRun
+    Start-Sleep 8
+    $sf = "forward test $n"
+    MailTo $addr $sf
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sf) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sf) } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: a forwarder from $addr to alice@example.test (copy kept) did not deliver to both (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
+    Ok "Mail: a forwarder made on the Forwarders page ($addr to alice@example.test, copy kept) delivers to both"
+    $p = Page '/?module=forwarders' $null
+    $p = Page '/?module=forwarders&action=CreateForwarder' @{ csfr_token = (Token $p.Content); inAddress = $addr; inDestinationName = 'bob'; inDestinationDomain = 'example.test'; inKeepMessage = '1' }
+    MailRun
+    Start-Sleep 8
+    $sf2 = "forward two test $n"
+    MailTo $addr $sf2
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sf2) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sf2) -and (ImapHas 'bob@example.test' 'Bob-Pass-5678' $sf2) } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: forwarders from $addr to two addresses did not deliver to all three (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
+    Ok "Mail: forwarders to two addresses (alice and bob, copy kept) deliver to all three"
     $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
     $mid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT mb_id_pk FROM sentora_core.x_mailboxes WHERE mb_address_vc='$addr' AND mb_deleted_ts IS NULL") -join ''
     Remove-Item Env:\MYSQL_PWD
