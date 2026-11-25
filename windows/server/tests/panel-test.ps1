@@ -455,14 +455,26 @@ if (-not (Test-Path $wf)) {
 }
 Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
 
+$late = @()
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
+try {
 $c = (Page '/?module=ftp_admin' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the FTP Config page does not load' }
-if ($c -match 'ProFTPD|60000-65535|name="ftp_db"' -or $c -notmatch 'SFTPGo' -or $c -notmatch '50000-50100') { throw 'the FTP Config page does not show SFTPGo''s settings' }
+$fa = if ($c -match '(?s)(<div class="fa" id="fa">.*)$') { $Matches[1] } else { '' }
+$bad = @()
+if ($fa -eq '') { $bad += 'no FTP Config part on the page' }
+if ($fa -match 'ProFTPD') { $bad += 'it names ProFTPD' }
+if ($fa -match '60000-65535') { $bad += 'ProFTPD''s passive ports' }
+if ($fa -match 'name="ftp_db"') { $bad += 'ProFTPD''s database setting' }
+if ($fa -notmatch 'SFTPGo') { $bad += 'SFTPGo is not named' }
+if ($fa -notmatch '50000-50100') { $bad += 'not SFTPGo''s passive ports' }
+if ($bad) { $tx = ($fa -replace '(?s)<script.*?</script>', ' ' -replace '<[^>]+>', ' ' -replace '\s+', ' ').Trim(); throw "the FTP Config page does not show SFTPGo's settings: $($bad -join ', '). It shows: $($tx.Substring(0, [Math]::Min(700, $tx.Length)))" }
 Ok 'FTP Config: the page shows SFTPGo, its passive ports (50000-50100) and no ProFTPD settings'
+} catch { $late += "$_" }
 
 # --- Apache Config: a domain's own lines (saved on its page) and the lines for every website go into the Windows sites;
 # a line Apache refuses switches off only that domain's lines (the page says so), the rest stays live
+try {
 $p = Page '/?module=apache_admin' $null
 if ($p.Content -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Apache Config page does not load' }
 if ($p.Content -match '/etc/hosts|PHP processes per account') { throw 'the Apache Config page shows Linux-only settings on Windows' }
@@ -503,8 +515,8 @@ SaveVhost ''
 $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
 & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='' WHERE so_name_vc='global_vhcustom'; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed';" | Out-Null
 Remove-Item Env:\MYSQL_PWD
+} catch { $late += "$_" }
 
-$late = @()
 # --- Server Monitor: the live figures come from the service SentoraStats (SYSTEM) through the page's own endpoint
 try {
 if ((Get-Service SentoraStats -ErrorAction SilentlyContinue).Status -ne 'Running') { throw 'the service SentoraStats does not run' }
