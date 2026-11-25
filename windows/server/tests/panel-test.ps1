@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin)'
 foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -433,6 +433,24 @@ $c = (Page '/?module=moduleadmin' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Module Admin page does not load' }
 if ($c -notmatch 'not on Windows yet' -or $c -match 'name="modulefile"') { throw 'Module Admin does not mark the modules not ready for Windows, or offers the add-on upload' }
 Ok 'Module Admin: the modules not ready for Windows are marked; no add-on upload on Windows'
+
+# --- Widget Admin: a widget uploaded on the page is checked and installed by the daemon (SYSTEM) into the panel
+$wd = Join-Path $env:TEMP "widget$n"
+New-Item -ItemType Directory -Force -Path $wd | Out-Null
+[IO.File]::WriteAllText("$wd\widget.xml", "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`n<widget><id>wintest$n</id><name>Windows test</name><description>A test widget.</description><version>1.0</version><author>test</author><default>false</default><groups>administrators</groups></widget>`n")
+[IO.File]::WriteAllText("$wd\widget.php", "<?php`nclass dashboard_widget_wintest$n`n{`n    static function Render(`$user)`n    {`n        return '<p>Windows widget</p>';`n    }`n}`n")
+Compress-Archive -Path "$wd\widget.xml", "$wd\widget.php" -DestinationPath "$wd.zip" -Force
+$p = Page '/?module=widget_admin' $null
+if ($p.Content -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Widget Admin page does not load' }
+$ck = ($s.Cookies.GetCookies('http://127.0.0.1') | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+$up = & curl.exe -s --max-time 60 -H "Cookie: $ck" -F "csfr_token=$(Token $p.Content)" -F "inWidgetFile=@$wd.zip;type=application/zip" 'http://127.0.0.1/?module=widget_admin&action=UploadWidget' 2>&1 | Out-String
+if ($up -notmatch 'is queued') { throw "Widget Admin: the upload was not queued: $(([regex]::Matches($up, '(?s)zannounce[a-z]*[^>]*>(.{0,300}?)</') | ForEach-Object { $_.Groups[1].Value }) -join ' / ')" }
+$p = Page '/?module=sentoraconfig' $null
+$null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$wf = "$Root\panel\etc\dashboard-widgets\wintest$n\widget.php"
+for ($i = 0; $i -lt 40 -and -not (Test-Path $wf); $i++) { Start-Sleep 3 }
+if (-not (Test-Path $wf)) { throw "Widget Admin: the widget was not installed: $(Get-Content C:\var\lib\sentora\widget-results.json -Raw -ErrorAction SilentlyContinue)" }
+Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
 
 # --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
 $c = (Page '/?module=ftp_admin' $null).Content
