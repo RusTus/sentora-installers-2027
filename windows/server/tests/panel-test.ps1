@@ -458,7 +458,13 @@ Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the
 # --- System Log Viewer: the Windows logs from the log_dir setting (the panel's, the sites', Apache's), none of Linux's
 $c = (Page '/?module=system_logviewer' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the System Log Viewer page does not load' }
-if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') { throw 'System Log Viewer does not list the Windows logs (a site''s access log, Apache''s or PHP''s)' }
+if ($c -notmatch [regex]::Escape("$dom-access.log") -or $c -notmatch 'php_errors\.log|error\.log') {
+    $names = ([regex]::Matches($c, 'lv-item-name">([^<]+)<') | ForEach-Object { $_.Groups[1].Value }) -join ', '
+    $why = "$Root\panel\ztest-$([guid]::NewGuid().ToString('N')).php"
+    [IO.File]::WriteAllText($why, '<?php foreach (array("C:/zpanel/logs", "C:/zpanel/logs/apache", "C:/zpanel/logs/domains") as $d) { echo $d, " dir=", (is_dir($d) ? 1 : 0), " read=", (is_readable($d) ? 1 : 0), " link=", (is_link($d) ? 1 : 0), " scan=", implode("|", (array) @scandir($d)), " glob=", implode("|", (array) glob($d . "/*")), "; "; }')
+    try { $inside = (Invoke-WebRequest "http://127.0.0.1/$(Split-Path $why -Leaf)" -UseBasicParsing -TimeoutSec 30).Content } catch { $inside = "$_" } finally { Remove-Item $why -Force }
+    throw "System Log Viewer does not list the Windows logs (a site's access log, Apache's or PHP's). Listed: '$names'. Inside Apache: $inside"
+}
 Ok "System Log Viewer: lists the Windows logs ($dom's access log, Apache's and PHP's)"
 
 # --- Server Monitor: the live figures come from the service SentoraStats (SYSTEM) through the page's own endpoint
