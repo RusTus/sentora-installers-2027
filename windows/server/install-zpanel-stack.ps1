@@ -321,6 +321,7 @@ if ($Uninstall) {
     Get-Service -Name 'SentoraPHP-*' -ErrorAction SilentlyContinue | ForEach-Object { Stop-AndRemoveService $_.Name }
     Get-LocalGroup -Name 'SentoraPHP' -ErrorAction SilentlyContinue | Remove-LocalGroup
     Unregister-ScheduledTask -TaskName 'Sentora daemon' -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName 'Sentora cron' -Confirm:$false -ErrorAction SilentlyContinue
     foreach ($n in @($FirewallRule, $OldFirewall, $FtpFirewall, $MailFirewall, $HttpsFirewall, $DnsFirewall)) { Get-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
     Ok 'firewall rule removed'
     Note "The folders under $Root are still there; delete them yourself once you no longer need the databases."
@@ -442,7 +443,7 @@ try {
     Stop-AndRemoveService $MySQLService
     # (the panel's root jobs and its daemon run PHP from the folder replaced below: stopped, a daemon run going is let
     # finish for up to a minute; the panel's part sets both up again)
-    Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue | Disable-ScheduledTask | Out-Null
+    Get-ScheduledTask -TaskName 'Sentora daemon', 'Sentora cron' -ErrorAction SilentlyContinue | Disable-ScheduledTask | Out-Null
     Stop-Service -Name 'SentoraZsudo' -Force -ErrorAction SilentlyContinue
     Get-Service -Name 'SentoraPHP-*' -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue
     for ($i = 0; $i -lt 120; $i++) {
@@ -2054,6 +2055,13 @@ switch ($Do) {
         Push-Location $panelDir
         try { $out = Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-q', 'bin\daemon.php') } finally { Pop-Location }
         if (($out -join "`n") -notmatch 'Daemon run complete') { Note "the first daemon run did not finish: $(($out | Select-Object -Last 5) -join ' ')" } else { Ok "task 'Sentora daemon' every 5 minutes (first run done)" }
+        # the clients' cron jobs (Cron Manager), every minute as SYSTEM: each due job runs as its account, through the
+        # account's own PHP (bin\sentora-cron.php), never as SYSTEM
+        $cronAction = New-ScheduledTaskAction -Execute $phpExe -Argument ('-c "' + (Join-Path $PhpDir 'php.ini') + '" -q "' + (Join-Path $panelDir 'bin\sentora-cron.php') + '"') -WorkingDirectory $panelDir
+        $every1 = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 1)
+        $null = Register-ScheduledTask -TaskName 'Sentora cron' -Action $cronAction -Trigger $every1 -User 'SYSTEM' -RunLevel Highest `
+            -Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)) -Description 'The Sentora clients'' cron jobs (bin\sentora-cron.php), every minute; each runs as its account' -Force
+        Ok "task 'Sentora cron' every minute (the clients' cron jobs, each as its own account)"
     }
 
     # --------------------------------------------------------------------------------------------------------------
@@ -2486,7 +2494,7 @@ Compress-Archive -Path (Join-Path $cfg '*') -DestinationPath $copy
 # the services NSSM runs stop first, and their programs are waited for (an installer of 2027.2 or older replaced their
 # folders while a program could still be exiting)
 # (the panel's too: SentoraZsudo and the daemon's task run PHP from bin\php, which the installer replaces)
-$daemonTask = Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue
+$daemonTask = Get-ScheduledTask -TaskName 'Sentora daemon', 'Sentora cron' -ErrorAction SilentlyContinue
 if ($daemonTask) { $daemonTask | Disable-ScheduledTask | Out-Null }
 foreach ($n in @('Stalwart', 'ClamAV', 'FreshClam', 'CoreDNS', 'SentoraZsudo')) { Stop-Service -Name $n -Force -ErrorAction SilentlyContinue }
 $phpAccounts = @(Get-Service -Name 'SentoraPHP-*' -ErrorAction SilentlyContinue)
@@ -2518,7 +2526,7 @@ $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy'
 # (the panel's root jobs and daemon again, also when the new installer left them as they were)
 if (Get-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue) { Start-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue }
 foreach ($pa in $phpAccounts) { if (Get-Service -Name $pa.Name -ErrorAction SilentlyContinue) { Start-Service -Name $pa.Name -ErrorAction SilentlyContinue } }
-if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { Enable-ScheduledTask -TaskName 'Sentora daemon' | Out-Null }
+foreach ($tn in @('Sentora daemon', 'Sentora cron')) { if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) { Enable-ScheduledTask -TaskName $tn | Out-Null } }
 if ($p.ExitCode -ne 0) { throw "The installer of $new stopped (exit code $($p.ExitCode)): see its log in $root\logs. The settings before it are in $copy." }
 [IO.File]::WriteAllText($verFile, $new)
 Remove-Item $note -ErrorAction SilentlyContinue
