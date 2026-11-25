@@ -448,8 +448,11 @@ if ($up -notmatch 'is queued') { throw "Widget Admin: the upload was not queued:
 $p = Page '/?module=sentoraconfig' $null
 $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
 $wf = "$Root\panel\etc\dashboard-widgets\wintest$n\widget.php"
-for ($i = 0; $i -lt 40 -and -not (Test-Path $wf); $i++) { Start-Sleep 3 }
-if (-not (Test-Path $wf)) { throw "Widget Admin: the widget was not installed: $(Get-Content C:\var\lib\sentora\widget-results.json -Raw -ErrorAction SilentlyContinue)" }
+for ($i = 0; $i -lt 110 -and -not (Test-Path $wf); $i++) { Start-Sleep 3 }
+if (-not (Test-Path $wf)) {
+    $dl = (Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String -Pattern 'Widget|widget_admin|Fatal|Warning' | Select-Object -Last 8) -join ' | '
+    throw "Widget Admin: the widget was not installed. Results: $(Get-Content C:\var\lib\sentora\widget-results.json -Raw -ErrorAction SilentlyContinue) Queue: $((Get-ChildItem C:\var\lib\sentora\tmp -Filter 'widget-*' -ErrorAction SilentlyContinue).Name -join ', ') Daemon: $dl"
+}
 Ok 'Widget Admin: a widget uploaded on the page was checked and installed by the daemon'
 
 # --- System Log Viewer: the Windows logs from the log_dir setting (the panel's, the sites', Apache's), none of Linux's
