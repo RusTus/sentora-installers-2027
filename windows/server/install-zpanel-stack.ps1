@@ -2348,7 +2348,7 @@ $members
         # the panel's File Manager at /sentora-fm/NAME/, run by NAME's own PHP with NAME's key (NAME's files only; the
         # panel sends a signed pass, app\winaccount.inc.php); its pictures and scripts are plain files
         $fmFw = $fmApp -replace '\\', '/'
-        [IO.File]::AppendAllText((Join-Path $apacheCfg "$n.conf"), @"
+        [IO.File]::AppendAllText((Join-Path $apacheCfg "$n.conf"), "`r`n" + @"
 Alias "/sentora-fm/$n/" "$fmFw/"
 <LocationMatch "^/sentora-fm/$n/[a-z]+\.php$">
     SetEnvIf Request_URI "^/sentora-fm/$n/([a-z]+\.php)$" SENTORA_FM=`$1

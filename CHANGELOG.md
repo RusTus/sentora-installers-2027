@@ -657,6 +657,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: Server Monitor (live CPU, memory, disks, network, processes and services from a small Windows service, SentoraStats) and its alerts for full disks and stopped services.
 - Panel on Windows: Site Health (each site's hourly check, traffic and errors from its logs).
 - Panel on Windows: Forwarders (a Sieve script on the mailbox through Stalwart's API; copy kept or not; several addresses at once).
+- Panel on Windows: File Manager, run as the hosting account's own Windows account (only its files), opened from the panel with a one-minute signed pass.
 - Release 2027.98: on Windows, Forwarders (copy kept or not, several addresses) and Site Health; Server Monitor's figures sturdier.
 - Release 2027.97: on Windows, Panel Update from the panel (Check now, Update now, its steps on the page), Apache Config, Protected Directories, Server Monitor, System Log Viewer, FTP Config, Module Admin and Widget Admin; "Site not found" switched off works there too.
 - Release 2027.96: on Windows, mail aliases and distribution lists, Backup Manager (Back up now, download, delete), phpMyAdmin, Webmail, Services and Domain Logs; the VM test's Log Forwarder check fixed.
