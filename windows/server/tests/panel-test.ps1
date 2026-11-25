@@ -35,16 +35,16 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager)'
-foreach ($m in @('apache_admin', 'aliases', 'backupmgr', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists)'
+foreach ($m in @('apache_admin', 'forwarders', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(apache_admin|aliases)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(apache_admin|forwarders)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
@@ -341,6 +341,29 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
             return [bool]($l -match '^a1 OK')
         } finally { $c.Close() }
     }
+    # (a message to an address on this server, the way mail from outside arrives: port 25, no login)
+    function MailTo($to, $subject) {
+        $c = New-Object Net.Mail.SmtpClient('127.0.0.1', 25)
+        $c.Send((New-Object Net.Mail.MailMessage('tester@outside.example', $to, $subject, 'Windows panel test')))
+    }
+    # (whether a mailbox has a message with this subject, in its inbox or its junk folder)
+    function ImapHas($user, $pass, $subject) {
+        $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 993)
+        try {
+            $ssl = New-Object Net.Security.SslStream($c.GetStream(), $false, ([Net.Security.RemoteCertificateValidationCallback] { $true }))
+            $ssl.AuthenticateAsClient('localhost')
+            $rd = New-Object IO.StreamReader($ssl); $wr = New-Object IO.StreamWriter($ssl); $wr.NewLine = "`r`n"; $wr.AutoFlush = $true
+            $null = $rd.ReadLine(); $n2 = 0
+            function Cmd($line) { $script:n2++; $tag = "t$script:n2"; $wr.WriteLine("$tag $line"); $all = @(); do { $l = $rd.ReadLine(); $all += $l } while ($l -and $l -notmatch "^$tag "); return ,$all }
+            $null = Cmd ('LOGIN "' + $user + '" "' + $pass + '"')
+            foreach ($box in @('INBOX', '"Junk Mail"')) {
+                $null = Cmd "SELECT $box"
+                $s = Cmd ('SEARCH SUBJECT "' + $subject + '"')
+                if (($s | Where-Object { $_ -match '^\* SEARCH \d' })) { return $true }
+            }
+            return $false
+        } finally { $c.Close() }
+    }
     function MailRun { $p = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) } }
     $box = "box$n"; $addr = "$box@$dom"; $mpw = "Mail-Test-$n-Aa9"; $mpw2 = "Mail-New-$n-Bb8"
     $p = Page '/?module=mailboxes' $null
@@ -351,6 +374,33 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     if (-not $ok) { throw "Mail: $addr can not log in over IMAPS (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
     if (ImapLogin $addr 'Wrong-Pass-123') { throw 'Mail: a wrong password logged in' }
     Ok "Mail: a mailbox made on the Mailboxes page ($addr) logs in over IMAPS; a wrong password does not"
+    # an alias of it, and a distribution list with it and alice@example.test (made with mailuser.ps1)
+    $al = "al$n"; $lst = "list$n"
+    $p = Page '/?module=aliases' $null
+    $p = Page '/?module=aliases&action=CreateAlias' @{ csfr_token = (Token $p.Content); inAddress = $al; inDomain = $dom; inDestination = $addr; inCreate = '1' }
+    $p = Page '/?module=distlists' $null
+    $p = Page '/?module=distlists&action=AddDistList' @{ csfr_token = (Token $p.Content); inAddress = $lst; inDomain = $dom; inCreate = '1' }
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $dlid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT dl_id_pk FROM sentora_core.x_distlists WHERE dl_address_vc='$lst@$dom' AND dl_deleted_ts IS NULL") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    if ($dlid -notmatch '^\d+$') { throw "Distribution Lists did not make $lst@$dom" }
+    foreach ($member in @($addr, 'alice@example.test')) {
+        $p = Page "/?module=distlists&show=Edit&other=$dlid" $null
+        $p = Page "/?module=distlists&show=Edit&other=$dlid&action=UpdateDistList" @{ csfr_token = (Token $p.Content); inDLID = $dlid; inAdd = '1'; inAddAddress = $member }
+    }
+    MailRun
+    Start-Sleep 5
+    $sa = "alias test $n"; $sl = "list test $n"
+    MailTo "$al@$dom" $sa
+    MailTo "$lst@$dom" $sl
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sa) } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: a message to the alias $al@$dom did not reach $addr (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
+    Ok "Mail: an alias made on the Aliases page ($al@$dom) delivers to its mailbox"
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sl) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sl) } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: a message to the list $lst@$dom did not reach both members (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
+    Ok "Mail: a distribution list made on its page ($lst@$dom) delivers to both its members
     $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
     $mid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT mb_id_pk FROM sentora_core.x_mailboxes WHERE mb_address_vc='$addr' AND mb_deleted_ts IS NULL") -join ''
     Remove-Item Env:\MYSQL_PWD
