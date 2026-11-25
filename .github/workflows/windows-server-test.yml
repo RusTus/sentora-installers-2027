@@ -214,7 +214,7 @@ jobs:
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\install-zpanel-stack.ps1 -Uninstall
-          if (Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS, SentoraZsudo, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'services still there' }
+          if (Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS, SentoraZsudo, SentoraStats, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'services still there' }
           if (Get-LocalGroup -Name SentoraPHP -ErrorAction SilentlyContinue) { throw 'the group SentoraPHP is still there' }
           if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { throw "the panel's daemon task is still there" }
           if (Get-ScheduledTask -TaskName 'Sentora update check', 'Sentora update' -ErrorAction SilentlyContinue) { throw 'an update task is still there' }
@@ -250,7 +250,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($n in 'Apache2', 'MySQL') { if ((Get-Service $n).Status -ne 'Running') { throw "$n does not run" } }
-          if (Get-Service SFTPGo, Stalwart, ClamAV, CoreDNS, SentoraZsudo, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'it installed more than Apache, PHP and MySQL' }
+          if (Get-Service SFTPGo, Stalwart, ClamAV, CoreDNS, SentoraZsudo, SentoraStats, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'it installed more than Apache, PHP and MySQL' }
           if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { throw 'the panel came with it' }
           'ok   Apache and MySQL run; no FTP, mail, DNS or panel'
           $ch = Get-Content C:\zpanel\configs\install-choices.json -Raw | ConvertFrom-Json
