@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs)'
 foreach ($m in @('apache_admin', 'forwarders', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -298,6 +298,14 @@ if (Get-Service SFTPGo -ErrorAction SilentlyContinue) {
     if (-not (Test-Path $landed.FullName)) { throw 'FTP: deleting the account removed its files' }
     Ok 'FTP: deleted on the page, it can no longer log in; its files stay'
 }
+
+# --- Webmail opens Roundcube at /webmail (over HTTPS); the domain's logs are there to read
+$p = Page '/?module=webmail' $null
+if ($p.Content -notmatch 'href="/webmail/"') { throw 'the Webmail page does not open /webmail/' }
+Ok 'Webmail: the page opens Roundcube at /webmail'
+$p = Page '/?module=user_logviewer' $null
+if ($p.Content -notmatch [regex]::Escape($dom)) { throw "the Domain Logs page does not list $dom" }
+Ok "Domain Logs: $dom is listed"
 
 # --- Cron: a task made in Cron Manager runs at its minute (the task 'Sentora cron', bin\sentora-cron.php) as the account's
 # own Windows account through its own PHP, never as SYSTEM; its output is the log Cron Manager shows
