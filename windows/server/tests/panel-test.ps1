@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update)'
 foreach ($m in @('apache_admin', 'forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -379,7 +379,10 @@ $p = Page '/?module=protected_directories&action=CreateProtection' @{ csfr_token
 $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
 $pid2 = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT x_htpasswd_file_id FROM sentora_core.x_htpasswd_file WHERE x_htpasswd_file_target LIKE '%/$($folder.Name)' AND x_htpasswd_file_deleted IS NULL ORDER BY x_htpasswd_file_id DESC LIMIT 1") -join ''
 Remove-Item Env:\MYSQL_PWD
-if ($pid2 -notmatch '^\d+$') { throw "Protected Directories did not save the protection of $($folder.Name)" }
+if ($pid2 -notmatch '^\d+$') {
+    $said = ([regex]::Matches($p.Content, '(?s)zannounce[a-z]*[^>]*>(.{0,300}?)</') | ForEach-Object { ($_.Groups[1].Value -replace '<[^>]+>', ' ').Trim() }) -join ' / '
+    throw "Protected Directories did not save the protection of $($folder.Name) (the page said: '$said')"
+}
 $p = Page "/?module=protected_directories&control=Edit&id=$pid2" $null
 $p = Page "/?module=protected_directories&control=Edit&id=$pid2&action=AddUser" @{ csfr_token = (Token $p.Content); inId = $pid2; inUser = 'guest'; inPassword = "Guest-Pass-$n-Aa9" }
 $p = Page '/?module=sentoraconfig' $null

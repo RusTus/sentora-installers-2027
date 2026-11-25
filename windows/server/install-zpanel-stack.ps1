@@ -317,6 +317,7 @@ if ($Uninstall) {
     Stop-AndRemoveService $FreshService
     Stop-AndRemoveService $DnsService
     Unregister-ScheduledTask -TaskName 'Sentora update check' -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName 'Sentora update' -Confirm:$false -ErrorAction SilentlyContinue
     Stop-AndRemoveService 'SentoraZsudo'
     Get-Service -Name 'SentoraPHP-*' -ErrorAction SilentlyContinue | ForEach-Object { Stop-AndRemoveService $_.Name }
     Get-LocalGroup -Name 'SentoraPHP' -ErrorAction SilentlyContinue | Remove-LocalGroup
@@ -2136,11 +2137,13 @@ switch ($Do) {
     $state = Join-Path $Root 'data\sentora'
     if (Test-Path $state) {
         Grant-Apache $state 'M'
-        foreach ($d in @('accounts', 'clientftp', 'goaccess', 'matomo', 'sitehealth', 'monitor', 'phpaccounts')) {
+        foreach ($d in @('accounts', 'clientftp', 'goaccess', 'matomo', 'sitehealth', 'monitor', 'phpaccounts', 'update')) {
             $p = Join-Path $state $d
             if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
             Protect-Folder $p
         }
+        # (sentora-update.ps1's progress and answers, which the Panel Update page reads)
+        Grant-Apache (Join-Path $state 'update') 'RX'
         # the websites' certificates and keys (the panel's Sencrypt page writes them, Apache reads them; never the
         # accounts' own PHP), and Let's Encrypt's check files, which every site serves (plain files only)
         $certs = Join-Path $state 'certs'
@@ -2437,6 +2440,9 @@ echo PHP_VERSION, '|', PHP_SAPI, '|', (extension_loaded('mysqli') ? 'mysqli' : '
     if ($WithMail) { $choices['MailDomain'] = $MailDomain }
     Write-Utf8NoBom (Join-Path $Cfg 'install-choices.json') ($choices | ConvertTo-Json)
     if ($InstallerVersion -ne 'dev') { Write-Utf8NoBom (Join-Path $Cfg 'version.txt') $InstallerVersion }
+    # (when the panel's code was put in place, for Panel Update; an update writes its own line after this)
+    $instRec = Join-Path $Root 'data\sentora\update\installed'
+    if ($WithPanel -and (Test-Path (Split-Path $instRec))) { Write-Utf8NoBom $instRec "- $InstallerVersion, $(Get-Date -Format 'yyyy-MM-dd HH:mm') by the installer`n" }
     $updCfg = Join-Path $Cfg 'update'
     if (-not (Test-Path $updCfg)) { New-Item -ItemType Directory -Path $updCfg | Out-Null }
     Protect-Folder $updCfg
@@ -2453,7 +2459,7 @@ echo PHP_VERSION, '|', PHP_SAPI, '|', (extension_loaded('mysqli') ? 'mysqli' : '
   checked against the SHA-256 GitHub keeps for it); no token is needed. One in
   C:\zpanel\configs\update\github-token.txt is still used when there (GitHub's limit on questions per hour is higher).
 #>
-param([switch]$Check, [switch]$Force)
+param([switch]$Check, [switch]$Force, [switch]$FromPanel)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -2463,11 +2469,25 @@ $cfg = Join-Path $root 'configs'
 $tokenFile = Join-Path $cfg 'update\github-token.txt'
 $note = Join-Path $root 'logs\update-available.txt'
 $verFile = Join-Path $cfg 'version.txt'
+# (what the panel's Panel Update page reads, in the same lines as Linux's sentora-update writes; only root's jobs write there)
+$upd = Join-Path $root 'data\sentora\update'
+function UnixNow { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+function Plain($t) { ("$t" -replace '[\t\r\n]+', ' ').Trim() }
+function Put($name, $text) { try { if (Test-Path $upd) { [IO.File]::WriteAllText((Join-Path $upd "$name.new"), $text); Move-Item (Join-Path $upd "$name.new") (Join-Path $upd $name) -Force } } catch { } }
+function St($text) { try { if (Test-Path $upd) { [IO.File]::AppendAllText((Join-Path $upd 'status'), "$text`n") } } catch { } }
+$script:stepNo = 0; $script:stepAt = 0
+function Step($title) {
+    if ($script:stepNo -gt 0) { St "end`tok`t$((UnixNow) - $script:stepAt)" }
+    $script:stepNo++; $script:stepAt = UnixNow
+    St "step`t$($script:stepNo)`t5`t$title"
+    "---- $title"
+}
 $have = if (Test-Path $verFile) { (Get-Content $verFile -Raw).Trim() } else { 'unknown' }
 $h = @{ 'User-Agent' = 'sentora-windows-update'; Accept = 'application/vnd.github+json' }
 if (Test-Path $tokenFile) { $t = (Get-Content $tokenFile -Raw).Trim(); if ($t) { $h['Authorization'] = "Bearer $t" } }
 try { $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/current" -Headers $h -UseBasicParsing -TimeoutSec 60 }
 catch {
+    if ($Check) { Put 'available' "$(UnixNow) unknown`n" }
     $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
     if ($code -eq 404 -or $code -eq 401) { throw "GitHub does not show $repo's releases to this server (a private repository?): put a read-only token in $tokenFile (see the top of this file)." }
     throw "GitHub could not be asked: $($_.Exception.Message)"
@@ -2476,6 +2496,9 @@ if ("$($rel.name)" -notmatch '(2027\.\d+)') { throw "The current release's name 
 $new = $Matches[1]
 function Num($v) { if ("$v" -match '^2027\.(\d+)$') { [int]$Matches[1] } else { -1 } }
 $newer = (Num $new) -gt (Num $have)
+$zipAsset = @($rel.assets) | Where-Object { $_.name -eq 'sentora-windows-server.zip' } | Select-Object -First 1
+$published = if ($zipAsset -and $zipAsset.updated_at -is [datetime]) { $zipAsset.updated_at.ToString('yyyy-MM-dd') } elseif ($zipAsset -and "$($zipAsset.updated_at)" -match '^(\d{4}-\d{2}-\d{2})') { $Matches[1] } else { '-' }
+Put 'available' ("$(UnixNow) " + $(if ($newer) { "available $new $published $repo" } else { 'current' }) + "`n")
 if ($Check) {
     if ($newer) {
         $msg = "Sentora-Windows $new is out (this server has $have). To update, as Administrator: $root\bin\sentora-update.ps1"
@@ -2488,10 +2511,17 @@ if ($Check) {
     } else { Remove-Item $note -ErrorAction SilentlyContinue; "Up to date: $have (the newest release is $new)." }
     return
 }
-if (-not $newer -and -not $Force) { "Up to date: $have (the newest release is $new). -Force runs it again anyway."; return }
 $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this as Administrator.' }
+Put 'status' "start`tupdate`t$(UnixNow)`t$(if ($FromPanel) { 'panel' } else { 'console' })`n"
+if (-not $newer -and -not $Force) {
+    St "done`tsame`tAlready up to date: $have."
+    "Up to date: $have (the newest release is $new). -Force runs it again anyway."; return
+}
 "Updating: $have -> $new"
+$daemonTask = $null; $phpAccounts = @()
+try {
+Step 'Download the release and check its checksum'
 $work = Join-Path $root ('temp\update-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $work | Out-Null
 function Get-Asset($name) {
@@ -2509,12 +2539,16 @@ function Get-Asset($name) {
 $zip = Get-Asset 'sentora-windows-server.zip'
 "ok   the download matches its checksum"
 Expand-Archive $zip -DestinationPath $work -Force
+St "info`tSentora-Windows $new, checksum matches"
+Step 'Keep a copy of the settings'
 # a copy of the settings first (a repair keeps them anyway; this one is for looking back)
 $bk = Join-Path $root 'backups'
 if (-not (Test-Path $bk)) { New-Item -ItemType Directory -Path $bk | Out-Null }
 $copy = Join-Path $bk ("configs-before-$new-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
 Compress-Archive -Path (Join-Path $cfg '*') -DestinationPath $copy
 "ok   settings copied to $copy"
+St "info`t$(Plain $copy)"
+Step 'Stop the services'
 # the services NSSM runs stop first, and their programs are waited for (an installer of 2027.2 or older replaced their
 # folders while a program could still be exiting)
 # (the panel's too: SentoraZsudo and the daemon's task run PHP from bin\php, which the installer replaces)
@@ -2532,6 +2566,8 @@ for ($i = 0; $i -lt 120; $i++) {
     if ($i -eq 119) { $left | Stop-Process -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
 }
+"ok   services stopped"
+Step 'Run the installer of the new release (a repair, with your answers)'
 # the new installer, as a repair, with this server's answers
 $cmd = "`$ErrorActionPreference = 'Stop'; & '" + (Join-Path $work 'install-zpanel-stack.ps1').Replace("'", "''") + "' -Unattended"
 $ch = Join-Path $cfg 'install-choices.json'
@@ -2547,20 +2583,46 @@ if (Test-Path $ch) {
 $cmd += '; exit 0'
 $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
 $p = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $enc -Wait -PassThru -NoNewWindow
+if ($p.ExitCode -ne 0) { St "end`tfail`t$((UnixNow) - $script:stepAt)"; $script:stepNo = 0; throw "The installer of $new stopped (exit code $($p.ExitCode)): see its log in $root\logs. The settings before it are in $copy." }
+Step 'Start the services again'
 # (the panel's root jobs and daemon again, also when the new installer left them as they were)
 if (Get-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue) { Start-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue }
 foreach ($pa in $phpAccounts) { if (Get-Service -Name $pa.Name -ErrorAction SilentlyContinue) { Start-Service -Name $pa.Name -ErrorAction SilentlyContinue } }
 foreach ($tn in @('Sentora daemon', 'Sentora cron')) { if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) { Enable-ScheduledTask -TaskName $tn | Out-Null } }
-if ($p.ExitCode -ne 0) { throw "The installer of $new stopped (exit code $($p.ExitCode)): see its log in $root\logs. The settings before it are in $copy." }
 [IO.File]::WriteAllText($verFile, $new)
 Remove-Item $note -ErrorAction SilentlyContinue
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+$when = Get-Date -Format 'yyyy-MM-dd HH:mm'
+Put 'installed' "$($zipAsset.digest) $new, $when`n"
+Put 'available' "$(UnixNow) current`n"
+St "end`tok`t$((UnixNow) - $script:stepAt)"
+St "done`tok`tUpdated to Sentora-Windows $new.`t$new, $when"
 "Updated to Sentora-Windows $new."
+} catch {
+    # (what stopped it, for the page; the panel's root jobs and daemon are started again whatever happened)
+    $why = Plain $_.Exception.Message
+    if ($script:stepNo -gt 0) { St "end`tfail`t$((UnixNow) - $script:stepAt)" }
+    St "fail`t$why"
+    if (Get-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue) { Start-Service -Name 'SentoraZsudo' -ErrorAction SilentlyContinue }
+    foreach ($pa in $phpAccounts) { Start-Service -Name $pa.Name -ErrorAction SilentlyContinue }
+    foreach ($tn in @('Sentora daemon', 'Sentora cron')) { if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) { Enable-ScheduledTask -TaskName $tn | Out-Null } }
+    throw
+}
 '@
     $updAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Bin 'sentora-update.ps1') + '" -Check')
-    $null = Register-ScheduledTask -TaskName 'Sentora update check' -Action $updAction -Trigger (New-ScheduledTaskTrigger -Daily -At '3:17am') `
-        -User 'SYSTEM' -RunLevel Highest -Description 'Tells when a newer Sentora-Windows release is out (it does not update by itself)' -Force
-    Ok "C:\zpanel\bin\sentora-update.ps1 (-Check tells, no switch updates); the nightly check (3:17) only tells: logs\update-available.txt"
+    $hourly = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(17) -RepetitionInterval (New-TimeSpan -Hours 1)
+    $null = Register-ScheduledTask -TaskName 'Sentora update check' -Action $updAction -Trigger $hourly `
+        -User 'SYSTEM' -RunLevel Highest -Description 'Tells when a newer Sentora-Windows release is out, every hour (it does not update by itself)' -Force
+    # the panel's Update now (Panel Update, through SentoraZsudo): a task of its own, as SYSTEM, apart from the services
+    # the update stops; not made again while it runs (an update runs this installer from it)
+    $runArgs = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Bin 'sentora-update.ps1') + '" -FromPanel'
+    $ut = Get-ScheduledTask -TaskName 'Sentora update' -ErrorAction SilentlyContinue
+    if (-not $ut -or "$($ut.Actions[0].Arguments)" -ne $runArgs) {
+        $null = Register-ScheduledTask -TaskName 'Sentora update' -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $runArgs) -User 'SYSTEM' -RunLevel Highest `
+            -Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)) `
+            -Description 'Updates Sentora-Windows when the panel''s Panel Update asks (it has no schedule)' -Force
+    }
+    Ok "$(Join-Path $Bin 'sentora-update.ps1') (-Check tells, no switch updates); the hourly check only tells (logs\update-available.txt, Panel Update); task 'Sentora update' for the panel's Update now"
     if (-not (Test-Path (Join-Path $updCfg 'github-token.txt'))) { Note "(while the repository is private, updates need a read-only GitHub token in $updCfg\github-token.txt)" }
 
     Write-Host ''

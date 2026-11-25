@@ -148,7 +148,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\php-account-test.ps1
           if ($LASTEXITCODE -ne 0) { throw 'the PHP per account test failed' }
-      - name: Update - the nightly check sees the newest release, then an update to it keeps everything
+      - name: Update - from the panel's Panel Update page (Check now, Update now), and the update keeps everything
         env:
           GH_TOKEN: ${{ github.token }}
         shell: powershell
@@ -160,11 +160,8 @@ jobs:
           $rel = Invoke-RestMethod https://api.github.com/repos/RusTus/sentora-installers-2027/releases/tags/current -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'test' }
           if (-not (@($rel.assets) | Where-Object name -eq 'sentora-windows-server.zip')) { 'note the current release has no sentora-windows-server.zip yet: the update is tried from the next one'; exit 0 }
           $up = 'C:\zpanel\bin\sentora-update.ps1'
-          $c = powershell -NoProfile -ExecutionPolicy Bypass -File $up -Check | Out-String; $c
-          if ($c -notmatch 'is out' -or -not (Test-Path C:\zpanel\logs\update-available.txt)) { throw 'the check did not tell about the release' }
-          'ok   the check tells (logs\update-available.txt)'
-          powershell -NoProfile -ExecutionPolicy Bypass -File $up
-          if ($LASTEXITCODE -ne 0) { throw 'the update failed' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows\server\tests\panel-update-test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'the update from the panel failed' }
           $v = (Get-Content C:\zpanel\configs\version.txt -Raw).Trim()
           if ($v -notmatch '^2027\.\d+$') { throw "no version after the update: $v" }
           "ok   updated to $v"
@@ -220,7 +217,7 @@ jobs:
           if (Get-Service Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS, SentoraZsudo, 'SentoraPHP-*' -ErrorAction SilentlyContinue) { throw 'services still there' }
           if (Get-LocalGroup -Name SentoraPHP -ErrorAction SilentlyContinue) { throw 'the group SentoraPHP is still there' }
           if (Get-ScheduledTask -TaskName 'Sentora daemon' -ErrorAction SilentlyContinue) { throw "the panel's daemon task is still there" }
-          if (Get-ScheduledTask -TaskName 'Sentora update check' -ErrorAction SilentlyContinue) { throw 'the nightly check is still there' }
+          if (Get-ScheduledTask -TaskName 'Sentora update check', 'Sentora update' -ErrorAction SilentlyContinue) { throw 'an update task is still there' }
           'ok   services removed'
       - name: Keep the logs
         if: always()
