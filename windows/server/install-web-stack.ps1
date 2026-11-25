@@ -2291,6 +2291,22 @@ function Remove-Account($n) {
     foreach ($f in @((Join-Path $apacheCfg "$n.conf"), (Join-Path $cfg "$n.ini"), (Join-Path $cfg "$n-guard.php"), (Join-Path $saved "$n.json"))) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
 }
 
+# The File Manager's code (from the panel's modules\file_manager\app), copied once a run to C:\zpanel\filemanager: the
+# accounts' PHP reads it there, Apache serves its pictures and scripts; nobody writes in it but Administrators and SYSTEM.
+$script:fmDone = $null
+function Copy-FileManager {
+    if ($script:fmDone -ne $null) { return $script:fmDone }
+    $src = Join-Path $root 'panel\modules\file_manager\app'
+    $dst = Join-Path $root 'filemanager'
+    $script:fmDone = ''
+    if (-not (Test-Path (Join-Path $src 'winaccount.inc.php'))) { return '' }
+    $o = & robocopy.exe $src $dst /MIR /NFL /NDL /NJH /NJS /NP 2>&1
+    if ($LASTEXITCODE -ge 8) { Write-Warning "the File Manager could not be copied (robocopy $LASTEXITCODE)"; return '' }
+    Native 'icacls.exe' @($dst, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F', "${group}:(OI)(CI)RX", 'NT SERVICE\Apache2:(OI)(CI)RX') | Out-Null
+    $script:fmDone = $dst
+    return $dst
+}
+
 function Build($a) {
     $n = $a.name; $svc = "SentoraPHP-$n"; $sid = "NT SERVICE\$svc"; $hd = Join-Path $root "hostdata\$n"
     foreach ($d in @($hd, "$hd\public_html", "$hd\tmp", "$hd\sessions")) { if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null } }
@@ -2303,9 +2319,10 @@ function Build($a) {
     # command line as well (sentora-php-pool.php)
     $ini = Join-Path $cfg "$n.ini"
     $base = [IO.File]::ReadAllText((Join-Path $php 'php.ini'))
-    # (the panel's File Manager runs as the account's own PHP: its code may be read, nothing else of the panel)
-    $fmApp = Join-Path $root 'panel\modules\file_manager\app'
-    $fence = if (Test-Path $fmApp) { "$hd\;$guard;$fmApp" } else { "$hd\;$guard" }
+    # (the panel's File Manager runs as the account's own PHP: a copy of its code in a folder of its own, which the
+    # accounts may read; the panel's folder stays closed to them)
+    $fmApp = Copy-FileManager
+    $fence = if ($fmApp) { "$hd\;$guard;$fmApp" } else { "$hd\;$guard" }
     [IO.File]::WriteAllText($ini, $base + "`r`n; --- $n (phpaccount.ps1)`r`nopen_basedir = `"$fence`"`r`nauto_prepend_file = `"$guard`"`r`nerror_log = `"$hd\tmp\php-error.log`"`r`nupload_tmp_dir = `"$hd\tmp`"`r`nsys_temp_dir = `"$hd\tmp`"`r`nsession.save_path = `"$hd\sessions`"`r`ncgi.fix_pathinfo = 0`r`n")
     $params = "-n `"$pool`" `"$ini`" " + ($ports -join ',') + " `"open_basedir=$fence`" `"auto_prepend_file=$guard`""
     if (Get-Service $svc -ErrorAction SilentlyContinue) { Stop-Service $svc -Force -ErrorAction SilentlyContinue }
@@ -2344,25 +2361,30 @@ $members
     ProxyFCGISetEnvIf "true" SENTORA_KEY "$($a.key)"
 </Directory>
 "@)
-    if (Test-Path $fmApp) {
+    if ($fmApp) {
         # the panel's File Manager at /sentora-fm/NAME/, run by NAME's own PHP with NAME's key (NAME's files only; the
         # panel sends a signed pass, app\winaccount.inc.php); its pictures and scripts are plain files
         $fmFw = $fmApp -replace '\\', '/'
         [IO.File]::AppendAllText((Join-Path $apacheCfg "$n.conf"), "`r`n" + @"
 Alias "/sentora-fm/$n/" "$fmFw/"
-<LocationMatch "^/sentora-fm/$n/[a-z]+\.php$">
-    SetEnvIf Request_URI "^/sentora-fm/$n/([a-z]+\.php)$" SENTORA_FM=`$1
+<Directory "$fmFw">
+    Options None
+    AllowOverride None
+    Require all granted
+    # (its PHP files are never sent as they are: only the two pages below, run by the account's PHP)
+    <FilesMatch "\.(php|json)$|^(VERSION|LICENSE)">
+        Require all denied
+    </FilesMatch>
+</Directory>
+<LocationMatch "^/sentora-fm/$n/(index|raw)\.php$">
+    Require all granted
+    SetEnvIf Request_URI "^/sentora-fm/$n/((index|raw)\.php)$" SENTORA_FM=`$1
     SetHandler "proxy:balancer://php-$n/"
     ProxyFCGIBackendType GENERIC
     ProxyFCGISetEnvIf "true" SCRIPT_FILENAME "$fmFw/%{reqenv:SENTORA_FM}"
     ProxyFCGISetEnvIf "true" SENTORA_KEY "$($a.key)"
 </LocationMatch>
 "@)
-        # (the accounts' PHP may read the File Manager's code, and only list the folders above it)
-        Native 'icacls.exe' @($fmApp, '/grant', "${group}:(OI)(CI)RX") | Out-Null
-        foreach ($up in @((Join-Path $root 'panel'), (Join-Path $root 'panel\modules'), (Join-Path $root 'panel\modules\file_manager'))) {
-            Native 'icacls.exe' @($up, '/grant', "${group}:(RX)") | Out-Null
-        }
     }
     Start-Service $svc
 }
