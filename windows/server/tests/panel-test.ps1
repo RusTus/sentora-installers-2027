@@ -542,9 +542,19 @@ if (-not $j) {
     $head = "$(Get-Content $wf -Raw -ErrorAction SilentlyContinue)"; $head = $head.Substring(0, [Math]::Min(300, $head.Length))
     throw "Server Monitor: no figures. The page answered: $said. winstats.json ($((Get-Item $wf -ErrorAction SilentlyContinue).LastWriteTime)): $head. Its rights: $((icacls $wf) -join ' '). Its log: $(Get-Content "$Root\logs\panel\winstats-service.log" -Raw -ErrorAction SilentlyContinue)"
 }
-if (@($j.cpu.cpu).Count -ne 8 -or [int64]$j.mem.total -le 0 -or -not (@($j.fs) | Where-Object { $_.mount -eq 'C:' -and [int64]$_.total -gt 0 }) -or @($j.procs).Count -lt 10 -or $j.services.Apache -ne $true -or $j.services.MySQL -ne $true -or -not $j.info.os) {
-    throw "Server Monitor: the figures are not complete: $(($j | ConvertTo-Json -Depth 3 -Compress).Substring(0, 600))"
+function SmMissing($j) {
+    $m = @()
+    if (@($j.cpu.cpu).Count -ne 8) { $m += 'cpu' }
+    if ([int64]$j.mem.total -le 0) { $m += 'memory' }
+    if (-not (@($j.fs) | Where-Object { $_.mount -eq 'C:' -and [int64]$_.total -gt 0 })) { $m += "disk C: (fs: $(($j.fs | ConvertTo-Json -Compress)))" }
+    if (@($j.procs).Count -lt 10) { $m += "processes ($(@($j.procs).Count))" }
+    if ($j.services.Apache -ne $true -or $j.services.MySQL -ne $true) { $m += "services ($(($j.services | ConvertTo-Json -Compress)))" }
+    if (-not $j.info.os) { $m += 'system name' }
+    return $m
 }
+$miss = SmMissing $j
+for ($i = 0; $i -lt 5 -and $miss; $i++) { Start-Sleep 4; try { $j = (Page '/modules/server_monitor/code/stats.php?info=1' $null).Content | ConvertFrom-Json; $miss = SmMissing $j } catch { } }
+if ($miss) { throw "Server Monitor: the figures are not complete (5 samples): $($miss -join '; ')" }
 Ok "Server Monitor: live figures from SentoraStats (CPU, $([math]::Round($j.mem.total / 1GB, 1)) GB memory, disk C:, $(@($j.procs).Count) processes; Apache and MySQL running; $($j.info.os))"
 # Apache's account may read the figures, never write them
 $acl = (icacls C:\zpanel\data\sentora\monitor) -join ' '
