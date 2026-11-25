@@ -35,12 +35,12 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config)'
-foreach ($m in @('apache_admin', 'mailboxes', 'ftp_management', 'cron', 'backupmgr', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts)'
+foreach ($m in @('apache_admin', 'mailboxes', 'cron', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
@@ -264,3 +264,37 @@ $after = (Get-Process coredns -ErrorAction SilentlyContinue).StartTime
 if (-not $after -or $after -le $before) { throw "DNS Config's reload button did not restart CoreDNS (before $before, after $after)" }
 if (-not (Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction SilentlyContinue)) { throw "after the restart CoreDNS does not answer for $dom" }
 Ok 'DNS Config: its reload button restarts CoreDNS through SentoraZsudo, and the zones are answered again'
+
+# --- FTP: an account made on the FTP Accounts page becomes an SFTPGo user at the daemon run (sys_winftp, through SFTPGo's
+# API as SYSTEM), logs in over FTPS with its password and lands in its own folder; deleted on the page, it goes
+if (Get-Service SFTPGo -ErrorAction SilentlyContinue) {
+    $fu = "ftp$n"; $fpw = "Ftp-Test-$n-Aa9"; $fname = "zadmin_$fu"
+    $p = Page '/?module=ftp_management' $null
+    $p = Page '/?module=ftp_management&action=CreateFTP' @{ csfr_token = (Token $p.Content); inFTPUsername = $fu; inPassword = $fpw; inAccess = 'RW'; inAutoHome = '1'; inDestination = ''; inDomainDestination = '' }
+    $p = Page '/?module=sentoraconfig' $null
+    $p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+    function FtpTry($user, $pass, $extra) { $ErrorActionPreference = 'Continue'; $o = (& curl.exe -s -S --max-time 30 --ssl-reqd -k -u "${user}:$pass" @extra 2>&1) -join "`n"; return @($LASTEXITCODE, $o) }
+    Set-Content "$env:TEMP\ftp-up-$n.txt" "uploaded-$n" -Encoding ASCII
+    $r = $null
+    for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $r = FtpTry $fname $fpw @('-T', "$env:TEMP\ftp-up-$n.txt", 'ftp://127.0.0.1/'); if ($r[0] -eq 0) { break } }
+    if ($r[0] -ne 0) { throw "FTP: $fname can not log in and upload (curl $($r[0]): $($r[1]); daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'FTP' | Select-Object -Last 4) -join ' / '))" }
+    $landed = Get-ChildItem "$Root\hostdata\zadmin" -Recurse -Filter "ftp-up-$n.txt" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $landed -or $landed.DirectoryName -notlike "$Root\hostdata\zadmin\*") { throw "FTP: the upload did not land in the account's folder ($($landed.FullName))" }
+    Ok "FTP: an account made on the page logs in over FTPS (TLS required) and its upload lands in $($landed.DirectoryName)"
+    $r = FtpTry $fname 'Wrong-Pass-123' @('ftp://127.0.0.1/')
+    if ($r[0] -eq 0) { throw 'FTP: a wrong password logged in' }
+    $ErrorActionPreference = 'Continue'; $plain = (& curl.exe -s --max-time 15 -u "${fname}:$fpw" 'ftp://127.0.0.1/' 2>&1) -join ' '; $plainRc = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+    if ($plainRc -eq 0) { throw 'FTP: a login without TLS was let in' }
+    Ok 'FTP: a wrong password and a login without TLS are refused'
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $fid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT ft_id_pk FROM sentora_core.x_ftpaccounts WHERE ft_user_vc='$fname' AND ft_deleted_ts IS NULL") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    $p = Page '/?module=ftp_management' $null
+    $p = Page '/?module=ftp_management&action=DeleteFTP' @{ csfr_token = (Token $p.Content); inDelete = $fid }
+    $p = Page '/?module=sentoraconfig' $null
+    $p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+    for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $r = FtpTry $fname $fpw @('ftp://127.0.0.1/'); if ($r[0] -ne 0) { break } }
+    if ($r[0] -eq 0) { throw "FTP: $fname still logs in after it was deleted on the page" }
+    if (-not (Test-Path $landed.FullName)) { throw 'FTP: deleting the account removed its files' }
+    Ok 'FTP: deleted on the page, it can no longer log in; its files stay'
+}

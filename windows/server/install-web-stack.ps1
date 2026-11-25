@@ -1985,8 +1985,16 @@ switch ($Do) {
             # the server's address, for the DNS records the panel makes (the one on the network with the default gateway)
             $ipNow = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress
             if ($ipNow) { $settings['server_ip'] = $ipNow }
+            # FTP: SFTPGo's driver; the daemon (SYSTEM) reads SFTPGo's administrator from its settings file
+            $settings['ftp_php'] = 'sftpgo.php'; $settings['ftp_api'] = 'http://127.0.0.1:8080/api/v2'
+            $settings['ftp_env'] = "$fwdRoot/configs/sftpgo/env.d/sftpgo.env"
             $q = ''
-            foreach ($k in $settings.Keys) { $q += "UPDATE sentora_core.x_settings SET so_value_tx = '" + "$($settings[$k])".Replace('\', '\\').Replace("'", "''") + "' WHERE so_name_vc = '$k';" }
+            foreach ($k in $settings.Keys) {
+                $v = "$($settings[$k])".Replace('\', '\\').Replace("'", "''")
+                # (a setting Linux does not have is added, hidden: root's commands and paths are changed over SSH only)
+                $q += "INSERT INTO sentora_core.x_settings (so_name_vc, so_value_tx, so_usereditable_en) SELECT '$k', '$v', 'false' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM sentora_core.x_settings WHERE so_name_vc = '$k');"
+                $q += "UPDATE sentora_core.x_settings SET so_value_tx = '$v' WHERE so_name_vc = '$k';"
+            }
             $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', $q)
             if ($LASTEXITCODE -ne 0) { Fail "The panel's settings could not be written: $($out -join ' ')" }
             Ok "settings for Windows ($($settings.Count): folders, programs, service names)"
