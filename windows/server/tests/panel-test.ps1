@@ -438,7 +438,7 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     $ok = $false
     for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sl) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sl) } catch { $ok = $false } }
     if (-not $ok) { throw "Mail: a message to the list $lst@$dom did not reach both members (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
-    Ok "Mail: a distribution list made on its page ($lst@$dom) delivers to both its members
+    Ok "Mail: a distribution list made on its page ($lst@$dom) delivers to both its members"
     $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
     $mid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT mb_id_pk FROM sentora_core.x_mailboxes WHERE mb_address_vc='$addr' AND mb_deleted_ts IS NULL") -join ''
     Remove-Item Env:\MYSQL_PWD
