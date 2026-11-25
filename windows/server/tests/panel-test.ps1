@@ -155,7 +155,9 @@ Set-Content "$($folder.FullName)\who.php" '<?php echo trim((string) shell_exec("
 $w = Site $dom '/who.php'
 if ($w -ne 'nt service\sentoraphp-zadmin') { throw "the domain's PHP runs as: $w" }
 Ok "its PHP runs as the account's own Windows account ($w), not Apache's"
-$pk = Site $park '/'
+# (a daemon run that began before the parked domain was saved serves the domain first: the next run brings the parked one)
+$pk = ''
+for ($i = 0; $i -lt 40; $i++) { $pk = Site $park '/'; if ($pk -ne '' -and $pk -notmatch 'inUsername|Your Sentora account is active') { break }; Start-Sleep 3 }
 if ($pk -match 'inUsername|Your Sentora account is active' -or $pk -eq '') {
     $inConf = Select-String -Path "$Root\configs\apache\sentora-vhosts.conf" -Pattern ([regex]::Escape($park)) -Context 0, 4 -ErrorAction SilentlyContinue | Out-String
     throw "the parked domain $park is not served (the page said: '$parkedSaid'; in sentora-vhosts.conf: $($inConf.Trim()); it answered: $(($pk -replace '\s+', ' ').Substring(0, [Math]::Min(160, $pk.Length))))"
