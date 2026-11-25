@@ -35,16 +35,16 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts)'
-foreach ($m in @('apache_admin', 'mailboxes', 'cron', 'backupmgr', 'php_versions')) {
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes)'
+foreach ($m in @('apache_admin', 'aliases', 'cron', 'backupmgr', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(apache_admin|mailboxes|cron)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(apache_admin|aliases|cron)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
@@ -297,4 +297,57 @@ if (Get-Service SFTPGo -ErrorAction SilentlyContinue) {
     if ($r[0] -eq 0) { throw "FTP: $fname still logs in after it was deleted on the page" }
     if (-not (Test-Path $landed.FullName)) { throw 'FTP: deleting the account removed its files' }
     Ok 'FTP: deleted on the page, it can no longer log in; its files stay'
+}
+
+# --- Mailboxes: a mailbox made on the Mailboxes page becomes a Stalwart account at the daemon run (sys_winmail, through
+# Stalwart's API as SYSTEM) and logs in over IMAPS with its password; a new password works, the old one no longer;
+# switched off it can not log in; deleted on the page, it goes
+if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
+    function ImapLogin($user, $pass) {
+        $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 993)
+        try {
+            $ssl = New-Object Net.Security.SslStream($c.GetStream(), $false, ([Net.Security.RemoteCertificateValidationCallback] { $true }))
+            $ssl.AuthenticateAsClient('localhost')
+            $rd = New-Object IO.StreamReader($ssl); $wr = New-Object IO.StreamWriter($ssl); $wr.NewLine = "`r`n"; $wr.AutoFlush = $true
+            $null = $rd.ReadLine()
+            $wr.WriteLine('a1 LOGIN "' + $user + '" "' + $pass + '"')
+            do { $l = $rd.ReadLine() } while ($l -and $l -notmatch '^a1 ')
+            return [bool]($l -match '^a1 OK')
+        } finally { $c.Close() }
+    }
+    function MailRun { $p = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) } }
+    $box = "box$n"; $addr = "$box@$dom"; $mpw = "Mail-Test-$n-Aa9"; $mpw2 = "Mail-New-$n-Bb8"
+    $p = Page '/?module=mailboxes' $null
+    $p = Page '/?module=mailboxes&action=AddMailbox' @{ csfr_token = (Token $p.Content); inAddress = $box; inDomain = $dom; inPassword = $mpw }
+    MailRun
+    $ok = $false
+    for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = ImapLogin $addr $mpw } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: $addr can not log in over IMAPS (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
+    if (ImapLogin $addr 'Wrong-Pass-123') { throw 'Mail: a wrong password logged in' }
+    Ok "Mail: a mailbox made on the Mailboxes page ($addr) logs in over IMAPS; a wrong password does not"
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $mid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT mb_id_pk FROM sentora_core.x_mailboxes WHERE mb_address_vc='$addr' AND mb_deleted_ts IS NULL") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    $p = Page "/?module=mailboxes&show=Edit&other=$mid" $null
+    $p = Page "/?module=mailboxes&show=Edit&other=$mid&action=UpdateMailbox" @{ csfr_token = (Token $p.Content); inSave = $mid; inPassword = $mpw2; inEnabled = '1' }
+    MailRun
+    $ok = $false
+    for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapLogin $addr $mpw2) -and -not (ImapLogin $addr $mpw) } catch { $ok = $false } }
+    if (-not $ok) { throw "Mail: the new password of $addr does not work (or the old one still does)" }
+    Ok 'Mail: a password changed on the page works at once after the daemon run, the old one no longer'
+    $p = Page "/?module=mailboxes&show=Edit&other=$mid" $null
+    $p = Page "/?module=mailboxes&show=Edit&other=$mid&action=UpdateMailbox" @{ csfr_token = (Token $p.Content); inSave = $mid; inPassword = '' }
+    MailRun
+    $off = $false
+    for ($i = 0; $i -lt 40 -and -not $off; $i++) { Start-Sleep 3; try { $off = -not (ImapLogin $addr $mpw2) } catch { $off = $false } }
+    if (-not $off) { throw "Mail: $addr switched off on the page still logs in" }
+    Ok 'Mail: switched off on the page, it can not log in'
+    $p = Page '/?module=mailboxes' $null
+    $p = Page '/?module=mailboxes&action=ConfirmDeleteMailbox' @{ csfr_token = (Token $p.Content); inDelete = $mid }
+    MailRun
+    Start-Sleep 5
+    $left = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\bin\mailuser.ps1" list 2>&1 | Out-String
+    if ($left -match [regex]::Escape($addr)) { throw "Mail: $addr is still in Stalwart after it was deleted on the page" }
+    if ($left -notmatch 'alice@example\.test') { throw "Mail: a mailbox made with mailuser.ps1 (alice@example.test) went: $left" }
+    Ok 'Mail: deleted on the page, it goes from Stalwart; mailboxes made with mailuser.ps1 stay'
 }

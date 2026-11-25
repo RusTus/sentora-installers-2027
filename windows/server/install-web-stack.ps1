@@ -1971,6 +1971,16 @@ switch ($Do) {
                 if ($LASTEXITCODE -ne 0) { Fail "The panel's database could not be made: $($out -join ' ')" }
                 Ok 'database sentora_core made'
             } else { Ok 'database sentora_core kept' }
+            # the mail database the panel's Mailboxes page writes (as on Linux); the daemon brings Stalwart in line with it
+            $haveMailDb = (Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-N', '-e', "SHOW DATABASES LIKE 'sentora_postfix'")) -join ''
+            if ($haveMailDb -ne 'sentora_postfix') {
+                $inst = Get-PanelSource $PanelSqlSource 'RusTus/sentora-installers-2027' 'sentora-installers-2027.zip'
+                $msql = Get-ChildItem $inst -Recurse -Filter 'sentora_postfix.sql' | Where-Object { $_.FullName -match 'sentora-install\\sql' } | Select-Object -First 1
+                if (-not $msql) { Fail 'The installers have no preconf\sentora-install\sql\sentora_postfix.sql.' }
+                $out = Invoke-Native $mysql @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', ('source ' + (& $Fwd $msql.FullName)))
+                if ($LASTEXITCODE -ne 0) { Fail "The mail database could not be made: $($out -join ' ')" }
+                Ok 'database sentora_postfix made (the panel''s mailboxes; Stalwart follows it)'
+            } else { Ok 'database sentora_postfix kept' }
             # where things are on Windows (the settings the panel reads instead of Linux's)
             $fwdRoot = & $Fwd $Root
             $settings = [ordered]@{
@@ -1988,6 +1998,8 @@ switch ($Do) {
             # FTP: SFTPGo's driver; the daemon (SYSTEM) reads SFTPGo's administrator from its settings file
             $settings['ftp_php'] = 'sftpgo.php'; $settings['ftp_api'] = 'http://127.0.0.1:8080/api/v2'
             $settings['ftp_env'] = "$fwdRoot/configs/sftpgo/env.d/sftpgo.env"
+            # mail: Stalwart's API on this server, and its administrator (read by the daemon only)
+            $settings['mail_api'] = 'https://127.0.0.1:8443'; $settings['mail_admin'] = "$fwdRoot/configs/stalwart/admin.txt"
             $q = ''
             foreach ($k in $settings.Keys) {
                 $v = "$($settings[$k])".Replace('\', '\\').Replace("'", "''")
