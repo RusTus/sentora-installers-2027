@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin)'
 foreach ($m in @('forwarders', 'php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -427,6 +427,18 @@ $c = ''
 for ($i = 0; $i -lt 40 -and $c -ne '200'; $i++) { Start-Sleep 3; $c = Code "nothere$n.example.net" }
 if ((Site "nothere$n.example.net" '/') -notmatch 'inUsername') { throw 'panel_fallback on again: a name no site claims does not open the panel' }
 Ok 'on again: names no site claims open the panel'
+
+# --- Module Admin: every module listed, the ones not ready for Windows marked, no add-on upload (add-ons are Linux's)
+$c = (Page '/?module=moduleadmin' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Module Admin page does not load' }
+if ($c -notmatch 'not on Windows yet' -or $c -match 'name="modulefile"') { throw 'Module Admin does not mark the modules not ready for Windows, or offers the add-on upload' }
+Ok 'Module Admin: the modules not ready for Windows are marked; no add-on upload on Windows'
+
+# --- FTP Config: SFTPGo's name and passive ports from the settings, no ProFTPD settings or text
+$c = (Page '/?module=ftp_admin' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the FTP Config page does not load' }
+if ($c -match 'ProFTPD|60000-65535|name="ftp_db"' -or $c -notmatch 'SFTPGo' -or $c -notmatch '50000-50100') { throw 'the FTP Config page does not show SFTPGo''s settings' }
+Ok 'FTP Config: the page shows SFTPGo, its passive ports (50000-50100) and no ProFTPD settings'
 
 # --- Apache Config: a domain's own lines (saved on its page) and the lines for every website go into the Windows sites;
 # a line Apache refuses switches off only that domain's lines (the page says so), the rest stays live

@@ -2001,7 +2001,7 @@ switch ($Do) {
             if ($ipNow) { $settings['server_ip'] = $ipNow }
             # FTP: SFTPGo's driver; the daemon (SYSTEM) reads SFTPGo's administrator from its settings file
             $settings['ftp_php'] = 'sftpgo.php'; $settings['ftp_api'] = 'http://127.0.0.1:8080/api/v2'
-            $settings['ftp_env'] = "$fwdRoot/configs/sftpgo/env.d/sftpgo.env"
+            $settings['ftp_env'] = "$fwdRoot/configs/sftpgo/env.d/sftpgo.env"; $settings['ftp_passive_ports'] = '50000-50100'
             # mail: Stalwart's API on this server, and its administrator (read by the daemon only)
             $settings['mail_api'] = 'https://127.0.0.1:8443'; $settings['mail_admin'] = "$fwdRoot/configs/stalwart/admin.txt"
             $q = ''
