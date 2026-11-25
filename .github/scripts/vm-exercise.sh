@@ -255,7 +255,9 @@ x_logforward() { # Log Forwarder (add-on): the panel's own access log sent live 
     rm -rf "$d"; mkdir -p "$d" && unzip -qo "$zpp" -d "$d" && chown -R root:root "$d"
     ( cd "$PANEL" && php -r 'require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php"; ui_module::ModuleInfoToDB("log_forwarder");' \
         && php -q "$d/deploy/install.run" ) > "$TMP/lf-install.txt" 2>&1 || { WHY="install: $(tail -2 "$TMP/lf-install.txt")"; return 1; }
-    grep -q "<version>202" "$d/module.xml" || { WHY="not the checkout's version"; return 1; }
+    # (version 202 or newer: the one with live sending over TLS; the test once matched the text "202")
+    local lfv; lfv=$(sed -n 's/.*<version>\([0-9]*\)<\/version>.*/\1/p' "$d/module.xml" | head -1)
+    [ "${lfv:-0}" -ge 202 ] || { WHY="not the checkout's version (${lfv:-none})"; return 1; }
     [ -n "$(ls /usr/lib*/rsyslog/lmnsd_gtls.so /usr/lib/*/rsyslog/lmnsd_gtls.so 2> /dev/null)" ] || { WHY="rsyslog's TLS support was not installed: $(cat "$TMP/lf-install.txt" | tr '\n' ' ' | cut -c1-200)"; return 1; }
     # a receiver with a certificate of its own making, as a self-hosted log server has
     mkdir -p $rx && rm -f $rx/got.txt
