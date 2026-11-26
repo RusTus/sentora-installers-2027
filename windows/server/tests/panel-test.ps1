@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -774,6 +774,61 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = (ImapHas $addr $mpw $sf2) -and (ImapHas 'alice@example.test' 'Alice-Pass-1234' $sf2) -and (ImapHas 'bob@example.test' 'Bob-Pass-5678' $sf2) } catch { $ok = $false } }
     if (-not $ok) { throw "Mail: forwarders from $addr to two addresses did not deliver to all three (daemon log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail' | Select-Object -Last 4) -join ' / '))" }
     Ok "Mail: forwarders to two addresses (alice and bob, copy kept) deliver to all three"
+    # --- Mail Config: the Windows settings (webmail, ActiveSync, Stalwart's limits) and no SOGo; saved, the daemon
+    # writes the webmail's file, closes ActiveSync's address (and opens it again), and sets Stalwart's largest message and
+    # login block; a mailbox's size is its Stalwart disk quota
+    function Stal($method, $argsJson) {
+        $adm = Get-Content "$Root\configs\stalwart\admin.txt" -Raw
+        $su = if ($adm -match '(?m)^user=(.+)$') { $Matches[1].Trim() } else { '' }; $sp = if ($adm -match '(?m)^password=(.+)$') { $Matches[1].Trim() } else { '' }
+        $ErrorActionPreference = 'Continue'
+        $ss = ((& curl.exe -sk --max-time 20 -u "${su}:$sp" 'https://127.0.0.1:8443/jmap/session' 2>&1) -join '') | ConvertFrom-Json
+        $acct = $ss.primaryAccounts.'urn:stalwart:jmap'
+        $f = Join-Path $env:TEMP "stal-$n.json"
+        [IO.File]::WriteAllText($f, ('{"using":["urn:ietf:params:jmap:core","urn:stalwart:jmap"],"methodCalls":[["' + $method + '",' + $argsJson.Replace('"ACCT"', '"' + $acct + '"') + ',"c0"]]}'))
+        $r = (& curl.exe -sk --max-time 20 -u "${su}:$sp" -H 'Content-Type: application/json' --data-binary "@$f" 'https://127.0.0.1:8443/jmap/' 2>&1) -join ''
+        $ErrorActionPreference = 'Stop'
+        return $r
+    }
+    function Eas { $ErrorActionPreference = 'Continue'; (& curl.exe -sk -o NUL -w '%{http_code}' -X OPTIONS -u alice@example.test:wrong-password --max-time 20 https://127.0.0.1/Microsoft-Server-ActiveSync 2>&1) -join '' }
+    function MailCfg($vals) {
+        $p = Page '/?module=mail_admin' $null
+        $b = @{ csfr_token = (Token $p.Content) }; foreach ($k in $vals.Keys) { $b[$k] = $vals[$k] }
+        $p = Page '/?module=mail_admin&action=UpdateConfig' $b
+        if ($p.Content -match 'Fatal error|Uncaught|Warning:') { throw 'Mail Config: saving failed' }
+        MailRun
+    }
+    $c = (Page '/?module=mail_admin' $null).Content
+    if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Mail Config page does not load' }
+    $bad = @()
+    foreach ($w in @('name="webmail_language"', 'name="webmail_timezone"', 'name="mail_activesync"', 'name="mail_max_message_mb"', 'name="mail_ban_logins"', 'name="max_mail_size"')) { if ($c -notmatch [regex]::Escape($w)) { $bad += "no $w" } }
+    if ($c -match 'SOGo|name="sogo_') { $bad += 'it shows SOGo' }
+    if ($c -notmatch 'IMAP') { $bad += 'no mail services box' }
+    if ($bad) { throw "Mail Config: the page is not the Windows one: $($bad -join ', ')" }
+    Ok 'Mail Config: the page shows the webmail, ActiveSync and mail server settings and the services, no SOGo'
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $qmb = [int]((& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT quota FROM sentora_postfix.mailbox WHERE username='$addr'") -join '')
+    Remove-Item Env:\MYSQL_PWD
+    $r = Stal 'x:Account/get' '{"accountId":"ACCT","properties":["emailAddress","quotas"]}'
+    $got = (($r | ConvertFrom-Json).methodResponses[0][1].list | Where-Object { $_.emailAddress -eq $addr }).quotas.maxDiskQuota
+    if ($qmb -le 0 -or [int64]$got -ne [int64]$qmb * 1048576) { throw "Mail Config: $addr's size in Stalwart is '$got', the panel's is $qmb MB ($($r.Substring(0, [Math]::Min(400, $r.Length))))" }
+    Ok "Mail Config: a mailbox's size ($qmb MB) is its Stalwart disk quota"
+    if ((Eas) -ne '401') { throw "Mail Config: ActiveSync does not answer before the change ($(Eas))" }
+    MailCfg @{ webmail_language = 'de_DE'; webmail_refresh = '120'; mail_activesync = 'false'; mail_max_message_mb = '20'; mail_ban_logins = '500' }
+    $rcp = "$Root\configs\stalwart\roundcube-panel.inc.php"
+    $ok = $false
+    for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $t = Get-Content $rcp -Raw -ErrorAction SilentlyContinue; $ok = ($t -match "'de_DE'") -and ($t -match "refresh_interval'\] = 120") -and ((Eas) -eq '403') }
+    if (-not $ok) { throw "Mail Config: the daemon did not apply the webmail settings and ActiveSync off ($rcp has: $t; ActiveSync: $(Eas); log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail Config' | Select-Object -Last 4) -join ' / '))" }
+    Ok 'Mail Config: saved, the webmail gets its language and new-mail check, and ActiveSync''s address is closed (403)'
+    $r1 = Stal 'x:MtaStageData/get' '{"accountId":"ACCT","properties":["maxMessageSize"]}'
+    $r2 = Stal 'x:Security/get' '{"accountId":"ACCT","properties":["authBanRate"]}'
+    if ($r1 -notmatch '"else":"20971520"' -or $r2 -notmatch '"count":500') { throw "Mail Config: Stalwart did not get its new limits: $r1 / $r2" }
+    Ok 'Mail Config: Stalwart takes messages up to 20 MB and blocks after 500 wrong passwords (its own settings, read back)'
+    if ((Get-Service Apache2).Status -ne 'Running') { throw 'Mail Config: Apache does not run after the change' }
+    MailCfg @{ webmail_language = 'auto'; webmail_refresh = '60'; mail_activesync = 'true'; mail_max_message_mb = '100'; mail_ban_logins = '100' }
+    $ok = $false
+    for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Eas) -eq '401' }
+    if (-not $ok) { throw "Mail Config: ActiveSync switched on again does not answer ($(Eas))" }
+    Ok 'Mail Config: ActiveSync switched on again answers (401 for a wrong password)'
     $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
     $mid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT mb_id_pk FROM sentora_core.x_mailboxes WHERE mb_address_vc='$addr' AND mb_deleted_ts IS NULL") -join ''
     Remove-Item Env:\MYSQL_PWD

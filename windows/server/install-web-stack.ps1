@@ -1321,6 +1321,7 @@ public static class ZLoopTls {
         # --- webmail: Roundcube in C:\zpanel\apps\roundcube, its database in MySQL
         $rc = Join-Path $apps 'roundcube'
         $rcCfgFile = Join-Path $mailCfg 'roundcube.inc.php'
+        $rcPanelFile = Join-Path $mailCfg 'roundcube-panel.inc.php'
         $rcOld = if (Test-Path $rcCfgFile) { Get-Content $rcCfgFile -Raw } else { '' }
         $rcDbPw  = if ($rcOld -match "mysql://roundcube:([A-Za-z0-9]+)@") { $Matches[1] } else { New-Password }
         $rcDes   = if ($rcOld -match "'des_key'\] = '([A-Za-z0-9]+)'") { $Matches[1] } else { New-Password }
@@ -1355,7 +1356,10 @@ public static class ZLoopTls {
 `$config['junk_mbox'] = 'Junk Mail';
 `$config['sent_mbox'] = 'Sent Items';
 `$config['trash_mbox'] = 'Deleted Items';
+// the panel's Admin > Mail Config (language, time zone, new-mail check, largest message, log out): written by its daemon
+if (is_readable('$(& $Fwd $rcPanelFile)')) { include '$(& $Fwd $rcPanelFile)'; }
 "@
+        if (-not (Test-Path $rcPanelFile)) { Write-Utf8NoBom $rcPanelFile "<?php`r`n// Made by the panel's daemon from Admin > Mail Config: change the values there (this file is written again).`r`n" }
         Write-Utf8NoBom (Join-Path $rc 'config\config.inc.php') ("<?php`r`n// install-zpanel-stack.ps1: the settings are in C:\zpanel\configs\stalwart (Administrators only)`r`nrequire '" + (& $Fwd $rcCfgFile) + "';`r`n")
         $q = "CREATE DATABASE IF NOT EXISTS roundcube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
         foreach ($h in @('localhost', '127.0.0.1')) {
@@ -1647,6 +1651,8 @@ exit($fail);
             Require all granted
         </Files>
     </Directory>
+    # (the panel's Admin > Mail Config: ActiveSync on or off, written by its daemon)
+    IncludeOptional "`${ZROOT}/configs/apache/mail-panel.conf"
 
     # calendars and contacts (CalDAV, CardDAV) from Stalwart on this server
     SSLProxyEngine on
@@ -2007,6 +2013,8 @@ switch ($Do) {
             $settings['db_service'] = $MySQLService; $settings['mail_service'] = $MailService; $settings['clamd_service'] = $ClamService; $settings['freshclam_service'] = $FreshService
             # mail: Stalwart's API on this server, and its administrator (read by the daemon only)
             $settings['mail_api'] = 'https://127.0.0.1:8443'; $settings['mail_admin'] = "$fwdRoot/configs/stalwart/admin.txt"
+            # Mail Config: the files its daemon writes (the webmail's settings, ActiveSync's switch in the mail site)
+            $settings['webmail_panel_conf'] = "$fwdRoot/configs/stalwart/roundcube-panel.inc.php"; $settings['mail_apache_conf'] = "$fwdRoot/configs/apache/mail-panel.conf"
             $q = ''
             foreach ($k in $settings.Keys) {
                 $v = "$($settings[$k])".Replace('\', '\\').Replace("'", "''")
@@ -2138,7 +2146,7 @@ switch ($Do) {
     }
     # read (and run its own programs)
     foreach ($p in @($ApacheDir, $PhpDir, (Join-Path $Root 'panel'), (Join-Path $Root 'hostdata'), $apps, (Join-Path $Cfg 'apache'), (Join-Path $Cfg 'ssl'),
-                     (Join-Path $Cfg 'stalwart\mailscan-key.txt'), (Join-Path $Cfg 'stalwart\roundcube.inc.php'))) { Grant-Apache $p 'RX' }
+                     (Join-Path $Cfg 'stalwart\mailscan-key.txt'), (Join-Path $Cfg 'stalwart\roundcube.inc.php'), (Join-Path $Cfg 'stalwart\roundcube-panel.inc.php'))) { Grant-Apache $p 'RX' }
     # write: its logs, temp files, sessions and the webmail's and ActiveSync's own data
     foreach ($p in @((Join-Path $ApacheDir 'logs'), (Join-Path $Logs 'apache'), (Join-Path $Logs 'php'), (Join-Path $Logs 'roundcube'), (Join-Path $Logs 'z-push'),
                      (Join-Path $Logs 'panel'), $Tmp, (Join-Path $Root 'data\z-push'))) { Grant-Apache $p 'M' }
