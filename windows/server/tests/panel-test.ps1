@@ -903,7 +903,20 @@ for ($i = 0; $i -lt 60; $i++) {
         $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
     }
 }
-if ($row -notmatch '^[1-9]\d* [1-9]') { throw "Matomo: no site with its log imported for $dom ($row; daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Matomo|matomo|import' | Select-Object -Last 6) -join ' / '))" }
+if ($row -notmatch '^[1-9]\d* [1-9]') {
+    # (diagnosis: Matomo's own login to MySQL, with the password in its config, and how MySQL has that user)
+    $mc = Get-Content "$Root\panel\etc\apps\matomo\config\config.ini.php" -Raw -ErrorAction SilentlyContinue
+    $mpw = if ($mc -match '(?m)^password\s*=\s*"([^"]*)"') { $Matches[1] } else { '' }
+    $mhost = if ($mc -match '(?m)^host\s*=\s*"([^"]*)"') { $Matches[1] } else { '?' }
+    $env:MYSQL_PWD = $mpw
+    $ErrorActionPreference = 'Continue'
+    $mlogin = (& $my --protocol=TCP -h 127.0.0.1 -u matomo -N -e "SELECT CURRENT_USER()" 2>&1) -join ' '
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $muser = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(user,'@',host,' ',plugin,' ',password_last_changed) FROM mysql.user WHERE user='matomo'" 2>&1) -join ' | '
+    $ErrorActionPreference = 'Stop'
+    Remove-Item Env:\MYSQL_PWD
+    Write-Host "   (diagnosis) Matomo's config: host $mhost, password $($mpw.Length) characters; its login now: $mlogin; MySQL: $muser"
+    throw "Matomo: no site with its log imported for $dom ($row; daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Matomo|matomo|import' | Select-Object -Last 6) -join ' / '))" }
 Ok "Matomo: the daemon made a Matomo site for $dom (id $($row.Split(' ')[0])) and the hourly run imported its log with Python"
 } catch { $late += "$_" }
 
