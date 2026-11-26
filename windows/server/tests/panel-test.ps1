@@ -177,8 +177,9 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
         if ($i % 10 -eq 9) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
     }
     if ($pv -ne '8.4 nt service\sentoraphp-zadmin') {
+        $myc = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
         $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
-        $dbv = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(vh_type_in, ':', IFNULL(vh_php_version_vc, 'none')) FROM sentora_core.x_vhosts WHERE vh_id_pk=$vid; SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='php_versions_enabled'") -join ' / '
+        $dbv = (& $myc --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(vh_type_in, ':', IFNULL(vh_php_version_vc, 'none')) FROM sentora_core.x_vhosts WHERE vh_id_pk=$vid; SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='php_versions_enabled'") -join ' / '
         Remove-Item Env:\MYSQL_PWD
         $ErrorActionPreference = 'Continue'
         $syncSaid = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\bin\phpaccount.ps1" sync 2>&1 | Out-String)
@@ -199,7 +200,7 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     Ok "PHP versions: back to the panel's PHP (8.5), $dom runs it again"
     Remove-Item "$($folder.FullName)\v.php" -Force
 } else { throw 'PHP versions: the installer did not add PHP 8.4 (bin\php-8.4)' }
-} catch { $phpFail = "$_" }
+} catch { $phpFail = "$_"; Write-Host "   (reported at the end) $phpFail" }
 # (a daemon run that began before the parked domain was saved serves the domain first: the next run brings the parked one)
 $pk = ''
 for ($i = 0; $i -lt 60; $i++) {
