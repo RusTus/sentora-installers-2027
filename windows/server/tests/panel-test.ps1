@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip', 'matomo')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip', 'matomo', 'php_versions')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -158,6 +158,9 @@ Ok "its PHP runs as the account's own Windows account ($w), not Apache's"
 # --- another PHP version for one domain (Domains page): the account's own service runs it too (its own php-cgi and
 # pool), still as the account's Windows account; back to the panel's PHP, the domain goes back
 if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
+    $c = (Page '/?module=php_versions' $null).Content
+    if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { throw 'PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way' }
+    Ok 'PHP versions: the PHP Versions page shows 8.4 (and 8.3) switched on, without Linux''s PHP-FPM, updates and extensions'
     Set-Content "$($folder.FullName)\v.php" '<?php echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION . " " . trim((string) shell_exec("whoami"));' -Encoding ASCII
     function SetPhp($ver) {
         $p = Page '/?module=domains' $null
