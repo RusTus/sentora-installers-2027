@@ -159,7 +159,7 @@ Ok "its PHP runs as the account's own Windows account ($w), not Apache's"
 # pool), still as the account's Windows account; back to the panel's PHP, the domain goes back
 if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     $c = (Page '/?module=php_versions' $null).Content
-    if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { throw 'PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way' }
+    if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { $tx = (($c -replace '(?s)<script.*?</script>', ' ') -replace '<[^>]+>', ' ' -replace '\s+', ' '); $at = [Math]::Max(0, $tx.IndexOf('PHP 8.5')); throw "PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way: $($tx.Substring($at, [Math]::Min(600, $tx.Length - $at)))" }
     Ok 'PHP versions: the PHP Versions page shows 8.4 (and 8.3) switched on, without Linux''s PHP-FPM, updates and extensions'
     Set-Content "$($folder.FullName)\v.php" '<?php echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION . " " . trim((string) shell_exec("whoami"));' -Encoding ASCII
     function SetPhp($ver) {
