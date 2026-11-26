@@ -40,11 +40,11 @@ foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users',
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
 Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders, File Manager, Backup Config)'
-foreach ($m in @('php_versions')) {
+foreach ($m in @('goaccess_stats', 'repo_browser')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(php_versions)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(goaccess_stats|repo_browser)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
