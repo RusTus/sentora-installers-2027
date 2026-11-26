@@ -1095,10 +1095,10 @@ for box in ['INBOX','"Junk Mail"']:
         $subj = "spamav $n-$($script:sk)"
         $text = if ($gtube) { 'XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X' } else { 'Hello, the meeting is at ten tomorrow. Regards, Sam' }
         $py = @"
-import imaplib,smtplib,ssl,time
+import imaplib,smtplib,ssl,time,email.utils
 s=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=30); s.ehlo()
 if s.has_extn('starttls'): s.starttls(context=ssl._create_unverified_context()); s.ehlo()
-s.sendmail('$from',['$saddr'],'From: $from\r\nTo: $saddr\r\nSubject: $subj\r\n\r\n$text\r\n')
+s.sendmail('$from',['$saddr'],'From: Sam <$from>\r\nTo: $saddr\r\nDate: '+email.utils.formatdate()+'\r\nMessage-ID: '+email.utils.make_msgid(domain='outside.example')+'\r\nSubject: $subj\r\n\r\n$text\r\n')
 s.quit()
 for t in range(20):
     time.sleep(3)
@@ -1106,7 +1106,9 @@ for t in range(20):
     for box in ['INBOX','"Junk Mail"']:
         if m.select(box)[0]!='OK': continue
         t2,d=m.search(None,'SUBJECT','"$subj"')
-        if d[0].split(): print('FOLDER',box.strip('"')); raise SystemExit
+        for i in d[0].split():
+            t3,x=m.fetch(i,'(BODY.PEEK[HEADER.FIELDS (X-SPAM-SCORE)])'); print('SCORE',x[0][1].decode(errors='replace').strip())
+            print('FOLDER',box.strip('"')); raise SystemExit
     m.logout()
 print('FOLDER none')
 "@
@@ -1114,6 +1116,7 @@ print('FOLDER none')
         $ErrorActionPreference = 'Continue'
         $r = (& python $f 2>&1) -join "`n"
         $ErrorActionPreference = 'Stop'
+        if ($r -match 'SCORE (.*)') { Write-Host "   ($from, $(if ($gtube) { 'spam' } else { 'plain' })) $($Matches[1].Trim())" }
         if ($r -match 'FOLDER (.+)') { return $Matches[1].Trim() }
         throw "SpamAV: the test message did not get through: $r"
     }
