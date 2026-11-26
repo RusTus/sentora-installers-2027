@@ -641,7 +641,7 @@ for ($i = 0; $i -lt 100; $i++) { Start-Sleep 3; $st = ObState; if ($st -and [int
 $night = Join-Path $ob "$env:COMPUTERNAME\$(Get-Date -Format 'yyyy-MM-dd')"
 $miss = @()
 foreach ($f in @("$night\databases\sentora_core.sql.gz", "$night\config\configs.zip", "$night\manifest.json", "$ob\$env:COMPUTERNAME\files\hostdata\zadmin\public_html", "$ob\$env:COMPUTERNAME\files\mail")) { if (-not (Test-Path $f)) { $miss += $f } }
-if (-not ($st -and $st.result -eq 'ok') -or $miss) { throw "Backup Config: Back up now did not make the copy (state: $($st | ConvertTo-Json -Compress); missing: $($miss -join ', '); log: $(Get-Content "$Root\logs\panel\offsite-backup.log" -Raw -ErrorAction SilentlyContinue))" }
+if (-not ($st -and $st.result -eq 'ok') -or $miss) { throw "Backup Config: Back up now did not make the copy (state: $($st | ConvertTo-Json -Compress); missing: $($miss -join ', '); log: $(Get-Content "$Root\logs\panel\offsite-backup.log" -Raw -ErrorAction SilentlyContinue); PHP: $((Get-Content "$Root\logs\php\php_errors.log" -Tail 6 -ErrorAction SilentlyContinue) -join ' / '); running: $((Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='mysqldump.exe' OR Name='robocopy.exe'" | ForEach-Object { $_.Name + ':' + $_.CommandLine }) -join ' | '))" }
 if ((Get-Service Stalwart).Status -ne 'Running') { throw 'Backup Config: Stalwart did not start again after the mailboxes were copied' }
 $gz = [IO.Compression.GZipStream]::new([IO.File]::OpenRead("$night\databases\sentora_core.sql.gz"), [IO.Compression.CompressionMode]::Decompress)
 $head = (New-Object IO.StreamReader($gz)).ReadToEnd(); $gz.Close()
