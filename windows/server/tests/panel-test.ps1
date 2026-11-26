@@ -1137,6 +1137,12 @@ print('FOLDER none')
     $at = SpamLands 'spammer@outside.example' $true
     if ($at -ne 'INBOX') { throw "SpamAV: with the filter off for the mailbox, spam went to $at" }
     Ok 'SpamAV: the filter switched off for a mailbox lets everything into the inbox'
+    # (look only, for the mail figures on Windows) what Stalwart's log says about these messages
+    $sl = Get-ChildItem "$Root\logs\stalwart" -Filter 'stalwart.log*' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($sl) {
+        $lines = Get-Content $sl.FullName -Tail 4000 | Select-String -SimpleMatch $saddr, 'spam', 'Spam', 'sieve', 'Sieve' | Select-Object -Last 40
+        Write-Host "   (look) Stalwart's log ($($sl.Name)):`n$(($lines | ForEach-Object { $_.Line.Substring(0, [Math]::Min(400, $_.Line.Length)) }) -join "`n")"
+    }
     # --- SpamAV Admin: ClamAV's settings go into clamd.conf (ClamAV restarts and answers again), the spam scores into
     # Stalwart's spam filter; no SpamAssassin; the file scanning tab
     function ClamUp { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 3310); $st = $c.GetStream(); $b = [Text.Encoding]::ASCII.GetBytes("zPING`0"); $st.Write($b, 0, $b.Length); $buf = New-Object byte[] 16; $k = $st.Read($buf, 0, 16); $c.Close(); return ([Text.Encoding]::ASCII.GetString($buf, 0, $k) -match 'PONG') } catch { return $false } }
