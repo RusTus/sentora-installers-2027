@@ -165,9 +165,15 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { $tx = (($c -replace '(?s)<script.*?</script>', ' ') -replace '<[^>]+>', ' ' -replace '\s+', ' '); $at = [Math]::Max(0, $tx.IndexOf('PHP 8.5')); throw "PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way: $($tx.Substring($at, [Math]::Min(600, $tx.Length - $at)))" }
     Ok 'PHP versions: the PHP Versions page shows 8.4 (and 8.3) switched on, without Linux''s PHP-FPM, updates and extensions'
     Set-Content "$($folder.FullName)\v.php" '<?php echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION . " " . trim((string) shell_exec("whoami"));' -Encoding ASCII
+    # (the domain's ID: the DNS part below looks it up later)
+    $pvMy = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $pvId = (& $pvMy --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT vh_id_pk FROM sentora_core.x_vhosts WHERE vh_name_vc='$dom' AND vh_deleted_ts IS NULL") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    if ($pvId -notmatch '^\d+$') { throw "PHP versions: no domain ID for $dom ($pvId)" }
     function SetPhp($ver) {
         $p = Page '/?module=domains' $null
-        $null = Page '/?module=domains&action=SetPhpVersion' @{ csfr_token = (Token $p.Content); inDomainId = $vid; inPhpVersion = $ver }
+        $null = Page '/?module=domains&action=SetPhpVersion' @{ csfr_token = (Token $p.Content); inDomainId = $pvId; inPhpVersion = $ver }
         $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
     }
     SetPhp '8.4'
@@ -179,7 +185,7 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     if ($pv -ne '8.4 nt service\sentoraphp-zadmin') {
         $myc = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
         $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
-        $dbv = (& $myc --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(vh_type_in, ':', IFNULL(vh_php_version_vc, 'none')) FROM sentora_core.x_vhosts WHERE vh_id_pk=$vid; SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='php_versions_enabled'") -join ' / '
+        $dbv = (& $myc --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(vh_type_in, ':', IFNULL(vh_php_version_vc, 'none')) FROM sentora_core.x_vhosts WHERE vh_id_pk=$pvId; SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='php_versions_enabled'") -join ' / '
         Remove-Item Env:\MYSQL_PWD
         $ErrorActionPreference = 'Continue'
         $syncSaid = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\bin\phpaccount.ps1" sync 2>&1 | Out-String)
@@ -1057,7 +1063,7 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     # (the page's own part: the menu lists every module with its description)
     $sa = if ($c -match '(?s)(<div class="sa" id="sa".*)$') { $Matches[1] } else { '' }
     if ($sa -eq '') { $bad += 'no SpamAV part on the page' }
-    if ($sa -match 'SpamAssassin') { $bad += "it names SpamAssassin ($((($sa -split 'SpamAssassin')[0] -replace '(?s)^.*(.{160})$', '$1') -replace '\s+', ' '))" }
+    if ($sa -cmatch 'SpamAssassin') { $bad += "it names SpamAssassin ($((($sa -split 'SpamAssassin')[0] -replace '(?s)^.*(.{160})$', '$1') -replace '\s+', ' '))" }
     if ($sa -notmatch 'data-tab="files"') { $bad += 'no file scanning tab' }
     if ($c -match 'name="in_sa_subject_tag"|name="in_clam_scan_outgoing"') { $bad += 'it shows Linux-only settings' }
     if ($bad) { throw "SpamAV Admin: the page is not the Windows one: $($bad -join ', ')" }
