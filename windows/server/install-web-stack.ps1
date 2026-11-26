@@ -146,7 +146,7 @@ $Pkg = @{
                 Url  = 'https://github.com/coredns/coredns/releases/download/v1.15.0/coredns_1.15.0_windows_amd64.tgz'
                 Sha  = '94D21843A17D13D32E8EB122B4410EF5C68C549A623CF9340896759252F940BD'; Top = '' }
     # (the panel's Matomo reads the websites' logs with Matomo's own importer, a Python script; the SHA-256 of python.org's file)
-    Python = @{ Name = 'Python 3.13.9 (embeddable, for Matomo\'s log importer)'
+    Python = @{ Name = 'Python 3.13.9 (embeddable, for Matomo''s log importer)'
                 Url  = 'https://www.python.org/ftp/python/3.13.9/python-3.13.9-embed-amd64.zip'
                 Sha  = '91D828C2DA3A029B41699E918674A0CB379C02CF20DAB9C501306885F837402A'; Top = '' }
     PhpImap = @{ Name = 'php_imap 1.0.3 for PHP 8.5 (for Z-Push)'
