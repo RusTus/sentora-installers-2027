@@ -904,5 +904,40 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
         for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Get-Content $cc -Raw) -match '(?m)^MaxFileSize 64M' }
         for ($i = 0; $i -lt 100 -and -not (ClamUp); $i++) { Start-Sleep 3 }
         if (-not (ClamUp)) { throw 'SpamAV: ClamAV does not answer after its settings went back' }
+        # --- File scanning: Scan now finds the EICAR test file in a website and moves it to the quarantine (Administrators
+        # and SYSTEM only); a copy behind a junction that leads out of the account is not followed; Put back restores it
+        $site = "$Root\hostdata\zadmin\public_html"
+        $outside = "C:\sentora-fs-outside-$n"
+        try { Add-MpPreference -ExclusionPath $site, $outside, "$Root\data\quarantine" -ErrorAction Stop } catch { }
+        $eicar = 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+        [IO.File]::WriteAllText("$site\eicar-$n.txt", $eicar)
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        [IO.File]::WriteAllText("$outside\outside-eicar-$n.txt", $eicar)
+        $null = & cmd /c "mklink /J `"$site\link-$n`" `"$outside`"" 2>&1
+        SaSave 'filescan' @{ fs_enabled = '1'; fs_hour = '3'; fs_full_day = '0'; fs_max_file_size = '25'; fs_quarantine = '1'; fs_notify_owner = '1' }
+        $p = Page '/?module=spamav_admin&tab=files' $null
+        $p = Page '/?module=spamav_admin&action=FileRequest' @{ csfr_token = (Token $p.Content); inWhat = 'full'; inId = '' }
+        $ok = $false
+        for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 3; $ok = -not (Test-Path "$site\eicar-$n.txt") }
+        $fsLog = (Get-Content "$Root\logs\panel\filescan-last.log" -ErrorAction SilentlyContinue) -join ' / '
+        if (-not $ok) { throw "File scanning: the EICAR test file was not moved to the quarantine (scan log: $fsLog)" }
+        if ($fsLog -match 'outside-eicar') { throw "File scanning: it followed a junction out of the account: $fsLog" }
+        if (-not (Test-Path "$outside\outside-eicar-$n.txt")) { throw 'File scanning: the file outside the account (behind a junction) was touched' }
+        $st = Get-Content "$Root\data\sentora\filescan.json" -Raw | ConvertFrom-Json
+        $f = $st.findings | Where-Object { $_.path -like "*eicar-$n.txt" -and $_.status -eq 'quarantined' } | Select-Object -First 1
+        if (-not $f) { throw "File scanning: the finding is not in its results: $(($st | ConvertTo-Json -Depth 4 -Compress).Substring(0, 400))" }
+        $acl = (Get-Acl "$Root\data\quarantine\$($f.id)").Access | ForEach-Object { "$($_.IdentityReference)" }
+        if ($acl -match 'Apache2|SentoraPHP|Users') { throw "File scanning: the quarantined file is readable by others: $($acl -join ', ')" }
+        Ok "File scanning: Scan now found the EICAR test file ($($f.sig)), moved it to the quarantine (Administrators and SYSTEM only), did not follow a junction out of the account"
+        $c = (Page '/?module=spamav_admin&tab=files' $null).Content
+        if ($c -notmatch [regex]::Escape("eicar-$n.txt")) { throw 'File scanning: the page does not list the finding' }
+        $p = Page '/?module=spamav_admin&action=FileRequest' @{ csfr_token = (Token $c); inWhat = 'restore'; inId = $f.id }
+        $ok = $false
+        for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = Test-Path "$site\eicar-$n.txt" }
+        if (-not $ok) { throw 'File scanning: Put back did not restore the file' }
+        Ok 'File scanning: the page lists it, and Put back restores it where it was'
+        Remove-Item "$site\eicar-$n.txt" -Force
+        cmd /c "rmdir `"$site\link-$n`"" | Out-Null
+        Remove-Item $outside -Recurse -Force
     }
 }

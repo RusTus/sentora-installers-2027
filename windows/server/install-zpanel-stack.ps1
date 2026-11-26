@@ -1942,6 +1942,10 @@ switch ($Do) {
         foreach ($d in @($panelCfg, $panelLogs, $stateDir, (Join-Path $stateDir 'tmp'), (Join-Path $stateDir 'zsudo'), (Join-Path $stateDir 'zsudo\new'), (Join-Path $stateDir 'zsudo\queue'))) {
             if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d | Out-Null }
         }
+        # (SpamAV Admin's file scan moves malware found in the websites here: Administrators and SYSTEM only)
+        $quarantine = Join-Path $Root 'data\quarantine'
+        if (-not (Test-Path $quarantine)) { New-Item -ItemType Directory -Path $quarantine | Out-Null }
+        Protect-Folder $quarantine
         $src = Join-Path $Tmp 'panel-src'
         Remove-Item $src -Recurse -Force -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Path $src | Out-Null
@@ -2043,6 +2047,7 @@ switch ($Do) {
             $clamFwd = "$fwdRoot/bin/clamav"
             $settings['clamd_conf'] = "$clamFwd/clamd.conf"; $settings['freshclam_conf'] = "$clamFwd/freshclam.conf"; $settings['clamd_exe'] = "$clamFwd/clamd.exe"
             $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
+            $settings['filescan_quarantine'] = "$fwdRoot/data/quarantine"
             # Mail Config: the files its daemon writes (the webmail's settings, ActiveSync's switch in the mail site)
             $settings['webmail_panel_conf'] = "$fwdRoot/configs/stalwart/roundcube-panel.inc.php"; $settings['mail_apache_conf'] = "$fwdRoot/configs/apache/mail-panel.conf"
             $q = ''
