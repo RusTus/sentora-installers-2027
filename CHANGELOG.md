@@ -659,6 +659,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: Forwarders (a Sieve script on the mailbox through Stalwart's API; copy kept or not; several addresses at once).
 - Panel on Windows: File Manager, run as the hosting account's own Windows account (only its files), opened from the panel with a one-minute signed pass.
 - Panel on Windows: Backup Config. The daily backup of every account and the purge, and the off-server backup to another disk or a network share (every database, the settings, the websites and the mailboxes, each night).
+- The daemon: when a page asks for a run while one is busy, the run that follows is now a process of its own (the second pass in the same process stopped with "Cannot redeclare function").
 - Release 2027.99: on Windows, the File Manager (run as the hosting account's own Windows account, opened from the panel with a one-minute signed pass).
 - Release 2027.98: on Windows, Forwarders (copy kept or not, several addresses) and Site Health; Server Monitor's figures sturdier.
 - Release 2027.97: on Windows, Panel Update from the panel (Check now, Update now, its steps on the page), Apache Config, Protected Directories, Server Monitor, System Log Viewer, FTP Config, Module Admin and Widget Admin; "Site not found" switched off works there too.

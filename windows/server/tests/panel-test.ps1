@@ -643,7 +643,9 @@ $t0 = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $p = Page '/?module=backup_admin' $null
 $p = Page '/?module=backup_admin&action=OffsiteNow' @{ csfr_token = (Token $p.Content) }
 for ($i = 0; $i -lt 100; $i++) { Start-Sleep 3; $st = ObState; if ($st -and [int64]$st.last_run -ge $t0) { break } }
-$night = Join-Path $ob "$env:COMPUTERNAME\$(Get-Date -Format 'yyyy-MM-dd')"
+# (the night is named by the panel's own time zone: the newest one there)
+$night = (Get-ChildItem (Join-Path $ob $env:COMPUTERNAME) -Directory -ErrorAction SilentlyContinue | Where-Object Name -match '^20\d\d-\d\d-\d\d$' | Sort-Object Name | Select-Object -Last 1).FullName
+if (-not $night) { $night = Join-Path $ob "$env:COMPUTERNAME\no-night" }
 $miss = @()
 foreach ($f in @("$night\databases\sentora_core.sql.gz", "$night\config\configs.zip", "$night\manifest.json", "$ob\$env:COMPUTERNAME\files\hostdata\zadmin\public_html", "$ob\$env:COMPUTERNAME\files\mail")) { if (-not (Test-Path $f)) { $miss += $f } }
 if (-not ($st -and $st.result -eq 'ok') -or $miss) { throw "Backup Config: Back up now did not make the copy (state: $($st | ConvertTo-Json -Compress); missing: $($miss -join ', '); log: $(Get-Content "$Root\logs\panel\offsite-backup.log" -Raw -ErrorAction SilentlyContinue); PHP: $((Get-Content "$Root\logs\php\php_errors.log" -Tail 6 -ErrorAction SilentlyContinue) -join ' / '); running: $((Get-CimInstance Win32_Process -Filter "Name='php.exe' OR Name='mysqldump.exe' OR Name='robocopy.exe'" | ForEach-Object { $_.Name + ':' + $_.CommandLine }) -join ' | '))" }
