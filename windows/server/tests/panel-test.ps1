@@ -1044,6 +1044,27 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     if ($left -match [regex]::Escape($addr)) { throw "Mail: $addr is still in Stalwart after it was deleted on the page" }
     if ($left -notmatch 'alice@example\.test') { throw "Mail: a mailbox made with mailuser.ps1 (alice@example.test) went: $left" }
     Ok 'Mail: deleted on the page, it goes from Stalwart; mailboxes made with mailuser.ps1 stay'
+    # --- (look only, for Mail > SpamAV on Windows) how Stalwart marks spam: GTUBE to alice, then the headers it got and
+    # the folder it went to
+    $probe = @"
+import imaplib,smtplib,ssl,time,email
+s=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=30); s.ehlo()
+if s.has_extn('starttls'): s.starttls(context=ssl._create_unverified_context()); s.ehlo()
+s.sendmail('spammer@outside.example',['alice@example.test'],'From: spammer@outside.example\r\nTo: alice@example.test\r\nSubject: gtube probe $n\r\n\r\nXJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X\r\n')
+s.quit(); time.sleep(15)
+m=imaplib.IMAP4_SSL('127.0.0.1',993,ssl_context=ssl._create_unverified_context()); m.login('alice@example.test','Alice-Pass-1234')
+for box in ['INBOX','"Junk Mail"']:
+    m.select(box); t,d=m.search(None,'SUBJECT','"gtube probe $n"')
+    for i in d[0].split():
+        t,x=m.fetch(i,'(BODY.PEEK[HEADER])'); h=email.message_from_bytes(x[0][1])
+        print('PROBE folder',box); [print('PROBE',k+':',v.replace('\r\n',' ')[:300]) for k,v in h.items() if k.lower().startswith(('x-spam','authentication','x-stalwart'))]
+"@
+    $ErrorActionPreference = 'Continue'
+    # (from a file: Windows PowerShell 5.1 drops the double quotes inside an argument)
+    $probeFile = Join-Path $env:TEMP "spam-probe-$n.py"; [IO.File]::WriteAllText($probeFile, $probe)
+    $pr = (& python $probeFile 2>&1) -join "`n"
+    $ErrorActionPreference = 'Stop'
+    Write-Host "   (look) Stalwart and a spam message:`n$pr"
     # --- SpamAV Admin: ClamAV's settings go into clamd.conf (ClamAV restarts and answers again), the spam scores into
     # Stalwart's spam filter; no SpamAssassin; the file scanning tab
     function ClamUp { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 3310); $st = $c.GetStream(); $b = [Text.Encoding]::ASCII.GetBytes("zPING`0"); $st.Write($b, 0, $b.Length); $buf = New-Object byte[] 16; $k = $st.Read($buf, 0, 16); $c.Close(); return ([Text.Encoding]::ASCII.GetString($buf, 0, $k) -match 'PONG') } catch { return $false } }
