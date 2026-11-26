@@ -819,8 +819,8 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $t = Get-Content $rcp -Raw -ErrorAction SilentlyContinue; $ok = ($t -match "'de_DE'") -and ($t -match "refresh_interval'\] = 120") -and ((Eas) -eq '403') }
     if (-not $ok) { throw "Mail Config: the daemon did not apply the webmail settings and ActiveSync off ($rcp has: $t; ActiveSync: $(Eas); log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Mail Config' | Select-Object -Last 4) -join ' / '))" }
     Ok 'Mail Config: saved, the webmail gets its language and new-mail check, and ActiveSync''s address is closed (403)'
-    $r1 = Stal 'x:MtaStageData/get' '{"accountId":"ACCT","properties":["maxMessageSize"]}'
-    $r2 = Stal 'x:Security/get' '{"accountId":"ACCT","properties":["authBanRate"]}'
+    $r1 = Stal 'x:MtaStageData/get' '{"accountId":"ACCT","ids":["singleton"],"properties":["maxMessageSize"]}'
+    $r2 = Stal 'x:Security/get' '{"accountId":"ACCT","ids":["singleton"],"properties":["authBanRate"]}'
     if ($r1 -notmatch '"else":"20971520"' -or $r2 -notmatch '"count":500') { throw "Mail Config: Stalwart did not get its new limits: $r1 / $r2" }
     Ok 'Mail Config: Stalwart takes messages up to 20 MB and blocks after 500 wrong passwords (its own settings, read back)'
     if ((Get-Service Apache2).Status -ne 'Running') { throw 'Mail Config: Apache does not run after the change' }
@@ -878,7 +878,7 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     $spam = @{ sa_enabled = '1'; sa_required_score = '6'; sa_reject_score = '20' }
     SaSave 'spamassassin' $spam
     $ok = $false
-    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; $r = Stal 'x:SpamSettings/get' '{"accountId":"ACCT","properties":["enable","scoreSpam","scoreReject"]}'; $ok = ($r -match '"scoreSpam":6(\.0)?[,}]') -and ($r -match '"scoreReject":20(\.0)?[,}]') }
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; $r = Stal 'x:SpamSettings/get' '{"accountId":"ACCT","ids":["singleton"],"properties":["enable","scoreSpam","scoreReject"]}'; $ok = ($r -match '"scoreSpam":6(\.0)?[,}]') -and ($r -match '"scoreReject":20(\.0)?[,}]') }
     if (-not $ok) { throw "SpamAV: Stalwart's spam filter did not get the scores: $r" }
     Ok 'SpamAV Admin: the spam score (6) and the refuse score (20) are Stalwart''s, read back'
     SaSave 'spamassassin' @{ sa_enabled = '1'; sa_required_score = '5'; sa_reject_score = '0' }
