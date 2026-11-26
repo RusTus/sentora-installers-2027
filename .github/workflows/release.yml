@@ -67,7 +67,7 @@ jobs:
 
   release:
     needs: [install-test, vm-test, windows-server-test, windows-setup]
-    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') && (needs.vm-test.result == 'success' || needs.vm-test.result == 'skipped') && needs.windows-setup.result == 'success' }}
+    if: ${{ !cancelled() && (needs.install-test.result == 'success' || needs.install-test.result == 'skipped') && (needs.vm-test.result == 'success' || needs.vm-test.result == 'skipped') && (needs.windows-server-test.result == 'success' || needs.windows-server-test.result == 'skipped') && needs.windows-setup.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out master2027
