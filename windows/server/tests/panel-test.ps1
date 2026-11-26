@@ -140,7 +140,7 @@ $p = Page '/?module=domains' $null
 $p = Page '/?module=domains&action=CreateDomain' @{ csfr_token = (Token $p.Content); inDomain = $dom; inAutoHome = '1'; inDestination = '' }
 $p = Page '/?module=parked_domains' $null
 $p = Page '/?module=parked_domains&action=CreateParkedDomain' @{ csfr_token = (Token $p.Content); inDomain = $park }
-$parkedSaid = ([regex]::Matches($p.Content, '(?s)class="alert[^"]*"[^>]*>(.{0,300}?)</') | ForEach-Object { ($_.Groups[1].Value -replace '<[^>]+>', ' ').Trim() }) -join ' / '
+$parkedSaid = ([regex]::Matches($p.Content, '(?s)class="alert[^"]*"[^>]*>(.*?)</div>') | ForEach-Object { ($_.Groups[1].Value -replace '<[^>]+>', ' ' -replace '&times;|\u00d7', '' -replace '\s+', ' ').Trim() }) -join ' / '
 $p = Page '/?module=sentoraconfig' $null
 $p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
 function Site($h, $path) { $ErrorActionPreference = 'Continue'; (& curl.exe -s --max-time 30 -H "Host: $h" "http://127.0.0.1$path" 2>&1) -join "`n" }
@@ -157,7 +157,12 @@ if ($w -ne 'nt service\sentoraphp-zadmin') { throw "the domain's PHP runs as: $w
 Ok "its PHP runs as the account's own Windows account ($w), not Apache's"
 # (a daemon run that began before the parked domain was saved serves the domain first: the next run brings the parked one)
 $pk = ''
-for ($i = 0; $i -lt 40; $i++) { $pk = Site $park '/'; if ($pk -ne '' -and $pk -notmatch 'inUsername|Your Sentora account is active') { break }; Start-Sleep 3 }
+for ($i = 0; $i -lt 60; $i++) {
+    $pk = Site $park '/'; if ($pk -ne '' -and $pk -notmatch 'inUsername|Your Sentora account is active') { break }
+    # (asked again now and then: a run that was already going when it was asked does not pick the parked domain up)
+    if ($i -gt 0 -and $i % 10 -eq 0) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
+    Start-Sleep 3
+}
 if ($pk -match 'inUsername|Your Sentora account is active' -or $pk -eq '') {
     $inConf = Select-String -Path "$Root\configs\apache\sentora-vhosts.conf" -Pattern ([regex]::Escape($park)) -Context 0, 4 -ErrorAction SilentlyContinue | Out-String
     throw "the parked domain $park is not served (the page said: '$parkedSaid'; in sentora-vhosts.conf: $($inConf.Trim()); it answered: $(($pk -replace '\s+', ' ').Substring(0, [Math]::Min(160, $pk.Length))))"
