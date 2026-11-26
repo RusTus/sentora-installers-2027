@@ -990,7 +990,7 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     if ($left -notmatch 'alice@example\.test') { throw "Mail: a mailbox made with mailuser.ps1 (alice@example.test) went: $left" }
     Ok 'Mail: deleted on the page, it goes from Stalwart; mailboxes made with mailuser.ps1 stay'
     # --- SpamAV Admin: ClamAV's settings go into clamd.conf (ClamAV restarts and answers again), the spam scores into
-    # Stalwart's spam filter; no SpamAssassin, no file scanning tab (not on Windows yet)
+    # Stalwart's spam filter; no SpamAssassin; the file scanning tab
     function ClamUp { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 3310); $st = $c.GetStream(); $b = [Text.Encoding]::ASCII.GetBytes("zPING`0"); $st.Write($b, 0, $b.Length); $buf = New-Object byte[] 16; $k = $st.Read($buf, 0, 16); $c.Close(); return ([Text.Encoding]::ASCII.GetString($buf, 0, $k) -match 'PONG') } catch { return $false } }
     function SaSave($section, $vals) {
         $p = Page '/?module=spamav_admin' $null
@@ -1005,8 +1005,11 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     $bad = @()
     if ($c -notmatch 'name="in_clam_max_file_size"') { $bad += 'no ClamAV settings' }
     if ($c -notmatch 'name="in_sa_required_score"') { $bad += 'no spam score' }
-    if ($c -match 'SpamAssassin') { $bad += 'it names SpamAssassin' }
-    if ($c -match 'data-tab="files"|name="in_fs_') { $bad += 'it shows file scanning' }
+    # (the page's own part: the menu lists every module with its description)
+    $sa = if ($c -match '(?s)(<div class="sa" id="sa".*)$') { $Matches[1] } else { '' }
+    if ($sa -eq '') { $bad += 'no SpamAV part on the page' }
+    if ($sa -match 'SpamAssassin') { $bad += "it names SpamAssassin ($((($sa -split 'SpamAssassin')[0] -replace '(?s)^.*(.{160})$', '$1') -replace '\s+', ' '))" }
+    if ($sa -notmatch 'data-tab="files"') { $bad += 'no file scanning tab' }
     if ($c -match 'name="in_sa_subject_tag"|name="in_clam_scan_outgoing"') { $bad += 'it shows Linux-only settings' }
     if ($bad) { throw "SpamAV Admin: the page is not the Windows one: $($bad -join ', ')" }
     Ok 'SpamAV Admin: the page shows ClamAV''s and Stalwart''s settings, no SpamAssassin or file scanning'
