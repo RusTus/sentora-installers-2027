@@ -157,6 +157,9 @@ if ($w -ne 'nt service\sentoraphp-zadmin') { throw "the domain's PHP runs as: $w
 Ok "its PHP runs as the account's own Windows account ($w), not Apache's"
 # --- another PHP version for one domain (Domains page): the account's own service runs it too (its own php-cgi and
 # pool), still as the account's Windows account; back to the panel's PHP, the domain goes back
+# (a failure here is reported at the very end, so the checks after it still run)
+$phpFail = $null
+try {
 if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     $c = (Page '/?module=php_versions' $null).Content
     if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { $tx = (($c -replace '(?s)<script.*?</script>', ' ') -replace '<[^>]+>', ' ' -replace '\s+', ' '); $at = [Math]::Max(0, $tx.IndexOf('PHP 8.5')); throw "PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way: $($tx.Substring($at, [Math]::Min(600, $tx.Length - $at)))" }
@@ -173,7 +176,19 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
         Start-Sleep 3; $pv = Site $dom '/v.php'; if ($pv -match '^8\.4 ') { break }
         if ($i % 10 -eq 9) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
     }
-    if ($pv -ne '8.4 nt service\sentoraphp-zadmin') { throw "PHP versions: $dom set to PHP 8.4 answers '$pv' (pool: $(Select-String -Path "$Root\configs\apache\php-accounts\zadmin.conf" -Pattern 'php84' -ErrorAction SilentlyContinue); daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'PHP|Websites' | Select-Object -Last 4) -join ' / '))" }
+    if ($pv -ne '8.4 nt service\sentoraphp-zadmin') {
+        $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+        $dbv = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(vh_type_in, ':', IFNULL(vh_php_version_vc, 'none')) FROM sentora_core.x_vhosts WHERE vh_id_pk=$vid; SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='php_versions_enabled'") -join ' / '
+        Remove-Item Env:\MYSQL_PWD
+        $ErrorActionPreference = 'Continue'
+        $syncSaid = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$Root\bin\phpaccount.ps1" sync 2>&1 | Out-String)
+        $ErrorActionPreference = 'Stop'
+        Write-Host "   (diagnosis) domain type:version / enabled: $dbv"
+        Write-Host "   (diagnosis) wanted.txt: $((Get-Content "$Root\data\sentora\phpaccounts\wanted.txt" -ErrorAction SilentlyContinue) -join ' | ')"
+        Write-Host "   (diagnosis) zadmin.json: $(Get-Content "$Root\configs\php\accounts\zadmin.json" -Raw -ErrorAction SilentlyContinue)"
+        Write-Host "   (diagnosis) phpaccount.ps1 sync now: $syncSaid"
+        Write-Host "   (diagnosis) zadmin.conf pools: $((Select-String -Path "$Root\configs\apache\php-accounts\zadmin.conf" -Pattern 'balancer://' | ForEach-Object Line) -join ' | ')"
+        throw "PHP versions: $dom set to PHP 8.4 answers '$pv' (pool: $(Select-String -Path "$Root\configs\apache\php-accounts\zadmin.conf" -Pattern 'php84' -ErrorAction SilentlyContinue); daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'PHP|Websites' | Select-Object -Last 4) -join ' / '))" }
     Ok "PHP versions: $dom set to PHP 8.4 on the Domains page runs it, as the account's own Windows account"
     SetPhp ''
     for ($i = 0; $i -lt 60; $i++) {
@@ -184,6 +199,7 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     Ok "PHP versions: back to the panel's PHP (8.5), $dom runs it again"
     Remove-Item "$($folder.FullName)\v.php" -Force
 } else { throw 'PHP versions: the installer did not add PHP 8.4 (bin\php-8.4)' }
+} catch { $phpFail = "$_" }
 # (a daemon run that began before the parked domain was saved serves the domain first: the next run brings the parked one)
 $pk = ''
 for ($i = 0; $i -lt 60; $i++) {
@@ -1111,3 +1127,6 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
         Remove-Item $outside -Recurse -Force
     }
 }
+
+# (the PHP versions check above, when it failed)
+if ($phpFail) { throw $phpFail }
