@@ -668,6 +668,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: Branding. Logos, name, colours and login page as on Linux, and resellers' own panel addresses with their Let's Encrypt certificates.
 - Panel on Windows: AutoIP. Follows the public address (the panel's address and the DNS records with the old one); switched off at first on Windows; no script there.
 - Panel on Windows: Restore from the off-server backup (Backup Config > Restore): read the backups, then restore one account's websites (the latest copy) and databases (from the night chosen); what it had before is saved first.
+- Panel on Windows: Matomo. The installer sets it up (and Python 3.13 for its log importer); the daemon makes a Matomo site per domain and a view-only user per account, and imports the websites' logs every hour.
 - Release 2027.100: on Windows, Backup Config (the daily backup of every account and the purge; the off-server backup to another disk or a network share); the daemon's extra run when a page asks during a run no longer stops.
 - Release 2027.99: on Windows, the File Manager (run as the hosting account's own Windows account, opened from the panel with a one-minute signed pass).
 - Release 2027.98: on Windows, Forwarders (copy kept or not, several addresses) and Site Health; Server Monitor's figures sturdier.

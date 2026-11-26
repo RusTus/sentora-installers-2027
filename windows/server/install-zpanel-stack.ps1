@@ -145,6 +145,10 @@ $Pkg = @{
     CoreDns = @{ Name = 'CoreDNS 1.15.0 (DNS server)'
                 Url  = 'https://github.com/coredns/coredns/releases/download/v1.15.0/coredns_1.15.0_windows_amd64.tgz'
                 Sha  = '94D21843A17D13D32E8EB122B4410EF5C68C549A623CF9340896759252F940BD'; Top = '' }
+    # (the panel's Matomo reads the websites' logs with Matomo's own importer, a Python script; the SHA-256 of python.org's file)
+    Python = @{ Name = 'Python 3.13.9 (embeddable, for Matomo\'s log importer)'
+                Url  = 'https://www.python.org/ftp/python/3.13.9/python-3.13.9-embed-amd64.zip'
+                Sha  = '91D828C2DA3A029B41699E918674A0CB379C02CF20DAB9C501306885F837402A'; Top = '' }
     PhpImap = @{ Name = 'php_imap 1.0.3 for PHP 8.5 (for Z-Push)'
                 Url  = 'https://downloads.php.net/~windows/pecl/releases/imap/1.0.3/php_imap-1.0.3-8.5-ts-vs17-x64.zip'
                 Sha  = 'FAC1258FFAB3425411770FDB0B1BFDD66F51EECBF22345AA259AEC4CA873C342'; Top = '' }
@@ -2048,6 +2052,7 @@ switch ($Do) {
             $settings['clamd_conf'] = "$clamFwd/clamd.conf"; $settings['freshclam_conf'] = "$clamFwd/freshclam.conf"; $settings['clamd_exe'] = "$clamFwd/clamd.exe"
             $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
             $settings['filescan_quarantine'] = "$fwdRoot/data/quarantine"
+            $settings['python_exe'] = "$fwdRoot/bin/python/python.exe"
             # Mail Config: the files its daemon writes (the webmail's settings, ActiveSync's switch in the mail site)
             $settings['webmail_panel_conf'] = "$fwdRoot/configs/stalwart/roundcube-panel.inc.php"; $settings['mail_apache_conf'] = "$fwdRoot/configs/apache/mail-panel.conf"
             $q = ''
@@ -2184,7 +2189,8 @@ switch ($Do) {
                      (Join-Path $Cfg 'stalwart\mailscan-key.txt'), (Join-Path $Cfg 'stalwart\roundcube.inc.php'), (Join-Path $Cfg 'stalwart\roundcube-panel.inc.php'))) { Grant-Apache $p 'RX' }
     # write: its logs, temp files, sessions and the webmail's and ActiveSync's own data
     foreach ($p in @((Join-Path $ApacheDir 'logs'), (Join-Path $Logs 'apache'), (Join-Path $Logs 'php'), (Join-Path $Logs 'roundcube'), (Join-Path $Logs 'z-push'),
-                     (Join-Path $Logs 'panel'), $Tmp, (Join-Path $Root 'data\z-push'))) { Grant-Apache $p 'M' }
+                     (Join-Path $Logs 'panel'), $Tmp, (Join-Path $Root 'data\z-push'),
+                     (Join-Path $Root 'panel\etc\apps\matomo\tmp'), (Join-Path $Root 'panel\etc\apps\matomo\config'))) { Grant-Apache $p 'M' }
     # the websites' logs (the panel's daemon makes a folder per account in it)
     if ($WithPanel) {
         $dl = Join-Path $Logs 'domains'
@@ -2234,6 +2240,66 @@ switch ($Do) {
         Fail "Apache did not start as $acct (the events above say why; its error log: $(Join-Path $Logs 'apache\error.log'))."
     }
     Ok "$ApacheService runs as $acct (reads its programs and sites; writes its logs, temp files and data only)"
+
+    # --------------------------------------------------------------------------------------------------------------
+    # Matomo web analytics (the panel's etc\apps\matomo), as on Linux: set up once with Matomo's own setup pages (the
+    # same steps as in a browser), then the panel's plugin and settings; the daemon then makes a Matomo site per domain
+    # and a view-only Matomo user per account, and imports the websites' logs every hour with Python
+    $matomo = Join-Path $Root 'panel\etc\apps\matomo'
+    if ($WithPanel -and (Test-Path (Join-Path $matomo 'index.php'))) {
+        Say 'Matomo web analytics (etc\apps\matomo)'
+        $pyDir = Join-Path $Bin 'python'
+        if (-not (Test-Path (Join-Path $pyDir 'python.exe'))) {
+            $pz = Get-Verified $Pkg.Python
+            Expand-Into $pz $Pkg.Python.Top $pyDir
+        }
+        Ok "Python $((Invoke-Native (Join-Path $pyDir 'python.exe') @('--version')) -join '') -> $pyDir (Matomo's log importer)"
+        if (-not (Test-Path (Join-Path $matomo 'config\config.ini.php'))) {
+            foreach ($d in @('tmp', 'config')) { $md = Join-Path $matomo $d; if (-not (Test-Path $md)) { New-Item -ItemType Directory -Path $md | Out-Null }; Grant-Apache $md 'M' }
+            $mPw = New-Password; $mAdminPw = New-Password
+            $q = "CREATE DATABASE IF NOT EXISTS sentora_matomo CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+            foreach ($h in @('localhost', '127.0.0.1')) {
+                $q += " CREATE USER IF NOT EXISTS 'matomo'@'$h' IDENTIFIED BY '$mPw'; ALTER USER 'matomo'@'$h' IDENTIFIED BY '$mPw'; GRANT ALL PRIVILEGES ON sentora_matomo.* TO 'matomo'@'$h';"
+            }
+            $env:MYSQL_PWD = $RootPw
+            try { $out = Invoke-Native (Join-Path $MySQLDir 'bin\mysql.exe') @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', $q) } finally { Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue }
+            if ($LASTEXITCODE -ne 0) { Fail "Matomo's database could not be made: $($out -join ' ')" }
+            $mi = "http://127.0.0.1:$HttpPort/etc/apps/matomo/index.php"
+            $jar = Join-Path $Tmp 'matomo-setup.cookies'
+            Remove-Item $jar -Force -ErrorAction SilentlyContinue
+            $steps = @(
+                @($mi, @()), @("$mi`?action=systemCheck", @()),
+                @("$mi`?action=databaseSetup", @('--data-urlencode', "password=$mPw", '-d', 'host=127.0.0.1&username=matomo&dbname=sentora_matomo&tables_prefix=matomo_&adapter=PDO\MYSQL&schema=Mysql&submit=Next')),
+                @("$mi`?action=tablesCreation&module=Installation", @()),
+                @("$mi`?action=setupSuperUser&module=Installation", @('--data-urlencode', "password=$mAdminPw", '--data-urlencode', "password_bis=$mAdminPw", '-d', "login=sentora_admin&email=postmaster@$ServerName&subscribe_newsletter_piwikorg=0&subscribe_newsletter_professionalservices=0&submit=Next")),
+                @("$mi`?action=firstWebsiteSetup&module=Installation", @('-d', "siteName=$ServerName&url=http://$ServerName&timezone=UTC&ecommerce=0&submit=Next")),
+                @("$mi`?action=trackingCode&module=Installation&site_idSite=1&site_name=$ServerName", @()),
+                @("$mi`?action=finished&module=Installation&site_idSite=1&site_name=$ServerName", @('-d', 'do_not_track=1&anonymise_ip=1&submit=Continue'))
+            )
+            $said = @()
+            foreach ($st in $steps) {
+                $code = (Invoke-Native 'curl.exe' (@('-s', '-o', 'NUL', '-w', '%{http_code}', '-c', $jar, '-b', $jar, '-H', "Host: $ServerName", '--max-time', '300') + $st[1] + @($st[0]))) -join ''
+                $said += "$code $(($st[0] -replace '^.*index\.php', '') -replace '&.*$', '')"
+            }
+            Remove-Item $jar -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path (Join-Path $matomo 'config\config.ini.php'))) { Fail "Matomo's setup pages did not finish (each page's answer: $($said -join ', '))." }
+            Write-Utf8NoBom (Join-Path $Cfg 'panel\matomo-admin-password.txt') "sentora_admin`r`n$mAdminPw"
+            Ok "Matomo set up (its own pages: $($said -join ', ')); its super user sentora_admin, the password in configs\panel\matomo-admin-password.txt"
+        } else { Ok 'Matomo was set up before (configs kept)' }
+        # the panel's plugin and settings (each time: a repair puts them back), as SYSTEM with the panel's PHP
+        Push-Location $matomo
+        try {
+            foreach ($c in @(@('plugin:activate', 'SentoraSync'), @('config:set', '--section=General', '--key=enable_framed_pages', '--value=1'),
+                             @('config:set', '--section=General', '--key=enable_browser_archiving_triggering', '--value=0'),
+                             @('config:set', '--section=General', '--key=enable_load_data_infile', '--value=0'),
+                             @('config:set', '--section=General', '--key=enable_internet_features', '--value=0'),
+                             @('plugin:deactivate', 'ProfessionalServices', 'Marketplace', 'Tour', 'Feedback'))) {
+                $out = Invoke-Native $phpExe (@('-c', (Join-Path $PhpDir 'php.ini'), 'console') + $c)
+                if ($LASTEXITCODE -ne 0 -and $c[0] -ne 'plugin:deactivate') { Write-Host "   NOTE Matomo's step 'console $($c -join ' ')' did not work: $(($out | Select-Object -Last 2) -join ' ')" -ForegroundColor Yellow }
+            }
+        } finally { Pop-Location }
+        Ok "Matomo: the panel's plugin (SentoraSync) on, its settings for the panel (in a frame, reports built hourly, no calls home)"
+    }
 
     if ($WithPanel) {
     # --------------------------------------------------------------------------------------------------------------

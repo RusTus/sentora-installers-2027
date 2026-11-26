@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip', 'matomo')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -773,6 +773,35 @@ $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim
 & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='$sip' WHERE so_name_vc='server_ip'; UPDATE sentora_core.x_dns SET dn_target_vc='$sip' WHERE dn_target_vc='1.2.3.4'; UPDATE sentora_core.x_settings SET so_value_tx=CONCAT(so_value_tx, ',$vid') WHERE so_name_vc='dns_hasupdates'"
 Remove-Item Env:\MYSQL_PWD
 $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+} catch { $late += "$_" }
+
+# --- Matomo: set up by the installer; the daemon makes a Matomo site for the domain, and the hourly run imports its log
+# with Python (the site was visited above)
+try {
+if (-not (Test-Path "$Root\panel\etc\apps\matomo\config\config.ini.php")) { throw 'Matomo: the installer did not set it up (no config.ini.php)' }
+$c = (Page '/?module=matomo' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Matomo page does not load' }
+$null = Site $dom '/'; $null = Site $dom '/?from=matomo-test'
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='0' WHERE so_name_vc='daemon_hourrun'" | Out-Null
+Remove-Item Env:\MYSQL_PWD
+$q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+$row = ''
+for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep 5
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $row = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(ms_idsite_in, ' ', ms_offset_bi) FROM sentora_core.x_matomo_sites WHERE ms_domain_vc='$dom' AND ms_deleted_in=0") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    if ($row -match '^[1-9]\d* [1-9]') { break }
+    if ($i % 12 -eq 11) {
+        $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+        & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='0' WHERE so_name_vc='daemon_hourrun'" | Out-Null
+        Remove-Item Env:\MYSQL_PWD
+        $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+    }
+}
+if ($row -notmatch '^[1-9]\d* [1-9]') { throw "Matomo: no site with its log imported for $dom ($row; daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Matomo|matomo|import' | Select-Object -Last 6) -join ' / '))" }
+Ok "Matomo: the daemon made a Matomo site for $dom (id $($row.Split(' ')[0])) and the hourly run imported its log with Python"
 } catch { $late += "$_" }
 
 if ($late) { throw ($late -join ' || ') }
