@@ -2511,7 +2511,6 @@ function Build($a) {
         $vports = @(0..($a.processes - 1) | ForEach-Object { $vb + $_ })
         $vini = Join-Path $cfg "$n-$vk.ini"
         [IO.File]::WriteAllText($vini, [IO.File]::ReadAllText((Join-Path $vd 'php.ini')) + $tail)
-        Native 'icacls.exe' @($vini, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
         $spec += @{ cgi = (Join-Path $vd 'php-cgi.exe'); ini = $vini; ports = $vports }
         $more += [pscustomobject]@{ key = $vk; ports = $vports }
     }
@@ -2519,7 +2518,6 @@ function Build($a) {
     [IO.File]::WriteAllText((Join-Path $saved "$n.json"), ($a | ConvertTo-Json -Depth 4))
     $specFile = Join-Path $cfg "$n.pool.json"
     [IO.File]::WriteAllText($specFile, (ConvertTo-Json -InputObject $spec -Depth 4))
-    Native 'icacls.exe' @($specFile, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
     $params = "-n `"$pool`" `"$specFile`" `"open_basedir=$fence`" `"auto_prepend_file=$guard`""
     if (Get-Service $svc -ErrorAction SilentlyContinue) { Stop-Service $svc -Force -ErrorAction SilentlyContinue }
     else { Native $nssm @('install', $svc, (Join-Path $php 'php.exe')) | Out-Null }
@@ -2539,6 +2537,10 @@ function Build($a) {
     Native 'icacls.exe' @($hd, '/grant', "${sid}:(OI)(CI)M") | Out-Null
     Native 'icacls.exe' @($ini, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
     Native 'icacls.exe' @($guard, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
+    # (its pool list and the other versions' php.ini: written above, read by its service, which now exists)
+    foreach ($f in @(@($specFile) + @($spec | Select-Object -Skip 1 | ForEach-Object { $_.ini }))) {
+        Native 'icacls.exe' @($f, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
+    }
     # Apache's part: every site in hostdata\NAME has its PHP done by NAME's (in turn), with NAME's key
     $members = ($ports | ForEach-Object { "    BalancerMember `"fcgi://127.0.0.1:$_`" retry=0" }) -join "`r`n"
     [IO.File]::WriteAllText((Join-Path $apacheCfg "$n.conf"), @"
