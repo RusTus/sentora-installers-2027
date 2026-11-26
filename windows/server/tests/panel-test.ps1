@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -696,6 +696,39 @@ $ok = $false
 for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Get-Content "$Root\configs\apache\sentora-vhosts.conf" -Raw) -notmatch "# BRANDING: $([regex]::Escape($bh))" }
 if (-not $ok) { throw 'Branding: the address''s site stayed after it was taken away' }
 Ok 'Branding: the address taken away, its site goes'
+} catch { $late += "$_" }
+
+# --- AutoIP: off at first on Windows; switched on with an IP service that answers 1.2.3.4 (a file on this server), the
+# panel's address and the domain's A record follow it, and CoreDNS answers the new address; then all is put back
+try {
+$c = (Page '/?module=autoip' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the AutoIP page does not load' }
+if ($c -match 'name="inScript"') { throw 'AutoIP: the page offers a script (not on Windows)' }
+if ($c -match 'name="inEnabled" value="1"\s+CHECKED') { throw 'AutoIP: it is switched on at first on Windows' }
+Ok 'AutoIP: the page loads, switched off at first on Windows, no script'
+$ipFile = "$Root\panel\autoip-test-$n.txt"
+[IO.File]::WriteAllText($ipFile, "1.2.3.4`n")
+$p = Page '/?module=autoip&action=updateautoip' @{ csfr_token = (Token $c); inUpdate = '1'; inEnabled = '1'; inCommand = "http://127.0.0.1/autoip-test-$n.txt"; inEmail = '' }
+$q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+$ok = $false
+for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
+    Start-Sleep 3
+    try { $a = @(Resolve-DnsName $dom -Server 127.0.0.1 -Type A -DnsOnly -ErrorAction Stop | Where-Object Type -eq 'A') } catch { $a = @() }
+    $ok = ($a.Count -gt 0 -and $a[0].IPAddress -eq '1.2.3.4')
+    if (-not $ok -and $i % 10 -eq 9) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
+}
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$nowIp = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT so_value_tx FROM sentora_core.x_settings WHERE so_name_vc='server_ip'") -join ''
+Remove-Item Env:\MYSQL_PWD
+if (-not $ok -or $nowIp -ne '1.2.3.4') { throw "AutoIP: the new address did not reach the panel ($nowIp) and DNS ($($a | ForEach-Object IPAddress)) (log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'IP' | Select-Object -Last 5) -join ' / '))" }
+Ok "AutoIP: switched on, the panel's address and $dom's A record follow the public address (1.2.3.4), CoreDNS answers it"
+$c = (Page '/?module=autoip' $null).Content
+$null = Page '/?module=autoip&action=updateautoip' @{ csfr_token = (Token $c); inUpdate = '1'; inCommand = 'https://api.ipify.org'; inEmail = '' }
+Remove-Item $ipFile -Force
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='$sip' WHERE so_name_vc='server_ip'; UPDATE sentora_core.x_dns SET dn_target_vc='$sip' WHERE dn_target_vc='1.2.3.4'; UPDATE sentora_core.x_settings SET so_value_tx=CONCAT(so_value_tx, ',$vid') WHERE so_name_vc='dns_hasupdates'"
+Remove-Item Env:\MYSQL_PWD
+$q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
 } catch { $late += "$_" }
 
 if ($late) { throw ($late -join ' || ') }
