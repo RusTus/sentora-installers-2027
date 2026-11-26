@@ -776,9 +776,12 @@ if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') {
 if ($c -match 'name="inScript"') { throw 'AutoIP: the page offers a script (not on Windows)' }
 if ($c -match 'name="inEnabled" value="1"\s+CHECKED') { throw 'AutoIP: it is switched on at first on Windows' }
 Ok 'AutoIP: the page loads, switched off at first on Windows, no script'
-$ipFile = "$Root\panel\autoip-test-$n.txt"
+# (a plain file every site serves as it is: Let's Encrypt's check folder)
+$ipFile = "$Root\data\sentora\acme\.well-known\acme-challenge\autoip-test-$n"
 [IO.File]::WriteAllText($ipFile, "1.2.3.4`n")
-$p = Page '/?module=autoip&action=updateautoip' @{ csfr_token = (Token $c); inUpdate = '1'; inEnabled = '1'; inCommand = "http://127.0.0.1/autoip-test-$n.txt"; inEmail = '' }
+$ErrorActionPreference = 'Continue'; $served = (& curl.exe -s --max-time 10 "http://127.0.0.1/.well-known/acme-challenge/autoip-test-$n" 2>&1) -join ''; $ErrorActionPreference = 'Stop'
+if ($served.Trim() -ne '1.2.3.4') { throw "AutoIP: the test's IP file is not served as it is ($served)" }
+$p = Page '/?module=autoip&action=updateautoip' @{ csfr_token = (Token $c); inUpdate = '1'; inEnabled = '1'; inCommand = "http://127.0.0.1/.well-known/acme-challenge/autoip-test-$n"; inEmail = '' }
 $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
 $ok = $false
 for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
