@@ -448,7 +448,10 @@ function AuthCode($cred) { $ErrorActionPreference = 'Continue'; $a = @('-s', '-o
 $c = ''
 for ($i = 0; $i -lt 40 -and $c -ne '401'; $i++) { Start-Sleep 3; $c = AuthCode $null }
 if ($c -ne '401') { throw "Protected Directories: $dom does not ask for a login ($c; .htaccess: $(Get-Content "$($folder.FullName)\.htaccess" -Raw -ErrorAction SilentlyContinue))" }
-if ((AuthCode "guest:Wrong-Pass-1") -ne '401') { throw 'Protected Directories: a wrong password got in' }
+# (a wrong password must get 401; anything but 401 or 200 is Apache between restarts, asked again)
+$w = ''
+for ($i = 0; $i -lt 10 -and $w -ne '401' -and $w -ne '200'; $i++) { $w = AuthCode "guest:Wrong-Pass-1"; if ($w -ne '401' -and $w -ne '200') { Start-Sleep 3 } }
+if ($w -ne '401') { throw "Protected Directories: a wrong password was not refused ($w)" }
 $c = ''
 for ($i = 0; $i -lt 20 -and $c -ne '200'; $i++) { $c = AuthCode "guest:Guest-Pass-$n-Aa9"; if ($c -ne '200') { Start-Sleep 3 } }
 if ($c -ne '200') { throw "Protected Directories: its user does not get in ($c)" }
