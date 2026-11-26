@@ -1,8 +1,9 @@
 Sentora-2027 for Windows Server (2022/2025), natively in C:\zpanel (the same panel as on Linux).
 Download: sentora-windows-server.zip from https://github.com/RusTus/sentora-installers-2027/releases/tag/current
 
-install-zpanel-stack.ps1: Apache 2.4.71, PHP 8.5.13, MySQL 8.4.13, FTP (SFTPGo) and mail (Stalwart, Roundcube webmail,
-ActiveSync for phones) into C:\zpanel (Windows Server 2022/2025).
+install-zpanel-stack.ps1: Apache 2.4.71, PHP 8.5.13 (and 8.4.28, 8.3.37 for websites that choose them), MySQL 8.4.13,
+FTP (SFTPGo), mail (Stalwart, Roundcube webmail, ActiveSync for phones), DNS (CoreDNS), Matomo web analytics (with
+Python 3.13 for its log importer) and the Sentora panel into C:\zpanel (Windows Server 2022/2025).
 Services: Apache2, MySQL, SFTPGo, Stalwart, ClamAV, FreshClam, CoreDNS. An install with the older ZPanelApache / ZPanelMySQL names is moved over; data kept.
 
 Two installers in this zip, the same file but for one line:
@@ -26,6 +27,7 @@ Two installers in this zip, the same file but for one line:
      PHP time zone (America/Chicago)
    -Unattended asks nothing and takes every Yes. A switch answers its question: -WithFtp:$false, -WithMail:$false, -WithClamAV:$false, -WithDns:$false,
    -MailDomain example.com, -RelaxedSqlMode:$false, -LegacyForeignKeys:$false, -NoFirewall, -TimeZone "America/New_York".
+   -PhpVersions '8.4' (or '' for none) chooses the other PHP versions the websites may use (default 8.4 and 8.3).
 3. Put your app in C:\zpanel\panel. Logs: C:\zpanel\logs. MySQL root password: C:\zpanel\configs\mysql\root-password.txt
 
 FTP users:   C:\zpanel\bin\ftpuser.ps1 add USER PASSWORD     (also: remove USER, list)
@@ -37,6 +39,12 @@ DNS zones:   C:\zpanel\bin\dnszone.ps1 add DOMAIN [IP]   (also: record DOMAIN ad
 Phones:      an Exchange (ActiveSync) account: server SERVER, user name the full address
 HTTPS:       webmail, ActiveSync and calendars only over HTTPS. The certificate in C:\zpanel\configs\ssl is made at install
              (phones ask once to trust it); put a real one there with the same names, then Restart-Service Apache2, Stalwart
+
+In the panel (Admin): Mail Config (mailbox size, webmail, ActiveSync, the mail server's limits), SpamAV Admin (ClamAV
+for mail and the nightly scan of the websites, the mail server's spam filter), Backup Config (the nightly copy to another
+disk or a network share; restore an account's websites and databases on its Restore tab), Branding (resellers' own look and
+panel address), AutoIP (off at first: switch it on if the server's public address changes), Matomo, and each domain's
+PHP version on the Domains page.
 
 Run it again to repair: databases, passwords, FTP users, mailboxes, DNS zones and httpd-vhosts.conf are kept.
 -Uninstall removes the services and keeps the data.
