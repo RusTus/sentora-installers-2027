@@ -1090,7 +1090,7 @@ for box in ['INBOX','"Junk Mail"']:
         if ($bad -and $bad.Line -ne $script:spamBad) { $script:spamBad = $bad.Line; throw "SpamAV: Stalwart did not take the filter: $($bad.Line)" }
     }
     # the folder a message lands in: GTUBE (spam) or a plain one, from the sender given
-    function SpamLands($from, $gtube) {
+    function SpamLands($from, $gtube, $dated = $true) {
         $script:sk++
         $subj = "spamav $n-$($script:sk)"
         $text = if ($gtube) { 'XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X' } else { 'Hello, the meeting is at ten tomorrow. Regards, Sam' }
@@ -1098,7 +1098,9 @@ for box in ['INBOX','"Junk Mail"']:
 import imaplib,smtplib,ssl,time,email.utils
 s=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=30); s.ehlo()
 if s.has_extn('starttls'): s.starttls(context=ssl._create_unverified_context()); s.ehlo()
-s.sendmail('$from',['$saddr'],'From: Sam <$from>\r\nTo: $saddr\r\nDate: '+email.utils.formatdate()+'\r\nMessage-ID: '+email.utils.make_msgid(domain='outside.example')+'\r\nSubject: $subj\r\n\r\n$text\r\n')
+dated=$(if ($dated) { 'True' } else { 'False' })
+hd=('Date: '+email.utils.formatdate()+'\r\nMessage-ID: '+email.utils.make_msgid(domain='outside.example')+'\r\n') if dated else ''
+s.sendmail('$from',['$saddr'],'From: Sam <$from>\r\nTo: $saddr\r\n'+hd+'Subject: $subj\r\n\r\n$text\r\n')
 s.quit()
 for t in range(20):
     time.sleep(3)
@@ -1131,8 +1133,11 @@ print('FOLDER none')
     if ($at -ne 'Junk Mail') { throw "SpamAV: a blocked sender's (pest.example) plain message went to $at" }
     $at = SpamLands 'friend@outside.example' $true
     if ($at -ne 'INBOX') { throw "SpamAV: an allowed sender's spam went to $at" }
+    # (Stalwart here: spam without a date scores about 11.6, with one about 9.1; both are spam by its own score 5)
+    $at = SpamLands 'someone@outside.example' $true $false
+    if ($at -ne 'Junk Mail') { throw "SpamAV: spam scoring 10 or more with sensitivity 10 went to $at" }
     $at = SpamLands 'someone@outside.example' $true
-    if ($at -ne 'Junk Mail') { throw "SpamAV: spam (score about 11) with sensitivity 10 went to $at" }
+    if ($at -ne 'INBOX') { throw "SpamAV: spam scoring under 10 with sensitivity 10 went to $at" }
     $at = SpamLands 'someone@outside.example' $false
     if ($at -ne 'INBOX') { throw "SpamAV: a plain message with sensitivity 10 went to $at" }
     Ok 'SpamAV: blocked senders to Junk Mail, allowed senders to the inbox, the sensitivity counts the score'
