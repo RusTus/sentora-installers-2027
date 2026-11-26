@@ -35,11 +35,11 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
-Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders, File Manager)'
+Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders, File Manager, Backup Config)'
 foreach ($m in @('php_versions')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
@@ -618,6 +618,48 @@ if ($c -notmatch [regex]::Escape($dom) -or $c -notmatch 'Answers') {
     throw "Site Health: $dom is not shown as checked (files: $((Get-ChildItem $f -ErrorAction SilentlyContinue).Name -join ', '); daemon: $dl)"
 }
 Ok "Site Health: $dom was checked by the daemon and its page shows it answering"
+} catch { $late += "$_" }
+
+# --- Backup Config: the off-server backup to a folder (the page's form, Test connection, Back up now: the databases, the
+# settings, the websites and the mailboxes there; Stalwart runs again after), and the daily backup of every account
+try {
+$c = (Page '/?module=backup_admin' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Backup Config page does not load' }
+if ($c -match 'data-tab="restore"|Another SSH server|A Sentora backup node') { throw 'Backup Config shows Linux-only parts on Windows (Restore, SSH, backup node)' }
+$ob = 'C:\sentora-offsite-test'
+$obState = 'C:\zpanel\data\sentora\offsite-backup.json'
+function ObState { try { Get-Content $obState -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $null } }
+$p = Page '/?module=backup_admin&action=SaveOffsite' @{ csfr_token = (Token $c); inDest = 'folder'; inOffsiteEnabled = '1'; inOffsitePath = $ob; inOffsiteTime = '23:59'; inOffsiteKeep = '3'; inOffsiteMail = '1' }
+$st = $null
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = ObState; if ($st -and $st.check_time -and $st.check_ok) { break } }
+if (-not ($st -and $st.check_ok)) { throw "Backup Config: the folder's test did not pass (state: $($st | ConvertTo-Json -Compress); log: $(Get-Content "$Root\logs\panel\offsite-backup.log" -Raw -ErrorAction SilentlyContinue))" }
+Ok "Backup Config: a folder saved on the page passes its test ($($st.check_message))"
+$t0 = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$p = Page '/?module=backup_admin' $null
+$p = Page '/?module=backup_admin&action=OffsiteNow' @{ csfr_token = (Token $p.Content) }
+for ($i = 0; $i -lt 100; $i++) { Start-Sleep 3; $st = ObState; if ($st -and [int64]$st.last_run -ge $t0) { break } }
+$night = Join-Path $ob "$env:COMPUTERNAME\$(Get-Date -Format 'yyyy-MM-dd')"
+$miss = @()
+foreach ($f in @("$night\databases\sentora_core.sql.gz", "$night\config\configs.zip", "$night\manifest.json", "$ob\$env:COMPUTERNAME\files\hostdata\zadmin\public_html", "$ob\$env:COMPUTERNAME\files\mail")) { if (-not (Test-Path $f)) { $miss += $f } }
+if (-not ($st -and $st.result -eq 'ok') -or $miss) { throw "Backup Config: Back up now did not make the copy (state: $($st | ConvertTo-Json -Compress); missing: $($miss -join ', '); log: $(Get-Content "$Root\logs\panel\offsite-backup.log" -Raw -ErrorAction SilentlyContinue))" }
+if ((Get-Service Stalwart).Status -ne 'Running') { throw 'Backup Config: Stalwart did not start again after the mailboxes were copied' }
+$gz = [IO.Compression.GZipStream]::new([IO.File]::OpenRead("$night\databases\sentora_core.sql.gz"), [IO.Compression.CompressionMode]::Decompress)
+$head = (New-Object IO.StreamReader($gz)).ReadToEnd(); $gz.Close()
+if ($head -notmatch 'CREATE TABLE `x_accounts`') { throw 'Backup Config: the panel database dump holds no x_accounts table' }
+Ok "Backup Config: Back up now copied the databases, the settings, the websites and the mailboxes to $ob ($($st.message)); Stalwart runs again"
+# the daily backup of every account (Client backups tab), at the daemon's next daily run
+$p = Page '/?module=backup_admin' $null
+$p = Page '/?module=backup_admin&action=UpdateConfig' @{ csfr_token = (Token $p.Content); schedule_bu = 'true'; purge_bu = 'true'; purge_date = '30'; disk_bu = 'true'; inSaveSystem = '1' }
+$before = @(Get-ChildItem "$Root\hostdata\zadmin\backups" -Filter '*.zip' -ErrorAction SilentlyContinue).Count
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='0' WHERE so_name_vc='daemon_dayrun';" | Out-Null
+Remove-Item Env:\MYSQL_PWD
+$p = Page '/?module=sentoraconfig' $null
+$null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
+$after = $before
+for ($i = 0; $i -lt 60 -and $after -le $before; $i++) { Start-Sleep 3; $after = @(Get-ChildItem "$Root\hostdata\zadmin\backups" -Filter '*.zip' -ErrorAction SilentlyContinue).Count }
+if ($after -le $before) { throw "Backup Config: the daily backup of every account made no backup for zadmin (daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Backup' | Select-Object -Last 4) -join ' / '))" }
+Ok 'Backup Config: the daily backup of every account made a backup for zadmin'
 } catch { $late += "$_" }
 
 if ($late) { throw ($late -join ' || ') }
