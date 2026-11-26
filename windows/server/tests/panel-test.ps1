@@ -280,8 +280,12 @@ if (Test-Path $key) { throw "deleting the certificate on the Sencrypt page left 
 $p = Page '/?module=sentoraconfig' $null
 $p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) }
 $ok = $false
-for ($i = 0; $i -lt 60 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Site $dom '/') -match 'Your Sentora account is active' }
-if (-not $ok) { throw "after deleting its certificate, $dom is not back on plain HTTP: $(Site $dom '/')" }
+for ($i = 0; $i -lt 80 -and -not $ok; $i++) {
+    Start-Sleep 3; $ok = (Site $dom '/') -match 'Your Sentora account is active'
+    # (a daemon run busy with a long job when it was asked: ask again)
+    if (-not $ok -and $i % 30 -eq 29) { $p = Page '/?module=sentoraconfig' $null; $p = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $p.Content) } }
+}
+if (-not $ok) { throw "after deleting its certificate, $dom is not back on plain HTTP (daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-Object -First 3) -join ' / ')): $(Site $dom '/')" }
 if ((CertSubject $dom) -match "CN=$([regex]::Escape($dom))(,|$)") { throw "after deleting its certificate, $dom still shows it" }
 Ok "a certificate deleted on the Sencrypt page: its files go, $dom is back on plain HTTP"
 
