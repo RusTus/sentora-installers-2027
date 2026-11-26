@@ -1145,6 +1145,37 @@ print('FOLDER none')
     $at = SpamLands 'spammer@outside.example' $true
     if ($at -ne 'INBOX') { throw "SpamAV: with the filter off for the mailbox, spam went to $at" }
     Ok 'SpamAV: the filter switched off for a mailbox lets everything into the inbox'
+    # --- the SpamAV figures: a virus sent to the mailbox is refused; the daemon reads Stalwart's log and the refusals into
+    # the counts and the activity the pages show
+    $vpy = @"
+import smtplib,ssl
+s=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=60); s.ehlo()
+if s.has_extn('starttls'): s.starttls(context=ssl._create_unverified_context()); s.ehlo()
+try:
+    s.sendmail('germs@outside.example',['$saddr'],'From: germs@outside.example\r\nTo: $saddr\r\nSubject: virus $n\r\n\r\nX5O!P%@AP[4\\PZX54(P^)7CC)7}`$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!`$H+H*\r\n'); print('VIRUS accepted')
+except smtplib.SMTPDataError as e: print('VIRUS refused',e.smtp_code)
+"@
+    $vf = Join-Path $env:TEMP "spamav-virus-$n.py"; [IO.File]::WriteAllText($vf, $vpy)
+    $ErrorActionPreference = 'Continue'
+    $vr = (& python $vf 2>&1) -join ' '
+    $ErrorActionPreference = 'Stop'
+    if ($vr -notmatch 'VIRUS refused 554') { throw "SpamAV: a virus sent to $saddr was not refused: $vr" }
+    $fig = ''
+    for ($i = 0; $i -lt 12; $i++) {
+        MailRun
+        Start-Sleep 5
+        $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+        $fig = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(COALESCE(SUM(dd_scanned_in),0),' ',COALESCE(SUM(dd_spam_in),0),' ',COALESCE(SUM(dd_virus_in),0)) FROM sentora_core.x_spamav_daily WHERE dd_mailbox_vc='$saddr'") -join ''
+        Remove-Item Env:\MYSQL_PWD
+        $fp = $fig.Split(' ')
+        if ($fp.Count -eq 3 -and [int]$fp[0] -ge 5 -and [int]$fp[1] -ge 2 -and [int]$fp[2] -ge 1) { break }
+    }
+    if (-not ($fp.Count -eq 3 -and [int]$fp[0] -ge 5 -and [int]$fp[1] -ge 2 -and [int]$fp[2] -ge 1)) { throw "SpamAV: the figures of $saddr are not counted (checked, spam, viruses: $fig; daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'SpamAV' | Select-Object -Last 4) -join ' / '))" }
+    $c = (Page "/?module=spamav&box=$saddr" $null).Content
+    if ($c -notmatch 'EICAR' -or $c -notmatch 'germs@outside\.example') { throw "SpamAV: the virus is not in the activity on Mail > SpamAV" }
+    $c = (Page '/?module=spamav_admin' $null).Content
+    if ($c -notmatch 'Spam caught') { throw 'SpamAV Admin: the overview has no mail figures' }
+    Ok "SpamAV: the figures are read from the mail server's log (for $saddr checked $($fp[0]), spam $($fp[1]), viruses $($fp[2])); the virus is in the activity"
     # (look only, for the mail figures on Windows) what Stalwart's log says about these messages
     $sl = Get-ChildItem "$Root\logs\stalwart" -Filter 'stalwart.log*' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
     if ($sl) {
