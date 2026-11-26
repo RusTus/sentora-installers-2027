@@ -163,7 +163,7 @@ try {
 if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     $c = (Page '/?module=php_versions' $null).Content
     if ($c -match 'Fatal error|Uncaught|Warning:' -or $c -notmatch 'PHP 8\.4' -or $c -notmatch 'name="inEnabled_8_4" value="1" checked' -or $c -match 'sentora-php-install 7\.1|-fpm ') { $tx = (($c -replace '(?s)<script.*?</script>', ' ') -replace '<[^>]+>', ' ' -replace '\s+', ' '); $at = [Math]::Max(0, $tx.IndexOf('PHP 8.5')); throw "PHP versions: the PHP Versions page does not show 8.4 switched on the Windows way: $($tx.Substring($at, [Math]::Min(600, $tx.Length - $at)))" }
-    Ok 'PHP versions: the PHP Versions page shows 8.4 (and 8.3) switched on, without Linux''s PHP-FPM, updates and extensions'
+    Ok 'PHP versions: the PHP Versions page shows 8.4 (and 8.3) switched on, without Linux''s PHP-FPM and updates'
     Set-Content "$($folder.FullName)\v.php" '<?php echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION . " " . trim((string) shell_exec("whoami"));' -Encoding ASCII
     # (the domain's ID: the DNS part below looks it up later)
     $pvMy = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
@@ -205,6 +205,47 @@ if (Test-Path "$Root\bin\php-8.4\php-cgi.exe") {
     if ($pv -notmatch '^8\.5 ') { throw "PHP versions: back to the panel's PHP, $dom answers '$pv'" }
     Ok "PHP versions: back to the panel's PHP (8.5), $dom runs it again"
     Remove-Item "$($folder.FullName)\v.php" -Force
+    # --- PHP Versions > Extensions: bz2 (shipped, not switched on by the installer) on for the panel's PHP 8.5: the
+    # daemon tries it, writes it into php.ini, and the account's PHP is rebuilt with it; then off again. com_dotnet is
+    # never offered (COM would let a site run any program)
+    function ExtSave($want) {
+        $c = (Page '/?module=php_versions' $null).Content
+        $b = @{ csfr_token = (Token $c) }
+        foreach ($m in [regex]::Matches($c, 'name="(peon_[a-z0-9_]+)" value="1"( checked)?')) { if ($m.Groups[2].Success) { $b[$m.Groups[1].Value] = '1' } }
+        foreach ($k in $want.Keys) { if ($want[$k]) { $b[$k] = '1' } else { $b.Remove($k) } }
+        $p = Page '/?module=php_versions&action=SaveExtensions' $b
+        if ($p.Content -notmatch 'Saved\. The daemon tries PHP') { throw "PHP extensions: not saved: $(([regex]::Match($p.Content, '(?s)zannounce\w*[^>]*>(.{0,300})')).Groups[1].Value)" }
+    }
+    Set-Content "$($folder.FullName)\e.php" '<?php echo extension_loaded("bz2") ? "bz2 on" : "bz2 off";' -Encoding ASCII
+    $c = ''
+    for ($i = 0; $i -lt 40; $i++) {
+        $c = (Page '/?module=php_versions' $null).Content
+        if ($c -match 'name="peon_8_5__bz2"') { break }
+        if ($i % 10 -eq 0) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
+        Start-Sleep 3
+    }
+    if ($c -notmatch 'name="peon_8_5__bz2"') { throw "PHP extensions: the page does not offer bz2 for PHP 8.5 (the daemon's list: $(Get-Content "$Root\data\sentora\php-extensions.json" -Raw -ErrorAction SilentlyContinue | Select-Object -First 1))" }
+    if ($c -match 'name="peon_[0-9_]+__com_dotnet"' -or $c -notmatch 'com_dotnet') { throw 'PHP extensions: com_dotnet is offered, or not listed as never offered' }
+    if ((Site $dom '/e.php') -ne 'bz2 off') { throw "PHP extensions: bz2 is already on for $dom" }
+    function ExtWait($want) {
+        $got = ''
+        for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep 3; $got = Site $dom '/e.php'; if ($got -eq $want) { break }
+            if ($i % 10 -eq 0) { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
+        }
+        return $got
+    }
+    ExtSave @{ 'peon_8_5__bz2' = $true }
+    $got = ExtWait 'bz2 on'
+    if ($got -ne 'bz2 on') { throw "PHP extensions: bz2 switched on, but $dom says '$got' (php.ini: $((Select-String -Path "$Root\bin\php\php.ini" -Pattern 'bz2' | ForEach-Object Line) -join ' | '); daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'PHP' | Select-Object -Last 4) -join ' / '))" }
+    $pm = (& "$Root\bin\php\php.exe" -m 2>&1) -join ' '
+    if ($pm -notmatch '\bbz2\b' -or $pm -match 'Warning') { throw "PHP extensions: the panel's PHP after bz2 was switched on: $pm" }
+    Ok "PHP extensions: bz2 switched on for PHP 8.5 on the page: tried first, in php.ini, and $dom's PHP (the account's service) has it"
+    ExtSave @{ 'peon_8_5__bz2' = $false }
+    $got = ExtWait 'bz2 off'
+    if ($got -ne 'bz2 off') { throw "PHP extensions: bz2 switched off, but $dom says '$got'" }
+    Remove-Item "$($folder.FullName)\e.php" -Force
+    Ok 'PHP extensions: switched off again, gone from the site''s PHP; com_dotnet is never offered'
 } else { throw 'PHP versions: the installer did not add PHP 8.4 (bin\php-8.4)' }
 } catch { $phpFail = "$_"; Write-Host "   (reported at the end) $phpFail" }
 # (a daemon run that began before the parked domain was saved serves the domain first: the next run brings the parked one)

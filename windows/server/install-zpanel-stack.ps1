@@ -290,6 +290,13 @@ function Stop-AndRemoveService($name) {
     }
 }
 
+# the block of a php.ini the panel writes (PHP Versions > Extensions): kept when this installer writes the file again
+function Get-ExtBlock($file) {
+    if (-not (Test-Path $file)) { return '' }
+    $m = [regex]::Match([IO.File]::ReadAllText($file), '(?s)\r?\n; --- Sentora: PHP Versions > Extensions .*?; --- Sentora: end of PHP Versions > Extensions ---')
+    if ($m.Success) { return "`r`n" + $m.Value.TrimStart() + "`r`n" }
+    return ''
+}
 function New-Password {
     $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'.ToCharArray()
     $bytes = New-Object byte[] 24
@@ -535,7 +542,7 @@ try {
         if ($_ -match '^\s*extension\s*=\s*"?([A-Za-z0-9_]+)"?\s*$') { $k = $Matches[1].ToLower(); if ($seenExt.ContainsKey($k)) { return $false }; $seenExt[$k] = $true }
         return $true
     }) -join "`r`n"
-    Write-Utf8NoBom (Join-Path $PhpDir 'php.ini') $ini
+    Write-Utf8NoBom (Join-Path $PhpDir 'php.ini') ($ini + (Get-ExtBlock (Join-Path $PhpDir 'php.ini')))
     $phpExe = Join-Path $PhpDir 'php.exe'
     $v = (Invoke-Native $phpExe @('-n', '-r', 'echo PHP_VERSION;')) -join ''
     $mods = (Invoke-Native $phpExe @('-c', (Join-Path $PhpDir 'php.ini'), '-m')) -join ' '
@@ -562,7 +569,7 @@ try {
                 if ($_ -match '^\s*extension\s*=\s*"?([A-Za-z0-9_]+)"?\s*$') { return (Test-Path (Join-Path $pvDir "ext\php_$($Matches[1]).dll")) }
                 return $true
             }) -join "`r`n"
-            Write-Utf8NoBom (Join-Path $pvDir 'php.ini') $pvIni
+            Write-Utf8NoBom (Join-Path $pvDir 'php.ini') ($pvIni + (Get-ExtBlock (Join-Path $pvDir 'php.ini')))
             $pvV = (Invoke-Native (Join-Path $pvDir 'php.exe') @('-c', (Join-Path $pvDir 'php.ini'), '-r', 'echo PHP_VERSION;')) -join ''
             if ($LASTEXITCODE -ne 0 -or $pvV -notmatch ('^' + [regex]::Escape($pv) + '\.')) { Fail "PHP $pv does not run: $pvV" }
             $phpExtra += $pv
@@ -2445,6 +2452,16 @@ function Free-Base($skip) {
     }
     throw 'no free ports for another account'
 }
+# (an account's php.ini files are built from each version's php.ini: one changed since, as by PHP Versions > Extensions)
+function Stale($a) {
+    $mine = Join-Path $cfg "$($a.name).ini"
+    if (-not (Test-Path $mine) -or (Get-Item (Join-Path $php 'php.ini')).LastWriteTimeUtc -gt (Get-Item $mine).LastWriteTimeUtc) { return $true }
+    foreach ($v in (Get-Versions $a)) {
+        $vi = Join-Path $cfg "$($a.name)-$($v -replace '\.', '').ini"
+        if (-not (Test-Path $vi) -or (Get-Item (Join-Path (Version-Dir $v) 'php.ini')).LastWriteTimeUtc -gt (Get-Item $vi).LastWriteTimeUtc) { return $true }
+    }
+    return $false
+}
 function Get-Saved { @(Get-ChildItem $saved -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json }) }
 # (the panel's user names: letters, digits and -, 1-63, not starting or ending with -; lower case here)
 function Test-Name($n) { if ($n -cnotmatch '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$') { throw "NAME: a-z, 0-9 and -, at most 63, not starting or ending with - ($n)" } }
@@ -2651,7 +2668,7 @@ switch ($Do) {
             if (($haveV -join ',') -ne ($wantV -join ',')) {
                 $a | Add-Member -NotePropertyName versions -NotePropertyValue $wantV -Force
                 Build $a; $changed++
-            } elseif (-not (Get-Service "SentoraPHP-$n" -ErrorAction SilentlyContinue) -or -not (Test-Path (Join-Path $apacheCfg "$n.conf"))) { Build $a; $changed++ }
+            } elseif (-not (Get-Service "SentoraPHP-$n" -ErrorAction SilentlyContinue) -or -not (Test-Path (Join-Path $apacheCfg "$n.conf")) -or (Stale $a)) { Build $a; $changed++ }
         }
         foreach ($a in $have) {
             if ($a.panel -and $want -notcontains $a.name) { Remove-Account $a.name; $changed++ }
