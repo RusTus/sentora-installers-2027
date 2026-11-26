@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding', 'autoip', 'matomo', 'php_versions')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'spamav', 'branding', 'autoip', 'matomo', 'php_versions')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -1068,6 +1068,75 @@ for box in ['INBOX','"Junk Mail"']:
     $pr = (& python $probeFile 2>&1) -join "`n"
     $ErrorActionPreference = 'Stop'
     Write-Host "   (look) Stalwart and a spam message:`n$pr"
+    # --- Mail > SpamAV (the mailbox owner's page): the choices become a Sieve filter on the mailbox, which Stalwart takes
+    $sbox = "spam$n"; $saddr = "$sbox@$dom"; $spw = "Spam-Test-$n-Cc7"
+    $p = Page '/?module=mailboxes' $null
+    $p = Page '/?module=mailboxes&action=AddMailbox' @{ csfr_token = (Token $p.Content); inAddress = $sbox; inDomain = $dom; inPassword = $spw }
+    MailRun
+    $ok = $false
+    for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; try { $ok = ImapLogin $saddr $spw } catch { $ok = $false } }
+    if (-not $ok) { throw "SpamAV: the mailbox $saddr made for the test does not log in" }
+    $sk = 0
+    function SpamPrefs($vals) {
+        $p = Page '/?module=spamav' $null
+        if ($p.Content -notmatch [regex]::Escape($saddr)) { throw "SpamAV: $saddr is not on Mail > SpamAV" }
+        $b = @{ csfr_token = (Token $p.Content); inMailbox = $saddr; inScore = ''; inAction = ''; inAllow = ''; inBlock = '' }
+        foreach ($k in $vals.Keys) { $b[$k] = $vals[$k] }
+        $p = Page "/?module=spamav&action=SavePrefs&edit=$saddr" $b
+        if ($p.Content -notmatch 'saved') { throw "SpamAV: the settings of $saddr were not saved: $(([regex]::Match($p.Content, '(?s)alert[^>]*>(.{0,300})')).Groups[1].Value)" }
+        MailRun
+        Start-Sleep 5
+        $bad = Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String ([regex]::Escape("filter (forwarder, spam choices) of $saddr")) | Select-Object -Last 1
+        if ($bad -and $bad.Line -ne $script:spamBad) { $script:spamBad = $bad.Line; throw "SpamAV: Stalwart did not take the filter: $($bad.Line)" }
+    }
+    # the folder a message lands in: GTUBE (spam) or a plain one, from the sender given
+    function SpamLands($from, $gtube) {
+        $script:sk++
+        $subj = "spamav $n-$($script:sk)"
+        $text = if ($gtube) { 'XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X' } else { 'Hello, the meeting is at ten tomorrow. Regards, Sam' }
+        $py = @"
+import imaplib,smtplib,ssl,time
+s=smtplib.SMTP('127.0.0.1',25,local_hostname='outside.example',timeout=30); s.ehlo()
+if s.has_extn('starttls'): s.starttls(context=ssl._create_unverified_context()); s.ehlo()
+s.sendmail('$from',['$saddr'],'From: $from\r\nTo: $saddr\r\nSubject: $subj\r\n\r\n$text\r\n')
+s.quit()
+for t in range(20):
+    time.sleep(3)
+    m=imaplib.IMAP4_SSL('127.0.0.1',993,ssl_context=ssl._create_unverified_context()); m.login('$saddr','$spw')
+    for box in ['INBOX','"Junk Mail"']:
+        if m.select(box)[0]!='OK': continue
+        t2,d=m.search(None,'SUBJECT','"$subj"')
+        if d[0].split(): print('FOLDER',box.strip('"')); raise SystemExit
+    m.logout()
+print('FOLDER none')
+"@
+        $f = Join-Path $env:TEMP "spamav-$n-$($script:sk).py"; [IO.File]::WriteAllText($f, $py)
+        $ErrorActionPreference = 'Continue'
+        $r = (& python $f 2>&1) -join "`n"
+        $ErrorActionPreference = 'Stop'
+        if ($r -match 'FOLDER (.+)') { return $Matches[1].Trim() }
+        throw "SpamAV: the test message did not get through: $r"
+    }
+    $at = SpamLands 'spammer@outside.example' $true
+    if ($at -ne 'Junk Mail') { throw "SpamAV: with no choices made, spam went to $at, not Junk Mail" }
+    SpamPrefs @{ inEnabled = '1'; inAction = 'inbox' }
+    $at = SpamLands 'spammer@outside.example' $true
+    if ($at -ne 'INBOX') { throw "SpamAV: set to 'Inbox, marked', spam went to $at" }
+    Ok 'SpamAV: a mailbox set to keep spam in the inbox gets it there (no choice: Junk Mail)'
+    SpamPrefs @{ inEnabled = '1'; inScore = '10'; inAction = 'folder'; inAllow = 'friend@outside.example'; inBlock = "pest.example`n*@nuisance.example" }
+    $at = SpamLands 'pal@pest.example' $false
+    if ($at -ne 'Junk Mail') { throw "SpamAV: a blocked sender's (pest.example) plain message went to $at" }
+    $at = SpamLands 'friend@outside.example' $true
+    if ($at -ne 'INBOX') { throw "SpamAV: an allowed sender's spam went to $at" }
+    $at = SpamLands 'someone@outside.example' $true
+    if ($at -ne 'Junk Mail') { throw "SpamAV: spam (score about 11) with sensitivity 10 went to $at" }
+    $at = SpamLands 'someone@outside.example' $false
+    if ($at -ne 'INBOX') { throw "SpamAV: a plain message with sensitivity 10 went to $at" }
+    Ok 'SpamAV: blocked senders to Junk Mail, allowed senders to the inbox, the sensitivity counts the score'
+    SpamPrefs @{ inAction = 'folder' }
+    $at = SpamLands 'spammer@outside.example' $true
+    if ($at -ne 'INBOX') { throw "SpamAV: with the filter off for the mailbox, spam went to $at" }
+    Ok 'SpamAV: the filter switched off for a mailbox lets everything into the inbox'
     # --- SpamAV Admin: ClamAV's settings go into clamd.conf (ClamAV restarts and answers again), the spam scores into
     # Stalwart's spam filter; no SpamAssassin; the file scanning tab
     function ClamUp { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 3310); $st = $c.GetStream(); $b = [Text.Encoding]::ASCII.GetBytes("zPING`0"); $st.Write($b, 0, $b.Length); $buf = New-Object byte[] 16; $k = $st.Read($buf, 0, 16); $c.Close(); return ([Text.Encoding]::ASCII.GetString($buf, 0, $k) -match 'PONG') } catch { return $false } }
