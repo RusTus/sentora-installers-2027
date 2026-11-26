@@ -83,6 +83,8 @@ param(
     [switch]$WithClamAV,
     [switch]$WithDns,
     [switch]$WithPanel,
+    # (other PHP versions for the hosting accounts' domains, next to the panel's own 8.5: '' for none)
+    [string]$PhpVersions = '8.4,8.3',
     [string]$PanelSource,
     [string]$PanelSqlSource,
     [string]$MailDomain,
@@ -145,6 +147,15 @@ $Pkg = @{
     CoreDns = @{ Name = 'CoreDNS 1.15.0 (DNS server)'
                 Url  = 'https://github.com/coredns/coredns/releases/download/v1.15.0/coredns_1.15.0_windows_amd64.tgz'
                 Sha  = '94D21843A17D13D32E8EB122B4410EF5C68C549A623CF9340896759252F940BD'; Top = '' }
+    # (other PHP versions for the websites, chosen per domain on the Domains page; checksums from windows.php.net's list)
+    Php84  = @{ Name = 'PHP 8.4.28 (Thread Safe, VS17, x64; for websites)'
+                Url  = 'https://windows.php.net/downloads/releases/php-8.4.28-Win32-vs17-x64.zip'
+                More = @('https://windows.php.net/downloads/releases/archives/php-8.4.28-Win32-vs17-x64.zip')
+                Sha  = '59CCAA095D0F0C3FBB9F7E2BFD86713EBAC032D5783CC22BC8934E2285629999'; Top = '' }
+    Php83  = @{ Name = 'PHP 8.3.37 (Thread Safe, VS16, x64; for websites)'
+                Url  = 'https://windows.php.net/downloads/releases/php-8.3.37-Win32-vs16-x64.zip'
+                More = @('https://windows.php.net/downloads/releases/archives/php-8.3.37-Win32-vs16-x64.zip')
+                Sha  = '07984BDCFD4391888954C2E73B1CF2C0D403CFA5FD8CB32AD60DDCD854C6B7DE'; Top = '' }
     # (the panel's Matomo reads the websites' logs with Matomo's own importer, a Python script; the SHA-256 of python.org's file)
     Python = @{ Name = 'Python 3.13.9 (embeddable, for Matomo''s log importer)'
                 Url  = 'https://www.python.org/ftp/python/3.13.9/python-3.13.9-embed-amd64.zip'
@@ -531,6 +542,33 @@ try {
     $missing = $exts | Where-Object { $mods -notmatch ('(?i)\b' + [regex]::Escape($_) + '\b') }
     if ($missing) { Fail "PHP $v did not load: $($missing -join ', ')" }
     Ok "PHP $v with $($exts -join ', ')"
+
+    # the other PHP versions for the websites (bin\php-8.4, bin\php-8.3): the same settings, their own extension folder,
+    # only the extensions each one ships; the hosting accounts' PHP runs them (phpaccount.ps1), never Apache
+    $phpExtra = @()
+    if ($Edition -ne 'stack') {
+        foreach ($pv in @($PhpVersions.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+            $pk = 'Php' + ($pv -replace '\.', '')
+            if ($pv -notmatch '^\d+\.\d+$' -or -not $Pkg.ContainsKey($pk)) { Note "(PHP $pv is not one this installer has: skipped)"; continue }
+            $pvDir = Join-Path $Bin "php-$pv"
+            $pvZip = Get-Verified $Pkg[$pk]
+            $stamp = Join-Path $pvDir 'sentora-version.txt'
+            if (-not (Test-Path $stamp) -or (Get-Content $stamp -Raw).Trim() -ne $Pkg[$pk].Sha) {
+                Expand-Into $pvZip $Pkg[$pk].Top $pvDir
+                Write-Utf8NoBom $stamp $Pkg[$pk].Sha
+            }
+            $pvIni = [regex]::Replace($ini, '(?m)^\s*extension_dir\s*=.*$', 'extension_dir = "' + (& $Fwd (Join-Path $pvDir 'ext')) + '"', 1)
+            $pvIni = (($pvIni -split "`r?`n") | Where-Object {
+                if ($_ -match '^\s*extension\s*=\s*"?([A-Za-z0-9_]+)"?\s*$') { return (Test-Path (Join-Path $pvDir "ext\php_$($Matches[1]).dll")) }
+                return $true
+            }) -join "`r`n"
+            Write-Utf8NoBom (Join-Path $pvDir 'php.ini') $pvIni
+            $pvV = (Invoke-Native (Join-Path $pvDir 'php.exe') @('-c', (Join-Path $pvDir 'php.ini'), '-r', 'echo PHP_VERSION;')) -join ''
+            if ($LASTEXITCODE -ne 0 -or $pvV -notmatch ('^' + [regex]::Escape($pv) + '\.')) { Fail "PHP $pv does not run: $pvV" }
+            $phpExtra += $pv
+            Ok "PHP $pvV -> $pvDir (for websites that choose it)"
+        }
+    }
 
     # --------------------------------------------------------------------------------------------------------------
     Say 'MySQL 8.4 settings and databases'
@@ -2053,6 +2091,8 @@ switch ($Do) {
             $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
             $settings['filescan_quarantine'] = "$fwdRoot/data/quarantine"
             $settings['python_exe'] = "$fwdRoot/bin/python/python.exe"
+            # the other PHP versions the Domains page offers (the installer's; an administrator may narrow the list)
+            $settings['php_versions_enabled'] = ($phpExtra -join ',')
             # Mail Config: the files its daemon writes (the webmail's settings, ActiveSync's switch in the mail site)
             $settings['webmail_panel_conf'] = "$fwdRoot/configs/stalwart/roundcube-panel.inc.php"; $settings['mail_apache_conf'] = "$fwdRoot/configs/apache/mail-panel.conf"
             $q = ''
@@ -2317,27 +2357,39 @@ switch ($Do) {
     # time), each with the account's fences on its command line
     Write-Utf8NoBom (Join-Path $Bin 'sentora-php-pool.php') @'
 <?php
-// sentora-php-pool.php <php.ini> <port,port,...> [name=value ...] (made by install-zpanel-stack.ps1; run by each
-// account's service SentoraPHP-NAME as php.exe -n): keeps one php-cgi FastCGI process per port running, on 127.0.0.1
-// only, and starts again any that stops. The name=value settings (the account's fences) go on each php-cgi's command
-// line as -d, so they hold even if php.ini could not be read; each value in quotes (-d is read like a php.ini line,
-// where ; starts a note).
-if (PHP_SAPI !== 'cli' || $argc < 3) { exit(2); }
-$ini = $argv[1];
-$ports = array_map('intval', explode(',', $argv[2]));
+// sentora-php-pool.php <pool.json> [name=value ...] (made by install-zpanel-stack.ps1; run by each account's service
+// SentoraPHP-NAME as php.exe -n): keeps one php-cgi FastCGI process per port running, on 127.0.0.1 only, and starts
+// again any that stops. pool.json (phpaccount.ps1) lists each PHP version the account's sites use: its php-cgi.exe,
+// its php.ini and its ports. The name=value settings (the account's fences) go on each php-cgi's command line as -d,
+// so they hold even if php.ini could not be read; each value in quotes (-d is read like a php.ini line).
+// (an older service's form: <php.ini> <port,port,...> [name=value ...], with this PHP's own php-cgi)
+if (PHP_SAPI !== 'cli' || $argc < 2) { exit(2); }
+$groups = array();
+$rest = array();
+if (substr($argv[1], -5) === '.json') {
+    foreach ((array) json_decode((string) @file_get_contents($argv[1]), true) as $g) {
+        if (isset($g['cgi'], $g['ini'], $g['ports']) && is_file($g['cgi'])) { $groups[] = array($g['cgi'], $g['ini'], array_map('intval', (array) $g['ports'])); }
+    }
+    $rest = array_slice($argv, 2);
+} elseif ($argc >= 3) {
+    $groups[] = array(dirname(PHP_BINARY) . DIRECTORY_SEPARATOR . 'php-cgi.exe', $argv[1], array_map('intval', explode(',', $argv[2])));
+    $rest = array_slice($argv, 3);
+}
+if (!$groups) { exit(2); }
 $extra = array();
-foreach (array_slice($argv, 3) as $a) {
+foreach ($rest as $a) {
     $eq = strpos($a, '=');
     if ($eq > 0 && strpos($a, '"') === false) { $extra[] = '-d'; $extra[] = substr($a, 0, $eq) . '="' . substr($a, $eq + 1) . '"'; }
 }
-$cgi = dirname(PHP_BINARY) . DIRECTORY_SEPARATOR . 'php-cgi.exe';
 putenv('PHP_FCGI_MAX_REQUESTS=0');
 $run = array();
 while (true) {
-    foreach ($ports as $p) {
-        if ($p < 1024 || $p > 65535) { continue; }
-        if (!isset($run[$p]) || !proc_get_status($run[$p])['running']) {
-            $run[$p] = proc_open(array_merge(array($cgi, '-b', "127.0.0.1:$p", '-c', $ini), $extra), array(), $pipes, null, null, array('bypass_shell' => true));
+    foreach ($groups as $g) {
+        foreach ($g[2] as $p) {
+            if ($p < 1024 || $p > 65535) { continue; }
+            if (!isset($run[$p]) || !proc_get_status($run[$p])['running']) {
+                $run[$p] = proc_open(array_merge(array($g[0], '-b', "127.0.0.1:$p", '-c', $g[1]), $extra), array(), $pipes, null, null, array('bypass_shell' => true));
+            }
         }
     }
     sleep(1);
@@ -2356,6 +2408,9 @@ while (true) {
     phpaccount.ps1 sync                      the panel's accounts in line with the list its daemon wrote (only root's
                                              jobs may write it: data\sentora\phpaccounts\wanted.txt); the panel asks
                                              for it through SentoraZsudo. Accounts added by hand are left alone.
+  Other PHP versions (bin\php-8.4, bin\php-8.3: the installer's): wanted.txt names them after an account ("shop 8.4,8.3")
+  when its domains use them; the account's one service then runs their php-cgi too, each on ports of its own, and
+  Apache's part has a pool for each (php84-NAME), which the panel's sites file names for those domains.
 #>
 param([Parameter(Mandatory = $true)][ValidateSet('add', 'remove', 'list', 'repair', 'sync')][string]$Do, [string]$Name,
       [ValidateRange(1, 16)][int]$Processes = 3, [switch]$NoRestart)
@@ -2372,6 +2427,16 @@ $group = 'SentoraPHP'
 # (ports: 16 per account from 20000, one php-cgi on each in use)
 $portBase = 20000; $portBlock = 16
 function Native($exe, $argv) { $ErrorActionPreference = 'Continue'; $o = & $exe @argv 2>&1; if ($LASTEXITCODE -ne 0) { throw "$exe $($argv -join ' '): $($o -join ' ')" }; $o }
+function Version-Dir($v) { if ($v -match '^\d+\.\d+$') { $d = Join-Path $root ("bin\php-$v"); if (Test-Path (Join-Path $d 'php-cgi.exe')) { return $d } }; return $null }
+function Get-Versions($a) { if ($a.PSObject.Properties['versions']) { return @($a.versions | Where-Object { Version-Dir $_ }) }; return @() }
+function Free-Base($skip) {
+    $used = @(Get-Saved | ForEach-Object { $_.base; if ($_.PSObject.Properties['extra']) { $_.extra.PSObject.Properties | ForEach-Object { $_.Value } } }) + $skip
+    for ($i = 0; $i -lt 2000; $i++) {
+        $b = $portBase + $i * $portBlock
+        if ($used -notcontains $b -and -not (Get-NetTCPConnection -LocalPort ($b..($b + $portBlock - 1)) -ErrorAction SilentlyContinue)) { return $b }
+    }
+    throw 'no free ports for another account'
+}
 function Get-Saved { @(Get-ChildItem $saved -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json }) }
 # (the panel's user names: letters, digits and -, 1-63, not starting or ending with -; lower case here)
 function Test-Name($n) { if ($n -cnotmatch '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$') { throw "NAME: a-z, 0-9 and -, at most 63, not starting or ending with - ($n)" } }
@@ -2398,6 +2463,7 @@ function Remove-Account($n) {
     }
     Remove-LocalGroupMember -Group $group -Member "NT SERVICE\$svc" -ErrorAction SilentlyContinue
     foreach ($f in @((Join-Path $apacheCfg "$n.conf"), (Join-Path $cfg "$n.ini"), (Join-Path $cfg "$n-guard.php"), (Join-Path $saved "$n.json"))) { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    Remove-Item (Join-Path $cfg "$n-*.ini"), (Join-Path $cfg "$n.pool.json") -Force -ErrorAction SilentlyContinue
 }
 
 # The File Manager's code (from the panel's modules\file_manager\app), copied once a run to C:\zpanel\filemanager: the
@@ -2433,7 +2499,28 @@ function Build($a) {
     $fmApp = Copy-FileManager
     $fence = if ($fmApp) { "$hd\;$guard;$fmApp" } else { "$hd\;$guard" }
     [IO.File]::WriteAllText($ini, $base + "`r`n; --- $n (phpaccount.ps1)`r`nopen_basedir = `"$fence`"`r`nauto_prepend_file = `"$guard`"`r`nerror_log = `"$hd\tmp\php-error.log`"`r`nupload_tmp_dir = `"$hd\tmp`"`r`nsys_temp_dir = `"$hd\tmp`"`r`nsession.save_path = `"$hd\sessions`"`r`ncgi.fix_pathinfo = 0`r`n")
-    $params = "-n `"$pool`" `"$ini`" " + ($ports -join ',') + " `"open_basedir=$fence`" `"auto_prepend_file=$guard`""
+    # the other PHP versions its domains use: each its own php.ini (that PHP's, then the same fences) and ports
+    $tail = "`r`n; --- $n (phpaccount.ps1)`r`nopen_basedir = `"$fence`"`r`nauto_prepend_file = `"$guard`"`r`nerror_log = `"$hd\tmp\php-error.log`"`r`nupload_tmp_dir = `"$hd\tmp`"`r`nsys_temp_dir = `"$hd\tmp`"`r`nsession.save_path = `"$hd\sessions`"`r`ncgi.fix_pathinfo = 0`r`n"
+    $spec = @(@{ cgi = (Join-Path $php 'php-cgi.exe'); ini = $ini; ports = $ports })
+    $more = @()
+    if (-not $a.PSObject.Properties['extra']) { $a | Add-Member -NotePropertyName extra -NotePropertyValue ([pscustomobject]@{}) }
+    foreach ($v in (Get-Versions $a)) {
+        $vd = Version-Dir $v; $vk = $v -replace '\.', ''
+        if (-not $a.extra.PSObject.Properties[$v]) { $a.extra | Add-Member -NotePropertyName $v -NotePropertyValue (Free-Base (@($a.base) + @($a.extra.PSObject.Properties | ForEach-Object { $_.Value }))) }
+        $vb = [int]$a.extra.$v
+        $vports = @(0..($a.processes - 1) | ForEach-Object { $vb + $_ })
+        $vini = Join-Path $cfg "$n-$vk.ini"
+        [IO.File]::WriteAllText($vini, [IO.File]::ReadAllText((Join-Path $vd 'php.ini')) + $tail)
+        Native 'icacls.exe' @($vini, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
+        $spec += @{ cgi = (Join-Path $vd 'php-cgi.exe'); ini = $vini; ports = $vports }
+        $more += [pscustomobject]@{ key = $vk; ports = $vports }
+    }
+    # (the ports each version was given are kept, so a rebuild keeps them)
+    [IO.File]::WriteAllText((Join-Path $saved "$n.json"), ($a | ConvertTo-Json -Depth 4))
+    $specFile = Join-Path $cfg "$n.pool.json"
+    [IO.File]::WriteAllText($specFile, (ConvertTo-Json -InputObject $spec -Depth 4))
+    Native 'icacls.exe' @($specFile, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F', "${sid}:R") | Out-Null
+    $params = "-n `"$pool`" `"$specFile`" `"open_basedir=$fence`" `"auto_prepend_file=$guard`""
     if (Get-Service $svc -ErrorAction SilentlyContinue) { Stop-Service $svc -Force -ErrorAction SilentlyContinue }
     else { Native $nssm @('install', $svc, (Join-Path $php 'php.exe')) | Out-Null }
     Native $nssm @('set', $svc, 'Application', (Join-Path $php 'php.exe')) | Out-Null
@@ -2460,6 +2547,7 @@ function Build($a) {
 $members
     ProxySet lbmethod=byrequests timeout=300
 </Proxy>
+$(($more | ForEach-Object { "<Proxy `"balancer://php$($_.key)-$n`">`r`n" + (($_.ports | ForEach-Object { "    BalancerMember `"fcgi://127.0.0.1:$_`" retry=0" }) -join "`r`n") + "`r`n    ProxySet lbmethod=byrequests timeout=300`r`n</Proxy>" }) -join "`r`n")
 <Directory "$fw/hostdata/$n">
     <FilesMatch "\.php$">
         Require all granted
@@ -2533,13 +2621,25 @@ switch ($Do) {
         # is skipped, and only accounts the panel made are removed
         $list = Join-Path $root 'data\sentora\phpaccounts\wanted.txt'
         if (-not (Test-Path $list)) { throw "no list from the panel ($list)" }
-        $want = @(Get-Content $list | ForEach-Object { $_.Trim() } | Where-Object { $_ -cmatch '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' } | Sort-Object -Unique)
+        # (each line: NAME, then the other PHP versions its domains use, if any: "shop 8.4,8.3")
+        $vers = @{}
+        foreach ($l in (Get-Content $list)) {
+            if ($l.Trim() -cmatch '^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\s+(\d+\.\d+(?:,\d+\.\d+)*))?$') {
+                $vers[$Matches[1]] = @(if ($Matches[2]) { $Matches[2].Split(',') | Where-Object { Version-Dir $_ } | Sort-Object -Unique })
+            }
+        }
+        $want = @($vers.Keys | Sort-Object)
         $have = @(Get-Saved)
         $changed = 0
         foreach ($n in $want) {
             $a = $have | Where-Object { $_.name -eq $n } | Select-Object -First 1
-            if (-not $a) { $a = New-Account $n $Processes $true; Build $a; $changed++ }
-            elseif (-not (Get-Service "SentoraPHP-$n" -ErrorAction SilentlyContinue) -or -not (Test-Path (Join-Path $apacheCfg "$n.conf"))) { Build $a; $changed++ }
+            $wantV = @($vers[$n])
+            if (-not $a) { $a = New-Account $n $Processes $true; $a | Add-Member -NotePropertyName versions -NotePropertyValue $wantV -Force; Build $a; $changed++; continue }
+            $haveV = @(Get-Versions $a)
+            if (($haveV -join ',') -ne ($wantV -join ',')) {
+                $a | Add-Member -NotePropertyName versions -NotePropertyValue $wantV -Force
+                Build $a; $changed++
+            } elseif (-not (Get-Service "SentoraPHP-$n" -ErrorAction SilentlyContinue) -or -not (Test-Path (Join-Path $apacheCfg "$n.conf"))) { Build $a; $changed++ }
         }
         foreach ($a in $have) {
             if ($a.panel -and $want -notcontains $a.name) { Remove-Account $a.name; $changed++ }
@@ -2558,7 +2658,7 @@ switch ($Do) {
     # the group every account's service is in: reads PHP, NSSM and the launcher; lists the folders above what PHP
     # reads (php-cgi looks at each folder on a path: without "list" it runs with no php.ini at all)
     if (-not (Get-LocalGroup -Name 'SentoraPHP' -ErrorAction SilentlyContinue)) { New-LocalGroup -Name 'SentoraPHP' -Description 'The PHP services of the Sentora hosting accounts' | Out-Null }
-    foreach ($p in @($PhpDir, (Join-Path $Bin 'nssm'))) {
+    foreach ($p in @(@($PhpDir, (Join-Path $Bin 'nssm')) + @($phpExtra | ForEach-Object { Join-Path $Bin "php-$_" }))) {
         $o = Invoke-Native 'icacls.exe' @($p, '/grant', 'SentoraPHP:(OI)(CI)RX')
         if ($LASTEXITCODE -ne 0) { Fail "Could not let the PHP accounts read ${p}: $($o -join ' ')" }
     }
