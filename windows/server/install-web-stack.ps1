@@ -1039,6 +1039,18 @@ StreamMaxLength 64M
 MaxFileSize 64M
 MaxScanSize 200M
 SelfCheck 600
+# (the panel's SpamAV Admin changes these; ClamAV's own defaults)
+MaxRecursion 17
+MaxFiles 10000
+ScanArchive yes
+ScanPDF yes
+ScanOLE2 yes
+OLE2BlockMacros no
+ScanHTML yes
+PhishingSignatures yes
+PhishingScanURLs yes
+HeuristicAlerts yes
+AlertEncrypted no
 "@
             Write-Utf8NoBom $freshConf @"
 # Made by install-zpanel-stack.ps1; run it again to rewrite this file.
@@ -1107,6 +1119,10 @@ Checks 12
 header('Content-Type: application/json');
 $key = trim((string) @file_get_contents('KEYFILE'));
 if ($key === '' || !hash_equals($key, (string) ($_SERVER['HTTP_X_SENTORA_KEY'] ?? ''))) { http_response_code(403); exit; }
+// the panel's SpamAV Admin (written by its daemon): scanning on or off, and ClamAV not answering = accept or try later
+$opt = json_decode((string) @file_get_contents(__DIR__ . '/options.json'), true);
+if (is_array($opt) && empty($opt['enabled'])) { echo '{"action":"accept"}'; exit; }
+$fail = function () use ($opt) { if (is_array($opt) && ($opt['on_fail'] ?? '') === 'accept') { echo '{"action":"accept"}'; } else { http_response_code(503); } exit; };
 $in = json_decode((string) file_get_contents('php://input'), true);
 if (!is_array($in) || !isset($in['message']['contents'])) { echo '{"action":"accept"}'; exit; }
 $raw = '';
@@ -1116,7 +1132,7 @@ foreach ((array) ($in['message']['headers'] ?? []) as $h) {
 }
 $raw .= "\r\n" . $in['message']['contents'];
 $s = @stream_socket_client('tcp://127.0.0.1:3310', $en, $es, 10);
-if (!$s) { http_response_code(503); exit; }
+if (!$s) { $fail(); }
 stream_set_timeout($s, 120);
 fwrite($s, "zINSTREAM\0");
 for ($i = 0, $n = strlen($raw); $i < $n; $i += 65536) {
@@ -1141,7 +1157,7 @@ if (preg_match('/^stream: (.+) FOUND$/', $r, $m)) {
 } elseif ($r === 'stream: OK') {
     echo '{"action":"accept"}';
 } else {
-    http_response_code(503);   // (size limit, error: try later)
+    $fail();   // (size limit, error: as SpamAV Admin says, try later by default)
 }
 '@).Replace('KEYFILE', (& $Fwd $hookKeyFile)).Replace('LOGFILE', (& $Fwd (Join-Path $clamLogs 'mail-refused.log')))
             Write-Utf8NoBom (Join-Path $Cfg 'apache\mailscan.conf') @"
@@ -2013,6 +2029,10 @@ switch ($Do) {
             $settings['db_service'] = $MySQLService; $settings['mail_service'] = $MailService; $settings['clamd_service'] = $ClamService; $settings['freshclam_service'] = $FreshService
             # mail: Stalwart's API on this server, and its administrator (read by the daemon only)
             $settings['mail_api'] = 'https://127.0.0.1:8443'; $settings['mail_admin'] = "$fwdRoot/configs/stalwart/admin.txt"
+            # SpamAV Admin: ClamAV's files and programs, and the virus check's options file (its daemon writes them)
+            $clamFwd = "$fwdRoot/bin/clamav"
+            $settings['clamd_conf'] = "$clamFwd/clamd.conf"; $settings['freshclam_conf'] = "$clamFwd/freshclam.conf"; $settings['clamd_exe'] = "$clamFwd/clamd.exe"
+            $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
             # Mail Config: the files its daemon writes (the webmail's settings, ActiveSync's switch in the mail site)
             $settings['webmail_panel_conf'] = "$fwdRoot/configs/stalwart/roundcube-panel.inc.php"; $settings['mail_apache_conf'] = "$fwdRoot/configs/apache/mail-panel.conf"
             $q = ''

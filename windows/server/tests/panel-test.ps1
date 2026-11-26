@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -854,4 +854,55 @@ if (Get-Service Stalwart -ErrorAction SilentlyContinue) {
     if ($left -match [regex]::Escape($addr)) { throw "Mail: $addr is still in Stalwart after it was deleted on the page" }
     if ($left -notmatch 'alice@example\.test') { throw "Mail: a mailbox made with mailuser.ps1 (alice@example.test) went: $left" }
     Ok 'Mail: deleted on the page, it goes from Stalwart; mailboxes made with mailuser.ps1 stay'
+    # --- SpamAV Admin: ClamAV's settings go into clamd.conf (ClamAV restarts and answers again), the spam scores into
+    # Stalwart's spam filter; no SpamAssassin, no file scanning tab (not on Windows yet)
+    function ClamUp { try { $c = New-Object Net.Sockets.TcpClient('127.0.0.1', 3310); $st = $c.GetStream(); $b = [Text.Encoding]::ASCII.GetBytes("zPING`0"); $st.Write($b, 0, $b.Length); $buf = New-Object byte[] 16; $k = $st.Read($buf, 0, 16); $c.Close(); return ([Text.Encoding]::ASCII.GetString($buf, 0, $k) -match 'PONG') } catch { return $false } }
+    function SaSave($section, $vals) {
+        $p = Page '/?module=spamav_admin' $null
+        $b = @{ csfr_token = (Token $p.Content); inSection = $section }; foreach ($k in $vals.Keys) { $b["in_$k"] = $vals[$k] }
+        $p = Page '/?module=spamav_admin&action=Save' $b
+        if ($p.Content -match 'Fatal error|Uncaught|Warning:') { throw "SpamAV: saving $section failed" }
+        if ($p.Content -notmatch 'settings saved') { $tx = ($p.Content -replace '(?s)<script.*?</script>', ' ' -replace '<[^>]+>', ' ' -replace '\s+', ' '); throw "SpamAV: $section was not saved: $($tx.Substring(0, [Math]::Min(500, $tx.Length)))" }
+        MailRun
+    }
+    $c = (Page '/?module=spamav_admin' $null).Content
+    if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the SpamAV Admin page does not load' }
+    $bad = @()
+    if ($c -notmatch 'name="in_clam_max_file_size"') { $bad += 'no ClamAV settings' }
+    if ($c -notmatch 'name="in_sa_required_score"') { $bad += 'no spam score' }
+    if ($c -match 'SpamAssassin') { $bad += 'it names SpamAssassin' }
+    if ($c -match 'data-tab="files"|name="in_fs_') { $bad += 'it shows file scanning' }
+    if ($c -match 'name="in_sa_subject_tag"|name="in_clam_scan_outgoing"') { $bad += 'it shows Linux-only settings' }
+    if ($bad) { throw "SpamAV Admin: the page is not the Windows one: $($bad -join ', ')" }
+    Ok 'SpamAV Admin: the page shows ClamAV''s and Stalwart''s settings, no SpamAssassin or file scanning'
+    $spam = @{ sa_enabled = '1'; sa_required_score = '6'; sa_reject_score = '20' }
+    SaSave 'spamassassin' $spam
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep 3; $r = Stal 'x:SpamSettings/get' '{"accountId":"ACCT","properties":["enable","scoreSpam","scoreReject"]}'; $ok = ($r -match '"scoreSpam":6(\.0)?[,}]') -and ($r -match '"scoreReject":20(\.0)?[,}]') }
+    if (-not $ok) { throw "SpamAV: Stalwart's spam filter did not get the scores: $r" }
+    Ok 'SpamAV Admin: the spam score (6) and the refuse score (20) are Stalwart''s, read back'
+    SaSave 'spamassassin' @{ sa_enabled = '1'; sa_required_score = '5'; sa_reject_score = '0' }
+    if (Get-Service ClamAV -ErrorAction SilentlyContinue) {
+        $clam = @{ clam_enabled = '1'; clam_on_fail = 'Defer'; clam_max_file_size = '30'; clam_max_scan_size = '200'; clam_max_recursion = '17'; clam_max_files = '10000'
+                   clam_scan_archive = '1'; clam_scan_pdf = '1'; clam_scan_ole2 = '1'; clam_block_macros = '1'; clam_scan_html = '1'; clam_phishing_sigs = '1'
+                   clam_phishing_urls = '1'; clam_heuristic = '1'; clam_db_checks = '12'; clam_threads = '8' }
+        SaSave 'clamav' $clam
+        $cc = "$Root\bin\clamav\clamd.conf"
+        $ok = $false
+        for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $t = Get-Content $cc -Raw; $ok = ($t -match '(?m)^MaxFileSize 30M') -and ($t -match '(?m)^OLE2BlockMacros yes') }
+        if (-not $ok) { throw "SpamAV: clamd.conf did not get the settings (log: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'SpamAV' | Select-Object -Last 4) -join ' / '))" }
+        $ok = $false
+        for ($i = 0; $i -lt 100 -and -not $ok; $i++) { Start-Sleep 3; $ok = ClamUp }
+        if (-not $ok) { throw 'SpamAV: ClamAV does not answer again after its settings changed' }
+        Ok 'SpamAV Admin: ClamAV''s settings are in clamd.conf (largest file 30 MB, Office macros blocked) and ClamAV answers again'
+        $o = (Page '/?module=spamav_admin' $null).Content
+        if ($o -notmatch 'sa-pill on') { throw 'SpamAV: the Overview does not say the scanners work' }
+        Ok 'SpamAV Admin: the Overview shows ClamAV and the spam filter working'
+        $clam['clam_max_file_size'] = '64'; $clam.Remove('clam_block_macros')
+        SaSave 'clamav' $clam
+        $ok = $false
+        for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Get-Content $cc -Raw) -match '(?m)^MaxFileSize 64M' }
+        for ($i = 0; $i -lt 100 -and -not (ClamUp); $i++) { Start-Sleep 3 }
+        if (-not (ClamUp)) { throw 'SpamAV: ClamAV does not answer after its settings went back' }
+    }
 }
