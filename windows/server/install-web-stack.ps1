@@ -292,6 +292,16 @@ function Protect-File($path) {
     Set-Acl -Path $path -AclObject $acl
 }
 
+function Get-MainIPv4 {
+    # the server's address on the network with the default gateway (the route with the lowest metric). Not with
+    # Get-NetIPConfiguration: on some servers (an adapter listed twice) it stops with "Cannot convert System.Object[]".
+    try {
+        $r = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop | Sort-Object { $_.RouteMetric + $_.InterfaceMetric } | Select-Object -First 1
+        if (-not $r) { return $null }
+        return (Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $r.InterfaceIndex -ErrorAction Stop | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1).IPAddress
+    } catch { return $null }
+}
+
 function Protect-Folder($path) {
     # only Administrators and SYSTEM, for everything inside too (the services run as SYSTEM)
     Invoke-Native 'icacls.exe' @($path, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') | Out-Null
@@ -1796,7 +1806,7 @@ switch ($Do) {
 }
 "@
         # the server's own address for new zones: the one on the network with the default gateway
-        $myIp = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress
+        $myIp = (Get-MainIPv4)
         if (-not $myIp) { $myIp = '127.0.0.1' }
         Write-Utf8NoBom (Join-Path $Bin 'dnszone.ps1') @'
 <#
@@ -2020,7 +2030,7 @@ switch ($Do) {
                 bind_service = $DnsService; zone_dir = "$fwdRoot/configs/dns/zones/"; ftp_service = $FtpService
             }
             # the server's address, for the DNS records the panel makes (the one on the network with the default gateway)
-            $ipNow = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress
+            $ipNow = (Get-MainIPv4)
             if ($ipNow) { $settings['server_ip'] = $ipNow }
             # FTP: SFTPGo's driver; the daemon (SYSTEM) reads SFTPGo's administrator from its settings file
             $settings['ftp_php'] = 'sftpgo.php'; $settings['ftp_api'] = 'http://127.0.0.1:8080/api/v2'

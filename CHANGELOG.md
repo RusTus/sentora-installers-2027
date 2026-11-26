@@ -663,6 +663,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: Mail Config. The webmail's language, time zone, new-mail check, largest message and log-out; ActiveSync on or off; the mail server's largest message and how many wrong passwords block an address; each mailbox's size now limits it on Windows too.
 - Windows: a domain or parked domain saved while the daemon was writing the websites could be left out until the next website change (the request was cleared at the end of the run instead of the start).
 - Panel on Windows: SpamAV Admin. ClamAV's settings for mail (what is scanned, sizes, signature updates, what happens when it does not answer, on or off) and the mail server's spam filter (on or off, spam score, refuse score); Restart and Update signatures buttons.
+- Windows installer: the server's address is found from its default route (Get-NetIPConfiguration stopped the install on some servers with "Cannot convert System.Object[]").
 - Release 2027.100: on Windows, Backup Config (the daily backup of every account and the purge; the off-server backup to another disk or a network share); the daemon's extra run when a page asks during a run no longer stops.
 - Release 2027.99: on Windows, the File Manager (run as the hosting account's own Windows account, opened from the panel with a one-minute signed pass).
 - Release 2027.98: on Windows, Forwarders (copy kept or not, several addresses) and Site Health; Server Monitor's figures sturdier.
