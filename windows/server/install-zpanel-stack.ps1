@@ -2627,7 +2627,9 @@ switch ($Do) {
         $vers = @{}
         foreach ($l in (Get-Content $list)) {
             if ($l.Trim() -cmatch '^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\s+(\d+\.\d+(?:,\d+\.\d+)*))?$') {
-                $vers[$Matches[1]] = @(if ($Matches[2]) { $Matches[2].Split(',') | Where-Object { Version-Dir $_ } | Sort-Object -Unique })
+                # (kept first: Version-Dir's own -match sets $Matches again)
+                $nm = $Matches[1]; $vs = if ($Matches.ContainsKey(2)) { $Matches[2] } else { '' }
+                $vers[$nm] = @(if ($vs) { $vs.Split(',') | Where-Object { Version-Dir $_ } | Sort-Object -Unique })
             }
         }
         $want = @($vers.Keys | Sort-Object)
