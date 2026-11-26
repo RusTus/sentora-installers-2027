@@ -1202,8 +1202,14 @@ while (!feof($s) && strpos($r, "\0") === false) {
 fclose($s);
 $r = trim($r, "\0\r\n ");
 if (preg_match('/^stream: (.+) FOUND$/', $r, $m)) {
-    $who = isset($in['envelope']['from']['address']) ? $in['envelope']['from']['address'] : '?';
-    @file_put_contents('LOGFILE', date('c') . " refused: $m[1] from $who\r\n", FILE_APPEND | LOCK_EX);
+    // (the panel's SpamAV pages read this line: the virus, the sender and the mailboxes it was for)
+    $who = isset($in['envelope']['from']['address']) ? preg_replace('/[\s,]+/', '', (string) $in['envelope']['from']['address']) : '';
+    $to = [];
+    foreach ((array) ($in['envelope']['to'] ?? []) as $t) {
+        $a = is_array($t) ? (string) ($t['address'] ?? '') : (string) $t;
+        if (preg_match('/^[^\s,]{1,254}$/', $a)) { $to[] = strtolower($a); }
+    }
+    @file_put_contents('LOGFILE', date('c') . ' refused: ' . preg_replace('/\s+/', '', $m[1]) . ' from ' . ($who === '' ? '?' : $who) . ' to ' . implode(',', $to) . "\r\n", FILE_APPEND | LOCK_EX);
     echo json_encode(['action' => 'reject', 'response' => ['status' => 554, 'enhanced_status' => '5.7.1',
         'message' => 'Message refused: virus found (' . preg_replace('/[^\w.\-]/', '', $m[1]) . ')']]);
 } elseif ($r === 'stream: OK') {
@@ -2090,6 +2096,8 @@ switch ($Do) {
             $settings['clamd_conf'] = "$clamFwd/clamd.conf"; $settings['freshclam_conf'] = "$clamFwd/freshclam.conf"; $settings['clamd_exe'] = "$clamFwd/clamd.exe"
             $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
             $settings['filescan_quarantine'] = "$fwdRoot/data/quarantine"
+            # SpamAV's figures: Stalwart's log (stalwart.log.DATE) and the virus check's refusals, read by the daemon
+            $settings['mail_log_dir'] = "$fwdRoot/logs/stalwart"; $settings['mail_refused_log'] = "$fwdRoot/logs/clamav/mail-refused.log"
             $settings['python_exe'] = "$fwdRoot/bin/python/python.exe"
             # the other PHP versions the Domains page offers (the installer's; an administrator may narrow the list)
             $settings['php_versions_enabled'] = ($phpExtra -join ',')
