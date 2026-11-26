@@ -665,6 +665,7 @@ The whole core now lints clean on PHP 8.5, and every panel page loads with no PH
 - Panel on Windows: SpamAV Admin. ClamAV's settings for mail (what is scanned, sizes, signature updates, what happens when it does not answer, on or off) and the mail server's spam filter (on or off, spam score, refuse score); Restart and Update signatures buttons.
 - Windows installer: the server's address is found from its default route (Get-NetIPConfiguration stopped the install on some servers with "Cannot convert System.Object[]").
 - Panel on Windows: SpamAV Admin's file scanning. The nightly (or Scan now) ClamAV scan of every website's files, quarantine (a folder only Administrators and SYSTEM can open) with Put back and Delete, and notices to the owner and administrators.
+- Panel on Windows: Branding. Logos, name, colours and login page as on Linux, and resellers' own panel addresses with their Let's Encrypt certificates.
 - Release 2027.100: on Windows, Backup Config (the daily backup of every account and the purge; the off-server backup to another disk or a network share); the daemon's extra run when a page asks during a run no longer stops.
 - Release 2027.99: on Windows, the File Manager (run as the hosting account's own Windows account, opened from the panel with a one-minute signed pass).
 - Release 2027.98: on Windows, Forwarders (copy kept or not, several addresses) and Site Health; Server Monitor's figures sturdier.

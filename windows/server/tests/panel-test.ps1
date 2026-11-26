@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'branding')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -667,6 +667,35 @@ $after = $before
 for ($i = 0; $i -lt 60 -and $after -le $before; $i++) { Start-Sleep 3; $after = @(Get-ChildItem "$Root\hostdata\zadmin\backups" -Filter '*.zip' -ErrorAction SilentlyContinue).Count }
 if ($after -le $before) { throw "Backup Config: the daily backup of every account made no backup for zadmin (daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'Backup' | Select-Object -Last 4) -join ' / '))" }
 Ok 'Backup Config: the daily backup of every account made a backup for zadmin'
+} catch { $late += "$_" }
+
+# --- Branding: the page saves a company name; a panel address of its own gets its site in the Windows sites (between
+# BRANDING lines), which says "being set up" until it has its certificate (no DNS for it here, so it stays so); taken
+# away, its site goes
+try {
+$c = (Page '/?module=branding' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Branding page does not load' }
+$p = Page '/?module=branding&action=Save' @{ csfr_token = (Token $c); inName = "Win Hosting $n"; inWelcome = ''; inVariant = '' }
+if ($p.Content -notmatch 'Branding saved') { throw 'Branding: the name was not saved' }
+$bh = "panel$n.example.net"
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$zid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT ac_id_pk FROM sentora_core.x_accounts WHERE ac_user_vc='zadmin'") -join ''
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_branding SET br_host_vc='$bh' WHERE br_acc_fk=$zid; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed'"
+Remove-Item Env:\MYSQL_PWD
+$q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+$ok = $false
+for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = ((Get-Content "$Root\configs\apache\sentora-vhosts.conf" -Raw) -match "# BRANDING: $([regex]::Escape($bh))") -and ((Site $bh '/') -match 'being set up') }
+if (-not $ok) { throw "Branding: the address $bh has no site that says it is being set up (it answered: $((Site $bh '/').Substring(0, [Math]::Min(200, (Site $bh '/').Length))))" }
+if ((Site $bh '/.well-known/acme-challenge/nothing-here') -match 'being set up') { throw 'Branding: Let''s Encrypt''s check is not let through on the address' }
+Ok "Branding: a name saved on the page; the panel address $bh has its site (being set up until its certificate; Let's Encrypt's check let through)"
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_branding SET br_host_vc=NULL, br_name_vc='' WHERE br_acc_fk=$zid; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed'"
+Remove-Item Env:\MYSQL_PWD
+$q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) }
+$ok = $false
+for ($i = 0; $i -lt 40 -and -not $ok; $i++) { Start-Sleep 3; $ok = (Get-Content "$Root\configs\apache\sentora-vhosts.conf" -Raw) -notmatch "# BRANDING: $([regex]::Escape($bh))" }
+if (-not $ok) { throw 'Branding: the address''s site stayed after it was taken away' }
+Ok 'Branding: the address taken away, its site goes'
 } catch { $late += "$_" }
 
 if ($late) { throw ($late -join ' || ') }
