@@ -630,7 +630,15 @@ Ok "Site Health: $dom was checked by the daemon and its page shows it answering"
 try {
 $c = (Page '/?module=backup_admin' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw 'the Backup Config page does not load' }
-if ($c -match 'data-tab="restore"|Another SSH server|A Sentora backup node') { throw 'Backup Config shows Linux-only parts on Windows (Restore, SSH, backup node)' }
+if ($c -match 'Another SSH server|A Sentora backup node') { throw 'Backup Config shows Linux-only parts on Windows (SSH, backup node)' }
+if ($c -notmatch 'data-tab="restore"') { throw 'Backup Config: no Restore tab' }
+# (for the restore below: a database of zadmin's and a file in its website, as they are at the copy)
+$rdb = "zadmin_rt$n"; $rfile = "$Root\hostdata\zadmin\public_html\restore-test-$n.txt"
+[IO.File]::WriteAllText($rfile, 'original')
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$zid = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT ac_id_pk FROM sentora_core.x_accounts WHERE ac_user_vc='zadmin'") -join ''
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "CREATE DATABASE $rdb; CREATE TABLE $rdb.t (v VARCHAR(20)); INSERT INTO $rdb.t VALUES ('before'); INSERT INTO sentora_core.x_mysql_databases (my_acc_fk, my_name_vc, my_created_ts) VALUES ($zid, '$rdb', UNIX_TIMESTAMP())"
+Remove-Item Env:\MYSQL_PWD
 $ob = 'C:\sentora-offsite-test'
 $obState = 'C:\zpanel\data\sentora\offsite-backup.json'
 function ObState { try { Get-Content $obState -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $null } }
@@ -654,6 +662,42 @@ $gz = [IO.Compression.GZipStream]::new([IO.File]::OpenRead("$night\databases\sen
 $head = (New-Object IO.StreamReader($gz)).ReadToEnd(); $gz.Close()
 if ($head -notmatch 'CREATE TABLE `x_accounts`') { throw 'Backup Config: the panel database dump holds no x_accounts table' }
 Ok "Backup Config: Back up now copied the databases, the settings, the websites and the mailboxes to $ob ($($st.message)); Stalwart runs again"
+# --- Restore: after the copy the file and the database change; Read the backups lists the night with zadmin and its
+# database; Restore this account puts both back (what was there is saved first, Administrators and SYSTEM only)
+[IO.File]::WriteAllText($rfile, 'changed')
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE $rdb.t SET v='changed'; CREATE TABLE $rdb.extra (x INT)"
+Remove-Item Env:\MYSQL_PWD
+$catFile = 'C:\zpanel\data\sentora\restore-catalog.json'; $rsFile = 'C:\zpanel\data\sentora\panel-restore.json'
+$t1 = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$p = Page '/?module=backup_admin' $null
+$p = Page '/?module=backup_admin&action=RestoreList' @{ csfr_token = (Token $p.Content) }
+$cat = $null
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; try { $cat = Get-Content $catFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $cat = $null }; if ($cat -and [int64]$cat.time -ge $t1) { break } }
+$snapR = @($cat.snapshots) | Where-Object { $_.date -eq (Split-Path $night -Leaf) } | Select-Object -First 1
+$accR = @($snapR.accounts) | Where-Object { $_.username -eq 'zadmin' } | Select-Object -First 1
+if (-not $accR -or @($accR.databases) -notcontains $rdb) { throw "Restore: Read the backups did not list the night with zadmin and $rdb ($(Get-Content $catFile -Raw -ErrorAction SilentlyContinue))" }
+Ok "Restore: Read the backups lists the night $($snapR.date) of $($snapR.server) with zadmin and its database"
+$c = (Page "/?module=backup_admin&snap=$($snapR.server)/$($snapR.date)" $null).Content
+if ($c -notmatch 'Restore this account' -or $c -match 'name="inPart_mail"|action=RestoreFull') { throw 'Restore: the snapshot is not shown the Windows way (one account, no mailboxes, no whole panel)' }
+$p = Page "/?module=backup_admin&action=RestoreAccount&snap=$($snapR.server)/$($snapR.date)" @{ csfr_token = (Token $c); inServer = $snapR.server; inDate = $snapR.date; inAccount = 'zadmin'; inPart_files = '1'; inPart_databases = '1' }
+$rs = $null
+for ($i = 0; $i -lt 60; $i++) { Start-Sleep 3; try { $rs = Get-Content $rsFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $rs = $null }; if ($rs -and -not $rs.running -and [int64]$rs.finished -ge $t1) { break } }
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+$v = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT v FROM $rdb.t") -join ''
+$extra = (& $my --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$rdb' AND TABLE_NAME='extra'") -join ''
+Remove-Item Env:\MYSQL_PWD
+$fileNow = Get-Content $rfile -Raw -ErrorAction SilentlyContinue
+if (-not $rs -or $rs.result -ne 'ok' -or $v -ne 'before' -or $extra -ne '0' -or $fileNow -ne 'original') { throw "Restore: zadmin was not put back (state: $($rs | ConvertTo-Json -Compress); database: $v, extra table: $extra; file: $fileNow; log: $(Get-Content "$Root\logs\panel\panel-restore.log" -Raw -ErrorAction SilentlyContinue))" }
+$saved = Get-ChildItem "$Root\data\before-restore" -Directory | Where-Object Name -like 'zadmin-*' | Sort-Object Name | Select-Object -Last 1
+if (-not $saved -or -not (Test-Path "$($saved.FullName)\databases\$rdb.sql") -or -not (Test-Path "$($saved.FullName)\hostdata\public_html\restore-test-$n.txt")) { throw "Restore: what zadmin had before was not saved ($($saved.FullName))" }
+$acl = (Get-Acl "$Root\data\before-restore").Access | ForEach-Object { "$($_.IdentityReference)" }
+if ($acl -match 'Apache2|SentoraPHP|Users') { throw "Restore: the saved copies can be read by others: $($acl -join ', ')" }
+Ok "Restore: Restore this account put zadmin's website file and database back as they were that night; what it had before is saved ($($saved.Name), Administrators and SYSTEM only)"
+$env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+& $my --protocol=TCP -h 127.0.0.1 -u root -e "DROP DATABASE $rdb; DELETE FROM sentora_core.x_mysql_databases WHERE my_name_vc='$rdb'"
+Remove-Item Env:\MYSQL_PWD
+Remove-Item $rfile -Force
 # the daily backup of every account (Client backups tab), at the daemon's next daily run
 $p = Page '/?module=backup_admin' $null
 $p = Page '/?module=backup_admin&action=UpdateConfig' @{ csfr_token = (Token $p.Content); schedule_bu = 'true'; purge_bu = 'true'; purge_date = '30'; disk_bu = 'true'; inSaveSystem = '1' }
