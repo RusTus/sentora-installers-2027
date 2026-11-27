@@ -228,6 +228,8 @@ function Get-Verified($pkg) {
     Note "downloading $($pkg.Name) ..."
     $urls = @($pkg.Url)
     if ($pkg.ContainsKey('More')) { $urls += $pkg.More }
+    # (last: the copy on this project's release, made by its Windows downloads mirror; checked against the same SHA-256)
+    $urls += "https://github.com/RusTus/sentora-installers-2027/releases/download/windows-mirror/$($pkg.Sha.ToLower().Substring(0, 12))-$([System.IO.Path]::GetFileName(([uri]$pkg.Url).AbsolutePath))"
     $done = $false; $why = ''
     # (sites differ: MySQL's takes a browser-like client name for a bot, Apache Lounge redirects PowerShell's own with a
     #  308 that Windows PowerShell 5.1 does not follow; so each address is tried with both, then again)
@@ -823,6 +825,28 @@ end
     $stKeyFile = Join-Path $Cfg 'apache\status-key.txt'
     $stKey = if (Test-Path $stKeyFile) { (Get-Content $stKeyFile -Raw).Trim() } else { '' }
     if ($stKey -notmatch '^[A-Za-z0-9]{24}$') { $stKey = New-Password; Write-Utf8NoBom $stKeyFile $stKey }
+    $statusBlock = if ($hasLua) { @"
+# Apache's status page for the panel's Apache Status: this server only, with the key only Apache's folder holds; the
+# hosted sites can not hand requests to it (the guard)
+<IfModule lua_module>
+    LuaScope thread
+    LuaHookFixups "$(& $Fwd $guardLua)" sentora_guard
+    LuaOutputFilter SENTORA_STATUS_BLOCK "$(& $Fwd $guardLua)" sentora_status_block
+    <Location "/">
+        SetOutputFilter SENTORA_STATUS_BLOCK
+    </Location>
+    <IfModule status_module>
+        ExtendedStatus On
+        <Location /server-status>
+            SetHandler server-status
+            <RequireAll>
+                Require local
+                Require expr "%{HTTP:X-Sentora-Status} == '$stKey'"
+            </RequireAll>
+        </Location>
+    </IfModule>
+</IfModule>
+"@ } else { '' }
     $conf = Join-Path $Cfg 'apache\httpd.conf'
     Write-Utf8NoBom $conf @"
 # Made by install-zpanel-stack.ps1; run it again to rewrite this file. Your own sites go in httpd-vhosts.conf.
@@ -881,28 +905,7 @@ PHPIniDir "$(& $Fwd $PhpDir)"
 ServerTokens Prod
 ServerSignature Off
 TraceEnable Off
-$(if ($hasLua) { @"
-# Apache's status page for the panel's Apache Status: this server only, with the key only Apache's folder holds; the
-# hosted sites can not hand requests to it (the guard)
-<IfModule lua_module>
-    LuaScope thread
-    LuaHookFixups "$(& $Fwd $guardLua)" sentora_guard
-    LuaOutputFilter SENTORA_STATUS_BLOCK "$(& $Fwd $guardLua)" sentora_status_block
-    <Location "/">
-        SetOutputFilter SENTORA_STATUS_BLOCK
-    </Location>
-    <IfModule status_module>
-        ExtendedStatus On
-        <Location /server-status>
-            SetHandler server-status
-            <RequireAll>
-                Require local
-                Require expr "%{HTTP:X-Sentora-Status} == '$stKey'"
-            </RequireAll>
-        </Location>
-    </IfModule>
-</IfModule>
-"@ })
+$statusBlock
 Timeout 120
 KeepAlive On
 FileETag None

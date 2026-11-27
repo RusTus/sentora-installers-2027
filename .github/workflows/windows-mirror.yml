@@ -1,0 +1,49 @@
+# A copy of each pinned download of the native Windows installer on this repository's release "windows-mirror", so an
+# install (and the Windows test) still works when a maker's site is down. Each copy is checked against the SHA-256 pinned
+# in install-zpanel-stack.ps1 before it is kept, and named <first 12 of its SHA-256>-<file name>; the installer checks it
+# again after downloading. Runs when the installer's pinned downloads change, every Monday, and by hand.
+name: Windows downloads mirror
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+  push:
+    branches: [master2027]
+    paths: ['windows/server/install-zpanel-stack.ps1']
+permissions:
+  contents: write
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy what is not there yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          gh release view windows-mirror --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create windows-mirror --repo "$GITHUB_REPOSITORY" --title "Windows downloads mirror" --latest=false \
+                 --notes "Copies of the native Windows installer's pinned downloads (each checked against its SHA-256), used only when a maker's site does not answer. Not a Sentora release."
+          have=$(gh release view windows-mirror --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          missing=0
+          while IFS=$'\t' read -r file sha urls; do
+            asset="$(printf '%s' "$sha" | tr 'A-F' 'a-f' | cut -c1-12)-$file"
+            if printf '%s\n' "$have" | grep -qxF "$asset"; then echo "kept: $asset"; continue; fi
+            got=""
+            for u in $urls; do
+              for try in "$u" "https://web.archive.org/web/2026id_/$u"; do
+                rm -f "$asset"
+                curl -fsSL --retry 2 --max-time 900 -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) zpanel-stack-installer' -o "$asset" "$try" || continue
+                if [ "$(sha256sum "$asset" | cut -d' ' -f1 | tr 'a-f' 'A-F')" = "$sha" ]; then got="$try"; break 2; fi
+                echo "checksum does not match: $try"
+              done
+            done
+            if [ -n "$got" ]; then
+              gh release upload windows-mirror "$asset" --repo "$GITHUB_REPOSITORY" && echo "copied: $asset (from $got)"
+            else
+              echo "::warning::$file could not be downloaded with its checksum from any address"; missing=$((missing + 1))
+            fi
+            rm -f "$asset"
+          done < <(python3 .github/scripts/windows-packages.py)
+          echo "not copied: $missing"

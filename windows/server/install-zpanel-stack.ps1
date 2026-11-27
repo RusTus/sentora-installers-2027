@@ -228,6 +228,8 @@ function Get-Verified($pkg) {
     Note "downloading $($pkg.Name) ..."
     $urls = @($pkg.Url)
     if ($pkg.ContainsKey('More')) { $urls += $pkg.More }
+    # (last: the copy on this project's release, made by its Windows downloads mirror; checked against the same SHA-256)
+    $urls += "https://github.com/RusTus/sentora-installers-2027/releases/download/windows-mirror/$($pkg.Sha.ToLower().Substring(0, 12))-$([System.IO.Path]::GetFileName(([uri]$pkg.Url).AbsolutePath))"
     $done = $false; $why = ''
     # (sites differ: MySQL's takes a browser-like client name for a bot, Apache Lounge redirects PowerShell's own with a
     #  308 that Windows PowerShell 5.1 does not follow; so each address is tried with both, then again)
