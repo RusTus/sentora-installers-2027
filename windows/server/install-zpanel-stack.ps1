@@ -2314,6 +2314,15 @@ switch ($Do) {
             Expand-Into $pz $Pkg.Python.Top $pyDir
         }
         Ok "Python $((Invoke-Native (Join-Path $pyDir 'python.exe') @('--version')) -join '') -> $pyDir (Matomo's log importer)"
+        # (a settings file without the database login is a setup that broke part way: set up again; its database is
+        # remade, as nothing could have been stored in it)
+        $mcfg0 = Join-Path $matomo 'config\config.ini.php'
+        if ((Test-Path $mcfg0) -and ((Get-Content $mcfg0 -Raw) -notmatch '(?m)^password\s*=\s*"[^"]+"')) {
+            Write-Host "   NOTE Matomo's settings have no database login (a setup that broke part way): it is set up again" -ForegroundColor Yellow
+            Move-Item $mcfg0 "$mcfg0.broken-$(Get-Date -Format yyyyMMddHHmmss)" -Force
+            $env:MYSQL_PWD = $RootPw
+            try { $null = Invoke-Native (Join-Path $MySQLDir 'bin\mysql.exe') @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', 'DROP DATABASE IF EXISTS sentora_matomo') } finally { Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue }
+        }
         if (-not (Test-Path (Join-Path $matomo 'config\config.ini.php'))) {
             foreach ($d in @('tmp', 'config')) { $md = Join-Path $matomo $d; if (-not (Test-Path $md)) { New-Item -ItemType Directory -Path $md | Out-Null }; Grant-Apache $md 'M' }
             $mPw = New-Password; $mAdminPw = New-Password
@@ -2336,13 +2345,32 @@ switch ($Do) {
                 @("$mi`?action=trackingCode&module=Installation&site_idSite=1&site_name=$ServerName", @()),
                 @("$mi`?action=finished&module=Installation&site_idSite=1&site_name=$ServerName", @('-d', 'do_not_track=1&anonymise_ip=1&submit=Continue'))
             )
-            $said = @()
-            foreach ($st in $steps) {
-                $code = (Invoke-Native 'curl.exe' (@('-s', '-o', 'NUL', '-w', '%{http_code}', '-c', $jar, '-b', $jar, '-H', "Host: $ServerName", '--max-time', '300') + $st[1] + @($st[0]))) -join ''
-                $said += "$code $(($st[0] -replace '^.*index\.php', '') -replace '&.*$', '')"
+            # (Matomo's own setup pages, in order; a page that fails part way (an answer of 500 after the system check, seen
+            # now and then on a fresh server) leaves a settings file without the database login: then its error is shown,
+            # the half-made setup is cleared and it is tried again, three times at most)
+            $mcfg = Join-Path $matomo 'config\config.ini.php'
+            $body = Join-Path $Tmp 'matomo-setup-page.html'
+            for ($try = 1; $try -le 3; $try++) {
+                $said = @(); $bad = ''
+                foreach ($st in $steps) {
+                    $code = (Invoke-Native 'curl.exe' (@('-s', '-o', $body, '-w', '%{http_code}', '-c', $jar, '-b', $jar, '-H', "Host: $ServerName", '--max-time', '300') + $st[1] + @($st[0]))) -join ''
+                    $step = ($st[0] -replace '^.*index\.php', '') -replace '&.*$', ''
+                    $said += "$code $step"
+                    if ($code -match '^5' -and $step -ne '?action=systemCheck' -and $step -ne '' -and -not $bad) {
+                        $txt = (Get-Content $body -Raw -ErrorAction SilentlyContinue) -replace '(?s)<(script|style).*?</\1>', ' ' -replace '<[^>]+>', ' ' -replace '\s+', ' '
+                        $bad = "$step answered $code`: $(if ($txt) { $txt.Substring(0, [Math]::Min(300, $txt.Length)) })"
+                    }
+                }
+                Remove-Item $jar, $body -Force -ErrorAction SilentlyContinue
+                $hasDb = (Test-Path $mcfg) -and ((Get-Content $mcfg -Raw) -match '(?m)^\[database\]') -and ((Get-Content $mcfg -Raw) -match '(?m)^password\s*=\s*"[^"]+"')
+                if ($hasDb -and -not $bad) { break }
+                Write-Host "   NOTE Matomo's setup did not finish (try $try of 3): $(if ($bad) { $bad } else { 'its settings have no database login' })" -ForegroundColor Yellow
+                Remove-Item $mcfg -Force -ErrorAction SilentlyContinue
+                $env:MYSQL_PWD = $RootPw
+                try { $null = Invoke-Native (Join-Path $MySQLDir 'bin\mysql.exe') @('--protocol=TCP', '-h', '127.0.0.1', '-u', 'root', '-e', "DROP DATABASE IF EXISTS sentora_matomo; $q") } finally { Remove-Item Env:\MYSQL_PWD -ErrorAction SilentlyContinue }
+                Start-Sleep 5
             }
-            Remove-Item $jar -Force -ErrorAction SilentlyContinue
-            if (-not (Test-Path (Join-Path $matomo 'config\config.ini.php'))) { Fail "Matomo's setup pages did not finish (each page's answer: $($said -join ', '))." }
+            if (-not $hasDb -or $bad) { Fail "Matomo's setup pages did not finish (each page's answer: $($said -join ', '); $bad)." }
             Write-Utf8NoBom (Join-Path $Cfg 'panel\matomo-admin-password.txt') "sentora_admin`r`n$mAdminPw"
             Ok "Matomo set up (its own pages: $($said -join ', ')); its super user sentora_admin, the password in configs\panel\matomo-admin-password.txt"
         } else { Ok 'Matomo was set up before (configs kept)' }
