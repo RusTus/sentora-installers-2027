@@ -124,7 +124,10 @@ class elk_health
         // Apache: its own status page on this server (as Apache Status reads it)
         if (function_exists('curl_init')) {
             $c = curl_init('http://127.0.0.1/server-status?auto');
-            curl_setopt_array($c, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_PROXY => ''));
+            // (panels from 2027.105 open Apache's status page only with its key, the hidden setting apache_status_secret)
+            $stKey = class_exists('ctrl_options') ? (string) ctrl_options::GetSystemOption('apache_status_secret') : '';
+            curl_setopt_array($c, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_PROXY => '',
+                CURLOPT_HTTPHEADER => preg_match('/^[A-Za-z0-9]{16,128}$/', $stKey) ? array('X-Sentora-Status: ' . $stKey) : array()));
             $auto = (string) curl_exec($c);
             if ((int) curl_getinfo($c, CURLINFO_RESPONSE_CODE) === 200) {
                 foreach (array('BusyWorkers' => 'apache_busy', 'IdleWorkers' => 'apache_idle') as $k => $f) {

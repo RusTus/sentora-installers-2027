@@ -157,8 +157,11 @@ grep -E '^\s+\[|RESULT' "$OUT/smoke-test.txt" || { echo "(the smoke test stopped
 in_box 'cat /var/sentora/logs/smoke-test.log' > "$OUT/smoke-test.log" 2>&1
 
 say "Apache's status page (Server Admin > Apache Status reads it from this server)"
-in_box 'code=$(curl -s -o /tmp/st -w "%{http_code}" http://127.0.0.1/server-status?auto); echo "  http://127.0.0.1/server-status?auto: HTTP $code"
-    if [ "$code" = 200 ] && grep -q "^ServerUptime" /tmp/st; then echo "STATUS: PASSED"; else head -5 /tmp/st; echo "STATUS: FAILED"; fi' > "$OUT/apache-status.txt" 2>&1
+# (only with its key, which the panel keeps: from this server without it, as a hosted site's PHP would ask, it is refused)
+in_box 'key=$(sed -n "s/^Define SENTORA_STATUS_KEY //p" /etc/sentora/configs/apache/sentora-status-key.conf 2>/dev/null)
+    open=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/server-status?auto); echo "  without the key: HTTP $open"
+    code=$(curl -s -o /tmp/st -w "%{http_code}" -H "X-Sentora-Status: $key" http://127.0.0.1/server-status?auto); echo "  with the key: HTTP $code"
+    if [ -n "$key" ] && [ "$open" = 403 ] && [ "$code" = 200 ] && grep -q "^ServerUptime" /tmp/st; then echo "STATUS: PASSED"; else head -5 /tmp/st; echo "STATUS: FAILED"; fi' > "$OUT/apache-status.txt" 2>&1
 cat "$OUT/apache-status.txt"
 
 say "Root actions from the panel (zsudo's queue, as the panel's user)"
@@ -284,7 +287,7 @@ say "Result for $SYS"
 ok=1
 if [ "${FAILS:-x}" != "0" ]; then echo "::error::$SYS: the post-install check has ${FAILS:-an unreadable number of} FAIL line(s)"; ok=0; fi
 if ! grep -q 'RESULT: PASSED' "$OUT/smoke-test.txt"; then echo "::error::$SYS: the smoke test did not pass"; ok=0; fi
-if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer on 127.0.0.1 (apache-status.txt)"; ok=0; fi
+if ! grep -q 'STATUS: PASSED' "$OUT/apache-status.txt"; then echo "::error::$SYS: Apache's status page does not answer with its key, or answers without it (apache-status.txt)"; ok=0; fi
 if ! grep -q 'PROBLEMS: PASSED' "$OUT/problems-log.txt"; then echo "::error::$SYS: the problems log did not work as it should (problems-log.txt)"; ok=0; fi
 if [ $AA -eq 1 ] && ! grep -q 'APPARMOR-TOOL: PASSED' "$OUT/apparmor-tool.txt"; then echo "::error::$SYS: sentora-apparmor on did not work (apparmor-tool.txt)"; ok=0; fi
 if ! grep -q 'FIREWALL: PASSED' "$OUT/firewall.txt"; then echo "::error::$SYS: the firewall did not open exactly Sentora's ports (firewall.txt)"; ok=0; fi
