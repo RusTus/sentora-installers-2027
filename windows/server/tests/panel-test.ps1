@@ -35,7 +35,7 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'spamav', 'branding', 'autoip', 'matomo', 'php_versions')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'apache_status', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'spamav', 'branding', 'autoip', 'matomo', 'php_versions')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
@@ -644,6 +644,24 @@ if ((Site $dom '/') -notmatch 'Your Sentora account is active') { throw "Apache 
 if ((Loc $dom '/sentora-every') -notmatch '^302 ') { throw 'Apache Config: the lines for every website went away with the refused line' }
 if ((Page '/?module=apache_admin' $null).Content -notmatch 'Apache did not take some settings') { throw 'Apache Config: the page does not say a line was switched off' }
 Ok 'Apache Config: a line Apache refuses is switched off (the page says so); the site and everything else stay live'
+# --- Apache Status: Apache's status page for the panel (from this server, with the key only Apache's folder holds); a
+# hosted site can not read it, neither from its PHP (no key) nor by handing its requests to it (the guard)
+$c = (Page '/?module=apache_status' $null).Content
+if ($c -notmatch 'data-url="modules/apache_status/code/status.php"') { $tx = (($c -replace '(?s)<script.*?</script>', ' ') -replace '<[^>]+>', ' ' -replace '\s+', ' '); $at = [Math]::Max(0, $tx.IndexOf('Apache Status')); throw "Apache Status: the page does not see Apache's status page: $($tx.Substring($at, [Math]::Min(400, $tx.Length - $at)))" }
+$j = (Page '/modules/apache_status/code/status.php' $null).Content
+if ($j -notmatch '"t":' -or $j -match '"error"') { throw "Apache Status: its figures did not come: $($j.Substring(0, [Math]::Min(300, $j.Length)))" }
+Set-Content "$($folder.FullName)\st.php" '<?php $c = @file_get_contents("http://127.0.0.1/server-status?auto", false, stream_context_create(array("http" => array("ignore_errors" => true)))); echo ($c !== false && strpos($c, "Total Accesses") !== false) ? "OPEN" : "closed";' -Encoding ASCII
+$st = Site $dom '/st.php'
+Remove-Item "$($folder.FullName)\st.php" -Force
+if ($st -ne 'closed') { throw "Apache Status: a hosted site's PHP reads Apache's status page ($st)" }
+New-Item -ItemType Directory -Path "$($folder.FullName)\stx" -Force | Out-Null
+Set-Content "$($folder.FullName)\stx\.htaccess" 'SetHandler server-status' -Encoding ASCII
+$h1 = Site $dom '/stx/'
+Set-Content "$($folder.FullName)\stx\.htaccess" "RewriteEngine On`r`nRewriteRule ^x$ - [H=server-status]" -Encoding ASCII
+$h2 = Site $dom '/stx/x'
+Remove-Item "$($folder.FullName)\stx" -Recurse -Force
+if ($h1 -match 'Total Accesses|Apache Server Status|Server uptime' -or $h2 -match 'Total Accesses|Apache Server Status|Server uptime') { throw 'Apache Status: a hosted site handed its requests to the status page' }
+Ok "Apache Status: the panel reads Apache's status page; a hosted site can not (its PHP has no key; SetHandler and [H=] are refused)"
 SaveVhost ''
 $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
 & $my --protocol=TCP -h 127.0.0.1 -u root -e "UPDATE sentora_core.x_settings SET so_value_tx='' WHERE so_name_vc='global_vhcustom'; UPDATE sentora_core.x_settings SET so_value_tx='true' WHERE so_name_vc='apache_changed';" | Out-Null

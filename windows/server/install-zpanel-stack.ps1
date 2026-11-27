@@ -768,6 +768,83 @@ IncludeOptional "${ZROOT}/configs/apache/php-accounts/*.conf"
     $loadFiles = (Get-ChildItem $PhpDir -Filter '*.dll' | Where-Object { $_.Name -notmatch '^php8apache2_4\.dll$|^php8phpdbg' } |
         Sort-Object { if ($_.Name -match '^php8ts') { 1 } else { 0 } }, Name |
         ForEach-Object { 'LoadFile "' + (& $Fwd $_.FullName) + '"' }) -join "`r`n"
+    # Apache's status page (the panel's Apache Status): from this server only, and only with this key, which only Apache's
+    # own folder holds (closed to the hosting accounts, whose PHP runs on this server too and could otherwise read every
+    # site's requests and visitors there)
+    # A hosted site's .htaccess may choose a request's handler (SetHandler, RewriteRule [H=] or [P]): Apache's status page
+    # is switched on only with the guard (mod_lua) that refuses it, and any proxying but the account's own PHP, for them
+    $hasLua = $WithPanel -and (Test-Path (Join-Path $ApacheDir 'modules\mod_lua.so'))
+    $guardLua = Join-Path $Cfg 'apache\sentora-guard.lua'
+    if ($hasLua) {
+        Write-Utf8NoBom $guardLua (@'
+-- Sentora (Windows): what a hosted site's request may be handed to (mod_lua; made by install-zpanel-stack.ps1).
+-- For requests of a hosted site (its DocumentRoot in HOSTED) it allows a proxy handler only to that account's own
+-- PHP (balancer://php-NAME/ or balancer://phpNN-NAME/), and refuses the status pages and proxying, as on Linux.
+local HOSTED = "HOSTED"
+local function account(r)
+    local root = (r.document_root or ""):gsub("\\", "/"):lower()
+    if root:sub(1, #HOSTED) ~= HOSTED then return nil end
+    return root:sub(#HOSTED + 1):match("^([^/]+)") or ""
+end
+function sentora_guard(r)
+    local acct = account(r)
+    if acct == nil then return apache2.DECLINED end
+    local handler = (r.handler or ""):lower()
+    local filename = r.filename or ""
+    if handler == "server-status" or handler == "server-info" or handler == "proxy-server" or filename:sub(1, 6) == "proxy:" then
+        r:warn("Sentora: refused handler '" .. handler .. "' for a hosted site: " .. (r.uri or ""))
+        return 403
+    end
+    if handler:sub(1, 6) == "proxy:" then
+        local name = handler:match("^proxy:balancer://php%-([a-z0-9%-]+)/$") or handler:match("^proxy:balancer://php%d+%-([a-z0-9%-]+)/$")
+        if acct == "" or name ~= acct then
+            r:warn("Sentora: refused PHP handler '" .. handler .. "' for account " .. acct .. ": " .. (r.uri or ""))
+            return 403
+        end
+    end
+    return apache2.DECLINED
+end
+-- (mod_rewrite's [H=] sets a handler after the check above: a status page of a hosted site is blanked here)
+function sentora_status_block(r)
+    local h = r.handler or ""
+    if account(r) == nil or (h ~= "server-status" and h ~= "server-info") then
+        coroutine.yield()
+        while bucket ~= nil do coroutine.yield(bucket) end
+        return
+    end
+    r.status = 403
+    r.content_type = "text/plain"
+    r:warn("Sentora: status page refused for a hosted site: " .. (r.uri or ""))
+    coroutine.yield("403 Forbidden\n")
+    while bucket ~= nil do coroutine.yield("") end
+end
+'@).Replace('"HOSTED"', '"' + (& $Fwd (Join-Path $Root 'hostdata')).ToLower().TrimEnd('/') + '/"')
+    } else { Remove-Item $guardLua -Force -ErrorAction SilentlyContinue }
+    $stKeyFile = Join-Path $Cfg 'apache\status-key.txt'
+    $stKey = if (Test-Path $stKeyFile) { (Get-Content $stKeyFile -Raw).Trim() } else { '' }
+    if ($stKey -notmatch '^[A-Za-z0-9]{24}$') { $stKey = New-Password; Write-Utf8NoBom $stKeyFile $stKey }
+    $statusBlock = if ($hasLua) { @"
+# Apache's status page for the panel's Apache Status: this server only, with the key only Apache's folder holds; the
+# hosted sites can not hand requests to it (the guard)
+<IfModule lua_module>
+    LuaScope thread
+    LuaHookFixups "$(& $Fwd $guardLua)" sentora_guard
+    LuaOutputFilter SENTORA_STATUS_BLOCK "$(& $Fwd $guardLua)" sentora_status_block
+    <Location "/">
+        SetOutputFilter SENTORA_STATUS_BLOCK
+    </Location>
+    <IfModule status_module>
+        ExtendedStatus On
+        <Location /server-status>
+            SetHandler server-status
+            <RequireAll>
+                Require local
+                Require expr "%{HTTP:X-Sentora-Status} == '$stKey'"
+            </RequireAll>
+        </Location>
+    </IfModule>
+</IfModule>
+"@ } else { '' }
     $conf = Join-Path $Cfg 'apache\httpd.conf'
     Write-Utf8NoBom $conf @"
 # Made by install-zpanel-stack.ps1; run it again to rewrite this file. Your own sites go in httpd-vhosts.conf.
@@ -801,7 +878,7 @@ LoadModule mime_module modules/mod_mime.so
 LoadModule negotiation_module modules/mod_negotiation.so
 LoadModule rewrite_module modules/mod_rewrite.so
 LoadModule setenvif_module modules/mod_setenvif.so
-LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
+$(if ($hasLua) { "LoadModule status_module modules/mod_status.so`r`nLoadModule lua_module modules/mod_lua.so`r`n" })LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
 LoadModule ssl_module modules/mod_ssl.so
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_http_module modules/mod_proxy_http.so
@@ -826,6 +903,7 @@ PHPIniDir "$(& $Fwd $PhpDir)"
 ServerTokens Prod
 ServerSignature Off
 TraceEnable Off
+$statusBlock
 Timeout 120
 KeepAlive On
 FileETag None
@@ -2103,6 +2181,8 @@ switch ($Do) {
             $settings['clamd_conf'] = "$clamFwd/clamd.conf"; $settings['freshclam_conf'] = "$clamFwd/freshclam.conf"; $settings['clamd_exe'] = "$clamFwd/clamd.exe"
             $settings['freshclam_exe'] = "$clamFwd/freshclam.exe"; $settings['clamav_db_dir'] = "$fwdRoot/data/clamav"; $settings['mailscan_options'] = "$fwdRoot/apps/mailscan/options.json"
             $settings['filescan_quarantine'] = "$fwdRoot/data/quarantine"
+            # Apache Status: the key Apache's status page asks for (Apache's own folder; the panel runs as Apache)
+            $settings['apache_status_key'] = "$fwdRoot/configs/apache/status-key.txt"
             # SpamAV's figures: Stalwart's log (stalwart.log.DATE) and the virus check's refusals, read by the daemon
             $settings['mail_log_dir'] = "$fwdRoot/logs/stalwart"; $settings['mail_refused_log'] = "$fwdRoot/logs/clamav/mail-refused.log"
             $settings['python_exe'] = "$fwdRoot/bin/python/python.exe"
