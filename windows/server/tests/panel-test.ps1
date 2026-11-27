@@ -1346,4 +1346,10 @@ except smtplib.SMTPDataError as e: print('VIRUS refused',e.smtp_code)
 }
 
 # (the PHP versions check above, when it failed)
+# the pages changed for Windows, saved for a look with the panel's stylesheets (uploaded with the logs)
+$pages = Join-Path $Root 'logs\pages'
+New-Item -ItemType Directory -Path $pages -Force | Out-Null
+foreach ($pg in @(@('spamav', '/?module=spamav'), @('spamav-admin', '/?module=spamav_admin'), @('php-versions', '/?module=php_versions'), @('mail-admin', '/?module=mail_admin'))) {
+    try { [IO.File]::WriteAllText((Join-Path $pages "$($pg[0]).html"), (Page $pg[1] $null).Content) } catch { Write-Host "   (could not save the page $($pg[1]): $_)" }
+}
 if ($phpFail) { throw $phpFail }
