@@ -2246,6 +2246,11 @@ switch ($Do) {
     foreach ($p in @((Join-Path $ApacheDir 'logs'), (Join-Path $Logs 'apache'), (Join-Path $Logs 'php'), (Join-Path $Logs 'roundcube'), (Join-Path $Logs 'z-push'),
                      (Join-Path $Logs 'panel'), $Tmp, (Join-Path $Root 'data\z-push'),
                      (Join-Path $Root 'panel\etc\apps\matomo\tmp'), (Join-Path $Root 'panel\etc\apps\matomo\config'))) { Grant-Apache $p 'M' }
+    # the mail virus check's refusals (scan.php runs as Apache's account; the panel's SpamAV pages count them): that one
+    # file, not ClamAV's own logs
+    $refusedLog = Join-Path $Logs 'clamav\mail-refused.log'
+    if ((Test-Path (Split-Path $refusedLog)) -and -not (Test-Path $refusedLog)) { [IO.File]::WriteAllText($refusedLog, '') }
+    Grant-Apache $refusedLog 'M'
     # the websites' logs (the panel's daemon makes a folder per account in it)
     if ($WithPanel) {
         $dl = Join-Path $Logs 'domains'
