@@ -1176,6 +1176,7 @@ print('FOLDER none')
         $ErrorActionPreference = 'Continue'
         $r = (& python $f 2>&1) -join "`n"
         $ErrorActionPreference = 'Stop'
+        $script:lastScore = if ($r -match 'score=(-?[\d.]+)') { [double]$Matches[1] } else { $null }
         if ($r -match 'SCORE (.*)') { Write-Host "   ($from, $(if ($gtube) { 'spam' } else { 'plain' })) $($Matches[1].Trim())" }
         if ($r -match 'FOLDER (.+)') { return $Matches[1].Trim() }
         throw "SpamAV: the test message did not get through: $r"
@@ -1271,6 +1272,19 @@ except smtplib.SMTPDataError as e: print('VIRUS refused',e.smtp_code)
     if (-not $ok) { throw "SpamAV: Stalwart's spam filter did not get the scores: $r" }
     Ok 'SpamAV Admin: the spam score (6) and the refuse score (20) are Stalwart''s, read back'
     SaSave 'spamassassin' @{ sa_enabled = '1'; sa_required_score = '5'; sa_reject_score = '0' }
+    # the senders always allowed and always blocked: Stalwart's own rules take 100 off or add 100 (to alice, who has no
+    # filter of her own)
+    SaSave 'spamassassin' @{ sa_enabled = '1'; sa_required_score = '5'; sa_reject_score = '0'; sa_allow_from = "vip@outside.example`n*@friends.example"; sa_block_from = 'pest.example' }
+    $keepBox = $saddr; $keepPw = $spw; $saddr = 'alice@example.test'; $spw = 'Alice-Pass-1234'
+    try {
+        $sc = $null
+        for ($i = 0; $i -lt 4; $i++) { $null = SpamLands 'vip@outside.example' $true; $sc = $script:lastScore; if ($sc -ne $null -and $sc -lt 0) { break }; MailRun; Start-Sleep 5 }
+        if ($sc -eq $null -or $sc -ge 0) { throw "SpamAV Admin: spam from an always-allowed sender scored $sc (daemon: $((Get-Content "$Root\logs\panel\daemon-panel-run.log" -ErrorAction SilentlyContinue | Select-String 'SpamAV' | Select-Object -Last 3) -join ' / '))" }
+        $at = SpamLands 'someone@pest.example' $false; $sb = $script:lastScore
+        if ($sb -eq $null -or $sb -lt 50 -or $at -ne 'Junk Mail') { throw "SpamAV Admin: a plain message from an always-blocked domain scored $sb and went to $at" }
+    } finally { $saddr = $keepBox; $spw = $keepPw }
+    SaSave 'spamassassin' @{ sa_enabled = '1'; sa_required_score = '5'; sa_reject_score = '0'; sa_allow_from = ''; sa_block_from = '' }
+    Ok "SpamAV Admin: senders always allowed (spam scored $sc) and always blocked (a plain message scored $sb, to Junk Mail) through Stalwart's own rules"
     if (Get-Service ClamAV -ErrorAction SilentlyContinue) {
         $clam = @{ clam_enabled = '1'; clam_on_fail = 'Defer'; clam_max_file_size = '30'; clam_max_scan_size = '200'; clam_max_recursion = '17'; clam_max_files = '10000'
                    clam_scan_archive = '1'; clam_scan_pdf = '1'; clam_scan_ole2 = '1'; clam_block_macros = '1'; clam_scan_html = '1'; clam_phishing_sigs = '1'
