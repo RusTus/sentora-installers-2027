@@ -1319,8 +1319,14 @@ class pp
         if (!is_file($root . '/dryden/loader.inc.php') || !in_array($what, array('Disable', 'Enable'), true)) {
             return;
         }
-        $code = 'chdir(' . var_export($root, true) . '); require "dryden/loader.inc.php"; require "cnf/db.php"; require "inc/dbc.inc.php";'
-            . ' runtime_hook::Execute("OnAfter' . $what . 'Client");';
+        // (single quotes only: on Windows escapeshellarg() turns double quotes into spaces)
+        $code = 'chdir(' . var_export($root, true) . '); require \'dryden/loader.inc.php\'; require \'cnf/db.php\'; require \'inc/dbc.inc.php\';'
+            . ' runtime_hook::Execute(\'OnAfter' . $what . 'Client\');';
+        if (class_exists('sys_versions') && method_exists('sys_versions', 'IsWindows') && sys_versions::IsWindows()) {
+            // (Windows: the PHP running this, as PHP_BINDIR is where PHP was built, not where it is)
+            exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' > NUL 2>&1');
+            return;
+        }
         $php = PHP_BINDIR . '/php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
         exec(escapeshellarg(is_executable($php) ? $php : PHP_BINDIR . '/php') . ' -r ' . escapeshellarg($code) . ' > /dev/null 2>&1');
     }
