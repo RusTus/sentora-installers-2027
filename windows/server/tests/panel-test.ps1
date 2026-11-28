@@ -46,7 +46,7 @@ foreach ($m in @('goaccess_stats')) {
 # --- Repo Browser: the add-on repository's list read again, zGod (Windows-ready) installed by the daemon and its page
 # loads; an add-on for Linux only (QuickFig) is refused with why
 function RunDaemonNow { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
-function RbQueue($action, $body) { $p = Page '/?module=repo_browser' $null; $b = @{ csfr_token = (Token $p.Content) }; foreach ($k in $body.Keys) { $b[$k] = $body[$k] }; $null = Page "/?module=repo_browser&action=$action" $b }
+function RbQueue($action, $body) { $p = Page '/?module=repo_browser' $null; $b = @{ csfr_token = (Token $p.Content) }; foreach ($k in $body.Keys) { $b[$k] = $body[$k] }; $r = Page "/?module=repo_browser&action=$action" $b; $script:rbSaid = (([regex]::Matches($r.Content, '(?s)class="[^"]*(zannounce|alert)[^"]*"[^>]*>(.{0,300}?)</') | ForEach-Object { $_.Groups[2].Value -replace '<[^>]+>', ' ' -replace '\s+', ' ' }) -join ' | ') }
 function RbLast($like) {
     $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
     $myExe = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
@@ -62,13 +62,13 @@ for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%update%'; if ($st 
 if ($st -notmatch '^done ') { throw "Repo Browser: the repository's list was not read: $st" }
 RbQueue 'AddModule' @{ inInstallModule = "${repo}:::zgod" }
 RunDaemonNow
-for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%"install","zgod"%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
-if ($st -notmatch '^done ') { throw "Repo Browser: zGod was not installed: $st" }
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%install%zgod%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
+if ($st -notmatch '^done ') { throw "Repo Browser: zGod was not installed: $st (the page said: $script:rbSaid)" }
 $c = (Page '/?module=zgod' $null).Content
 if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:' -or $c -notmatch 'zGod') { throw 'Repo Browser: zGod was installed but its page does not load' }
 RbQueue 'AddModule' @{ inInstallModule = "${repo}:::quickfig" }
 RunDaemonNow
-for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%"install","quickfig"%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%install%quickfig%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
 if ($st -notmatch '^failed .*does not work on Windows' -or (Test-Path "$Root\panel\modules\quickfig")) { throw "Repo Browser: QuickFig (Linux only) was not refused: $st" }
 Ok 'Repo Browser: the repository read, zGod installed from it and its page loads; QuickFig (Linux only) refused, with why'
 $front = (Page '/' $null).Content
