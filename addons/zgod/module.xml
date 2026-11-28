@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <module>
     <name>zGod</name>
-    <version>101</version>
+    <version>102</version>
     <defaultcat>Server Admin</defaultcat>
+    <windows>yes</windows>
     <desc>Everything on the panel in one place, across every reseller: every account (its activity, package, reseller, disk and bandwidth against its quotas) and lists of every domain, mailbox, forwarder, alias, MySQL database and user, FTP account, cron job, package and Docker app; shadow an account, suspend it or switch a mailbox off; a daily report by email; its figures on the Elk node. For administrators. (The ZPanel classic, written again for Sentora-2027.)</desc>
     <authorname>RusTus</authorname>
     <authoremail></authoremail>
