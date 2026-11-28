@@ -72,7 +72,7 @@ for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%install%quickfig%'
 if ($st -notmatch '^failed .*does not work on Windows' -or (Test-Path "$Root\panel\modules\quickfig")) { throw "Repo Browser: QuickFig (Linux only) was not refused: $st" }
 Ok 'Repo Browser: the repository read, zGod installed from it and its page loads; QuickFig (Linux only) refused, with why'
 $front = (Page '/' $null).Content
-if ($front -match '\?module=(goaccess_stats|repo_browser)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
+if ($front -match '\?module=(goaccess_stats)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
 
 # --- "Run the daemon now": the page asks zsudo, the service runs the daemon
