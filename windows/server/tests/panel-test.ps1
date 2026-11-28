@@ -35,14 +35,42 @@ if ($p.Content -notmatch '\?module=packages') { throw 'zadmin could not log in' 
 Ok 'zadmin logs in'
 
 # --- the modules: ready ones load, the others are kept out (page, menu, search list)
-foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'apache_status', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'spamav', 'branding', 'autoip', 'matomo', 'php_versions')) {
+foreach ($m in @('packages', 'manage_clients', 'mysql_databases', 'mysql_users', 'my_account', 'sentoraconfig', 'faqs', 'client_notices', 'domains', 'sub_domains', 'parked_domains', 'sencrypt', 'dns_manager', 'dns_admin', 'ftp_management', 'mailboxes', 'cron', 'aliases', 'distlists', 'webmail', 'services', 'user_logviewer', 'phpmyadmin', 'backupmgr', 'protected_directories', 'panel_update', 'apache_admin', 'apache_status', 'ftp_admin', 'moduleadmin', 'widget_admin', 'system_logviewer', 'server_monitor', 'site_health', 'forwarders', 'file_manager', 'backup_admin', 'mail_admin', 'spamav_admin', 'spamav', 'repo_browser', 'branding', 'autoip', 'matomo', 'php_versions')) {
     $c = (Page "/?module=$m" $null).Content
     if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:') { throw "module $m does not load" }
 }
 Ok 'the modules ready for Windows load (packages, clients, MySQL, my account, settings, FAQs, notices, domains, subdomains, parked domains, Sencrypt, DNS Manager, DNS Config, FTP Accounts, Mailboxes, Cron Manager, Aliases, Distribution Lists, Webmail, Services, Domain Logs, phpMyAdmin, Backup Manager, Protected Directories, Panel Update, Apache Config, FTP Config, Module Admin, Widget Admin, System Log Viewer, Server Monitor, Site Health, Forwarders, File Manager, Backup Config)'
-foreach ($m in @('goaccess_stats', 'repo_browser')) {
+foreach ($m in @('goaccess_stats')) {
     if ((Page "/?module=$m" $null).Content -notmatch 'Unable to find requested module') { throw "module $m is not kept out on Windows" }
 }
+# --- Repo Browser: the add-on repository's list read again, zGod (Windows-ready) installed by the daemon and its page
+# loads; an add-on for Linux only (QuickFig) is refused with why
+function RunDaemonNow { $q = Page '/?module=sentoraconfig' $null; $null = Page '/?module=sentoraconfig&action=RunDaemon' @{ csfr_token = (Token $q.Content) } }
+function RbQueue($action, $body) { $p = Page '/?module=repo_browser' $null; $b = @{ csfr_token = (Token $p.Content) }; foreach ($k in $body.Keys) { $b[$k] = $body[$k] }; $null = Page "/?module=repo_browser&action=$action" $b }
+function RbLast($like) {
+    $env:MYSQL_PWD = (Get-Content "$Root\configs\mysql\root-password.txt" -Raw).Trim()
+    $myExe = (Get-ChildItem "$Root\bin" -Recurse -Filter mysql.exe | Select-Object -First 1).FullName
+    $r = (& $myExe --protocol=TCP -h 127.0.0.1 -u root -N -e "SELECT CONCAT(zq_status_vc, ' | ', REPLACE(REPLACE(zq_output_tx, '\r', ' '), '\n', ' ')) FROM sentora_core.x_zppy_queue WHERE zq_args_tx LIKE '$like' ORDER BY zq_id_pk DESC LIMIT 1") -join ''
+    Remove-Item Env:\MYSQL_PWD
+    return $r
+}
+$repo = 'https://raw.githubusercontent.com/RusTus/sentora-installers-2027/master2027/sentora-repo'
+RbQueue 'CheckAll' @{}
+RunDaemonNow
+$st = ''
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%update%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
+if ($st -notmatch '^done ') { throw "Repo Browser: the repository's list was not read: $st" }
+RbQueue 'AddModule' @{ inInstallModule = "${repo}:::zgod" }
+RunDaemonNow
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%"install","zgod"%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
+if ($st -notmatch '^done ') { throw "Repo Browser: zGod was not installed: $st" }
+$c = (Page '/?module=zgod' $null).Content
+if ($c -match 'Unable to find requested module|Fatal error|Uncaught|Warning:' -or $c -notmatch 'zGod') { throw 'Repo Browser: zGod was installed but its page does not load' }
+RbQueue 'AddModule' @{ inInstallModule = "${repo}:::quickfig" }
+RunDaemonNow
+for ($i = 0; $i -lt 40; $i++) { Start-Sleep 3; $st = RbLast '%"install","quickfig"%'; if ($st -match '^(done|failed) ') { break }; if ($i % 10 -eq 9) { RunDaemonNow } }
+if ($st -notmatch '^failed .*does not work on Windows' -or (Test-Path "$Root\panel\modules\quickfig")) { throw "Repo Browser: QuickFig (Linux only) was not refused: $st" }
+Ok 'Repo Browser: the repository read, zGod installed from it and its page loads; QuickFig (Linux only) refused, with why'
 $front = (Page '/' $null).Content
 if ($front -match '\?module=(goaccess_stats|repo_browser)\b') { throw "the page offers a module not ready for Windows: $($Matches[0])" }
 Ok 'the modules not ready for Windows are kept out (their pages, the menu, the dashboard)'
